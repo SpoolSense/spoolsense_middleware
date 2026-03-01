@@ -1,6 +1,8 @@
 # Voron NFC Spoolman Integration
 
 Automatic filament spool tracking for multi-toolhead Voron printers using NFC tags, ESP32-S3, and Spoolman.
+![IMG_2287](https://github.com/user-attachments/assets/66cfed3d-6f2a-4ca7-aada-d6a62300f70d)
+
 
 ## Overview
 
