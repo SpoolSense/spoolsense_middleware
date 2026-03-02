@@ -6,7 +6,7 @@ Automatic filament spool tracking for multi-toolhead Voron printers using NFC ta
 
 ## Overview
 
-Scan an NFC tag on a filament spool → automatically sets the active spool in Spoolman → updates Fluidd per toolhead → Klipper tracks filament usage.
+Scan an NFC tag on a filament spool → automatically sets the active spool in Spoolman → updates Fluidd per toolhead → Klipper tracks filament usage → LED on each toolhead confirms the scan and displays the spool color.
 
 ```
 Scan NFC tag
@@ -22,12 +22,24 @@ Spoolman lookup by UID
 Moonraker sets active spool
      ↓
 Fluidd shows spool per toolhead
+     ↓
+LED flashes white 3x (scan confirmed) → holds spool color
 ```
+
+## LED Status Indicator
+
+Each toolhead's onboard WS2812 RGB LED provides visual feedback. This project is tested with the **Waveshare ESP32-S3-Zero**, which includes an onboard WS2812 LED on GPIO21 — no additional wiring required for the LED.
+
+- **3x white flash** — NFC tag successfully scanned
+- **Solid spool color** — displays the filament color pulled from Spoolman after a successful scan
+
+The LED color is published via MQTT and driven by the middleware using the `color_hex` value stored in Spoolman for each spool.
 
 ## Hardware
 
-- 4x ESP32-S3 DevKitC-1
+- 4x [Waveshare ESP32-S3-Zero](https://www.waveshare.com/esp32-s3-zero.htm) *(tested and recommended — onboard WS2812 LED on GPIO21)*
 - 4x PN532 NFC Module (I2C mode)
+- 4x WS2812 RGB LED (onboard on Waveshare ESP32-S3-Zero, GPIO21)
 - Raspberry Pi (Klipper host)
 - NFC tags (one per spool)
 
