@@ -230,18 +230,24 @@ def on_message(client, userdata, msg):
             # Publish filament colour to MQTT so the ESP32 LED can display it
             # Spoolman stores colour as a hex string in filament.color_hex (e.g. 'FF0000')
             # Fall back to white if no colour is set
-            color_hex = filament.get("color_hex", "FFFFFF")
-            if color_hex:
-                publish_color(client, toolhead, color_hex)
+            color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
+            publish_color(client, toolhead, color_hex)
+
+            # Check remaining filament weight — warn if 100g or less
+            # Spoolman stores remaining weight in grams under 'remaining_weight'
+            remaining = spool.get("remaining_weight")
+            topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+            if remaining is not None and remaining <= 100:
+                logging.warning(f"Low spool warning: {name} has {remaining:.1f}g remaining on {toolhead}")
+                client.publish(topic_low, "true")
             else:
-                # No colour set in Spoolman — default to white
-                publish_color(client, toolhead, "FFFFFF")
+                client.publish(topic_low, "false")
         else:
             # No spool found — user needs to register this NFC tag in Spoolman
             logging.warning(f"No spool found in Spoolman for UID: {uid}")
             logging.warning(f"Go to Spoolman and add this UID to a spool's nfc_id field.")
-            # Turn off the LED to indicate scan failure
-            publish_color(client, toolhead, "000000")
+            # Publish error status — ESPHome will flash red to indicate unknown tag
+            publish_color(client, toolhead, "error")
 
     except Exception as e:
         logging.error(f"Error processing message: {e}")
