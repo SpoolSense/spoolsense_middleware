@@ -14,7 +14,7 @@ The first flash must be done via USB. After that, all updates are wireless (OTA)
 2. Click **"Prepare for first use"**
 3. Plug ESP32-S3 into your PC via USB
 4. Click **Connect** and select **USB JTAG** from the popup
-5. Flash the basic firmware (Be sure to set your Wifi SSID/password)
+5. Flash the basic firmware
 6. Once flashed, connect your PC to the ESP32's fallback hotspot (e.g. `toolhead-t0`)
 7. Enter your WiFi credentials in the captive portal at **192.168.4.1**
 8. The ESP32 will reboot and connect to your WiFi

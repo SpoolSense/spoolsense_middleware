@@ -1,7 +1,7 @@
 # =============================================================
 # ESPHome config for Toolhead T2 NFC Reader
 # =============================================================
-# Hardware: ESP32-S3 DevKitC-1 + PN532 NFC module (I2C mode)
+# Hardware: Waveshare ESP32-S3-Zero + PN532 NFC module (I2C mode)
 #
 # PN532 DIP Switch settings for I2C mode:
 #   Switch 1: ON
@@ -13,10 +13,15 @@
 #   PN532 SDA  → ESP32-S3 GPIO1
 #   PN532 SCL  → ESP32-S3 GPIO2
 #
+# Onboard LED:
+#   WS2812 RGB LED on GPIO21 (built into the Waveshare ESP32-S3-Zero)
+#   No external wiring needed for the LED.
+#
 # When an NFC tag is scanned, the UID is published to the MQTT
-# topic nfc/toolhead/T2 as JSON: {"uid": "XX-XX-XX", "toolhead": "T2"}
+# topic nfc/toolhead/T2 as JSON: {"uid": "XX-XX-XX", "toolhead": "T0"}
 # The middleware script on the Pi subscribes to this topic and
-# updates Spoolman/Moonraker accordingly.
+# updates Spoolman/Moonraker accordingly, then publishes the
+# filament colour back to nfc/toolhead/T2/color.
 # =============================================================
 
 esphome:
@@ -59,11 +64,34 @@ wifi:
 # Captive portal serves the WiFi config page when in fallback hotspot mode
 captive_portal:
 
-# MQTT — publishes NFC scan events to the broker running on Home Assistant
+# MQTT — publishes NFC scan events and subscribes to colour updates
+# Both the scan publish and colour subscription live in this single block
 mqtt:
   broker: YOUR_HOME_ASSISTANT_IP   # e.g. 192.168.1.100
   username: !secret mqtt_username
   password: !secret mqtt_password
+  # Subscribe to the colour topic published by the middleware after each NFC scan
+  # The middleware publishes the filament colour as a hex string e.g. "FF0000"
+  # This fires after the scan flash and sets the LED to the filament colour
+  on_message:
+    - topic: "nfc/toolhead/T2/color"
+      then:
+        - lambda: |-
+            // Parse the hex colour string (e.g. "FF0000") into R, G, B components
+            std::string hex = x;
+            if (hex.length() == 6) {
+              int r = stoi(hex.substr(0, 2), nullptr, 16);
+              int g = stoi(hex.substr(2, 2), nullptr, 16);
+              int b = stoi(hex.substr(4, 2), nullptr, 16);
+              // Set the LED to the filament colour, clearing any active effect
+              auto call = id(status_led).turn_on();
+              call.set_effect("none");
+              call.set_rgb(r / 255.0, g / 255.0, b / 255.0);
+              call.perform();
+            } else if (hex == "000000") {
+              // Black means no spool found — turn LED off
+              id(status_led).turn_off().perform();
+            }
 
 # I2C bus configuration for PN532 communication
 # Slow frequency (10000 Hz) improves reliability with the PN532
@@ -72,6 +100,18 @@ i2c:
   scl: GPIO2
   frequency: 10000
   scan: true  # Logs detected I2C devices on boot — useful for debugging
+
+# Onboard WS2812 RGB LED (GPIO21 on Waveshare ESP32-S3-Zero)
+# Displays the filament colour after a successful NFC scan
+# rgb_order: RGB is correct for this board
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: RGB
+    pin: GPIO21
+    num_leds: 1
+    name: "T2 Status LED"
+    id: status_led
+    default_transition_length: 0s
 
 # PN532 NFC reader configuration
 pn532_i2c:
@@ -83,8 +123,41 @@ pn532_i2c:
       - logger.log:
           format: "Tag scanned on T2: %s"
           args: [x.c_str()]
+      # Flash white 3 times to indicate a successful scan
+      # Done manually with delays so it stops cleanly after exactly 3 flashes
+      # WS2812 has no white channel — white is achieved by setting R+G+B all to max
+      - light.turn_on:
+          id: status_led
+          red: 1.0
+          green: 1.0
+          blue: 1.0
+          brightness: 100%
+      - delay: 150ms
+      - light.turn_off:
+          id: status_led
+      - delay: 100ms
+      - light.turn_on:
+          id: status_led
+          red: 1.0
+          green: 1.0
+          blue: 1.0
+          brightness: 100%
+      - delay: 150ms
+      - light.turn_off:
+          id: status_led
+      - delay: 100ms
+      - light.turn_on:
+          id: status_led
+          red: 1.0
+          green: 1.0
+          blue: 1.0
+          brightness: 100%
+      - delay: 150ms
+      - light.turn_off:
+          id: status_led
       # Publish the UID and toolhead identifier to MQTT as JSON
-      # The middleware script on the Pi will receive this and look up the spool
+      # The middleware script on the Pi will receive this, look up the spool,
+      # and publish the filament colour back to nfc/toolhead/T2/color
       - mqtt.publish:
           topic: "nfc/toolhead/T2"
           payload: !lambda |-

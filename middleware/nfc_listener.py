@@ -160,11 +160,34 @@ def on_connect(client, userdata, flags, rc):
     """
     if rc == 0:
         logging.info("Connected to MQTT broker")
-        # Subscribe to all toolhead NFC topics (T0, T1, T2, T3)
-        client.subscribe(MQTT_TOPIC)
-        logging.info(f"Subscribed to {MQTT_TOPIC}")
+        # Subscribe to toolhead NFC scan topics only (T0, T1, T2, T3)
+        # We use a specific pattern to avoid receiving our own colour messages
+        # which are published to nfc/toolhead/T0/color etc.
+        for t in ["T0", "T1", "T2", "T3"]:
+            client.subscribe(f"nfc/toolhead/{t}")
+        logging.info("Subscribed to nfc/toolhead/T0-T3")
     else:
         logging.error(f"MQTT connection failed with code {rc}")
+
+
+def publish_color(client, toolhead, color_hex):
+    """
+    Publish the filament colour to MQTT so the ESPHome LED can display it.
+
+    The colour is sourced from Spoolman's filament.color_hex field (e.g. 'FF0000').
+    ESPHome subscribes to nfc/toolhead/T0/color and sets the onboard WS2812 LED
+    to that colour after the scan flash animation completes.
+
+    Args:
+        client: The MQTT client instance.
+        toolhead (str): The toolhead identifier, e.g. 'T0'.
+        color_hex (str): Hex colour string without '#', e.g. 'FF0000'.
+    """
+    topic = f"nfc/toolhead/{toolhead}/color"
+    # Ensure the hex string is clean — no '#' prefix
+    color_hex = color_hex.lstrip("#").upper()
+    client.publish(topic, color_hex)
+    logging.info(f"Published colour #{color_hex} to {topic}")
 
 
 def on_message(client, userdata, msg):
@@ -178,7 +201,8 @@ def on_message(client, userdata, msg):
         1. Parse the JSON payload to extract UID and toolhead.
         2. Look up the UID in Spoolman.
         3. If found, set it as the active spool in Moonraker/Klipper.
-        4. If not found, log a warning — the spool needs to be registered in Spoolman.
+        4. Publish the filament colour to MQTT so the ESP32 LED updates.
+        5. If not found, log a warning — the spool needs to be registered in Spoolman.
 
     Args:
         client: The MQTT client instance.
@@ -198,13 +222,26 @@ def on_message(client, userdata, msg):
         if spool:
             # Spool found — set it as active
             spool_id = spool["id"]
-            name = spool.get("filament", {}).get("name", "Unknown")
+            filament = spool.get("filament", {})
+            name = filament.get("name", "Unknown")
             logging.info(f"Found spool: {name} (ID: {spool_id})")
             set_active_spool(spool_id, toolhead)
+
+            # Publish filament colour to MQTT so the ESP32 LED can display it
+            # Spoolman stores colour as a hex string in filament.color_hex (e.g. 'FF0000')
+            # Fall back to white if no colour is set
+            color_hex = filament.get("color_hex", "FFFFFF")
+            if color_hex:
+                publish_color(client, toolhead, color_hex)
+            else:
+                # No colour set in Spoolman — default to white
+                publish_color(client, toolhead, "FFFFFF")
         else:
             # No spool found — user needs to register this NFC tag in Spoolman
             logging.warning(f"No spool found in Spoolman for UID: {uid}")
             logging.warning(f"Go to Spoolman and add this UID to a spool's nfc_id field.")
+            # Turn off the LED to indicate scan failure
+            publish_color(client, toolhead, "000000")
 
     except Exception as e:
         logging.error(f"Error processing message: {e}")
