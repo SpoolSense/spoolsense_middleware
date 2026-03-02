@@ -58,12 +58,26 @@ The LED color is published via MQTT and driven by the middleware using the `colo
 - Spoolman installed and running
 - Fluidd installed (see docs/fluidd-install.md)
 
+## 3D Printed Case
+
+A custom case is included in the `3mf/` directory, modified from [this model on MakerWorld](https://makerworld.com/en/models/2108947-esp32-c3-pn532-nfc-reader-case-usb-c#profileId-2552448).
+
+Modifications made:
+- **Toolhead labels** — T0, T1, T2, T3 text added to each case
+- **ESP32-S3-Zero fit** — modified bay designed specifically for the Waveshare ESP32-S3-Zero (get the version without pins and solder wires directly)
+- **Scan target** — added a scan target area on the case, suggested to print in red filament
+
+**Printing tips:**
+- Print the case itself in a **clear material** (PLA, PETG, or PC) to let the onboard LED shine through for full visual effect
+- Print the scan target insert in red for easy identification
+
 ## Directory Structure
 
 ```
 ├── esphome/          # ESPHome YAML configs for each toolhead
 ├── middleware/       # Python MQTT listener script
 ├── klipper/          # Klipper macro configs
+├── 3mf/              # 3D printable case files
 └── docs/             # Setup guides
 ```
 
