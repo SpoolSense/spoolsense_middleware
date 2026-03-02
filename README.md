@@ -26,6 +26,20 @@ Fluidd shows spool per toolhead
 LED flashes white 3x (scan confirmed) → holds spool color
 ```
 
+## Features
+
+Tap an NFC tag on your spool and walk away. That's really it — everything else happens automatically.
+
+**Scan to track** — each toolhead has its own ESP32-S3 constantly listening for NFC tags. The moment you tap a spool, it's registered as active in Spoolman, Moonraker is updated, and Fluidd reflects it per toolhead. No typing spool IDs, no dropdown menus, no forgetting to update it.
+
+**LED feedback that actually tells you something** — the onboard RGB LED isn't just an "it worked" light. It flashes the filament's exact color from Spoolman so you can glance at the toolhead and know what's loaded. Scan an unknown tag and it goes red. Running low (under 100g)? The LED starts breathing in the filament color so it catches your eye without being obnoxious.
+
+**Survives reboots** — spool IDs are saved to disk via Klipper's save_variables system and restored automatically on startup. Pull the power, come back the next day, and everything is still assigned correctly.
+
+**Four toolheads, one system** — built specifically for multi-toolhead setups like the MadMax toolchanger. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Fluidd shows per-toolhead spool status natively (Mainsail unfortunately only supports one active spool).
+
+**Printable case included** — a custom case is in the `3mf/` folder designed specifically for the Waveshare ESP32-S3-Zero + PN532. Print it clear so the LED glows through. Print the scan target in red so you know where to tap.
+
 ## LED Status Indicator
 ![LED Status Demo](IMG_2293.gif)
 
