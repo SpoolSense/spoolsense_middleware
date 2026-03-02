@@ -28,6 +28,7 @@ LED flashes white 3x (scan confirmed) → holds spool color
 
 ## LED Status Indicator
 ![LED Status Demo](IMG_2293.gif)
+
 Each toolhead's onboard WS2812 RGB LED provides visual feedback. This project is tested with the **Waveshare ESP32-S3-Zero**, which includes an onboard WS2812 LED on GPIO21 — no additional wiring required for the LED.
 
 - **3x white flash** — NFC tag successfully scanned
