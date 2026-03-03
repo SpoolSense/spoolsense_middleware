@@ -25,7 +25,10 @@ MQTT_USERNAME = "your_mqtt_username"
 MQTT_PASSWORD = "your_mqtt_password"
 SPOOLMAN_URL = "http://YOUR_SPOOLMAN_IP:7912"
 MOONRAKER_URL = "http://YOUR_KLIPPER_IP"
+LOW_SPOOL_THRESHOLD = 100  # grams — LED breathes when remaining weight hits this level
 ```
+
+`LOW_SPOOL_THRESHOLD` controls when the low spool warning kicks in. The default is 100g which works well for standard 1kg spools. Adjust based on your setup — bump it up to 200g if you want an earlier heads-up, or drop it to 50g if you're running small 250g spools and want to squeeze more out before the warning triggers.
 
 4. Install dependencies:
 ```bash

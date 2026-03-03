@@ -12,8 +12,8 @@ Ideas and known improvements for future development. Contributions welcome.
 **MQTT auto-reconnect**
 The middleware has no reconnect logic. If the MQTT broker goes down (Home Assistant update, power blip, whatever), the script dies and stays dead until you manually restart it. Needs an `on_disconnect` callback with automatic reconnect so it just heals itself.
 
-**Configurable low spool threshold**
-The 100g low spool warning is hardcoded. Should be a variable at the top of the config alongside the other settings — people running 250g mini spools have very different needs than someone running 3kg spools.
+~~**Configurable low spool threshold**
+The 100g low spool warning is hardcoded. Should be a variable at the top of the config alongside the other settings — people running 250g mini spools have very different needs than someone running 3kg spools.~~ ✅ Done — `LOW_SPOOL_THRESHOLD` added to middleware config.
 
 ---
 

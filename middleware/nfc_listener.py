@@ -48,6 +48,10 @@ SPOOLMAN_URL = "http://YOUR_SPOOLMAN_IP:7912"  # e.g. "http://192.168.1.101:7912
 # URL of your Klipper/Moonraker instance
 MOONRAKER_URL = "http://YOUR_KLIPPER_IP"       # e.g. "http://192.168.1.102"
 
+# Remaining filament threshold in grams — LED will breathe when a spool hits this level or below
+# Adjust based on your typical spool sizes (e.g. 50 for mini spools, 200 for cautious early warning)
+LOW_SPOOL_THRESHOLD = 100
+
 # ============================================================
 
 
@@ -233,12 +237,12 @@ def on_message(client, userdata, msg):
             color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
             publish_color(client, toolhead, color_hex)
 
-            # Check remaining filament weight — warn if 100g or less
+            # Check remaining filament weight — warn if at or below LOW_SPOOL_THRESHOLD
             # Spoolman stores remaining weight in grams under 'remaining_weight'
             remaining = spool.get("remaining_weight")
             topic_low = f"nfc/toolhead/{toolhead}/low_spool"
-            if remaining is not None and remaining <= 100:
-                logging.warning(f"Low spool warning: {name} has {remaining:.1f}g remaining on {toolhead}")
+            if remaining is not None and remaining <= LOW_SPOOL_THRESHOLD:
+                logging.warning(f"Low spool warning: {name} has {remaining:.1f}g remaining on {toolhead} (threshold: {LOW_SPOOL_THRESHOLD}g)")
                 client.publish(topic_low, "true")
             else:
                 client.publish(topic_low, "false")
