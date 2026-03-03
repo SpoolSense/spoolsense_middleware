@@ -1,5 +1,7 @@
 # KTC Macro Changes — Design Notes
 
+> ⚠️ **Everything in this file is assumption and theory at this point. None of this has been tested. Treat it as a starting point for implementation, not a finished solution.**
+
 Design notes for implementing automatic spool activation via klipper-toolchanger (KTC) macros. Suggested by Jim's ID from the #madmax-toolchanger Discord channel.
 
 See ENHANCEMENTS.md (Klipper section) for full context.
@@ -108,3 +110,54 @@ No changes needed to the `RESTORE_SPOOL_IDS` delayed_gcode macro — it already 
 - No longer dependent on Fluidd to manage spool assignments
 - Works with Mainsail, Fluidd, or any other front end
 - Single toolhead users are unaffected if `TOOLHEAD_MODE = "single"`
+
+---
+
+## Middleware Changes Required
+
+> ⚠️ Theory — needs testing.
+
+With the KTC macro changes handling `SET_ACTIVE_SPOOL` automatically at toolchange time, the middleware needs to be aware of the mode to avoid redundant or conflicting calls.
+
+**Current middleware behavior on scan:**
+1. Look up spool in Spoolman
+2. Call `SET_ACTIVE_SPOOL` via Moonraker immediately
+3. Save spool ID to disk via `SAVE_VARIABLE`
+4. Publish LED color via MQTT
+
+**Problem in toolchanger mode:**
+Step 2 becomes redundant. The middleware activates the spool immediately on scan, then the KTC macro clears it and re-activates at the next toolchange anyway. Not broken, but noisy — and could theoretically cause a brief window where the wrong spool is being tracked if a toolchange fires between the scan and the macro running.
+
+**Proposed middleware behavior based on TOOLHEAD_MODE:**
+
+- `TOOLHEAD_MODE = "single"` — no change, keep calling `SET_ACTIVE_SPOOL` on scan as today
+- `TOOLHEAD_MODE = "toolchanger"` — skip `SET_ACTIVE_SPOOL` on scan, only save the spool ID to disk and publish the LED color. Let the KTC macro handle activation at toolchange time.
+
+The `SAVE_VARIABLE` call stays in both modes — this is what `RESTORE_SPOOL_IDS` reads on reboot to restore spool assignments after a power cycle.
+
+---
+
+## Print Scenario Walkthrough
+
+> ⚠️ Theory — needs testing.
+
+**Setup:** All 4 spools scanned, spool IDs saved to disk. Print job uses all 4 toolheads.
+
+**What should happen:**
+
+1. Print starts with T0 active → KTC macro fires `SET_ACTIVE_SPOOL` for T0's spool → Spoolman starts tracking filament usage on T0's spool
+2. Toolchange to T1 → `CLEAR_ACTIVE_SPOOL` fires first → then `SET_ACTIVE_SPOOL` for T1's spool → Spoolman switches tracking to T1
+3. Toolchange to T2 → same pattern → Spoolman tracks T2
+4. Toolchange to T3 → same pattern → Spoolman tracks T3
+5. Toolchanges back to T0, T1 etc. → continues correctly throughout the print
+
+Filament usage should update correctly at every toolchange since Spoolman is always tracking whichever toolhead is currently active.
+
+**After shutdown:**
+
+Yes — spool assignments survive a shutdown. The middleware saves each toolhead's spool ID to disk via `SAVE_VARIABLE` every time an NFC scan occurs. The `RESTORE_SPOOL_IDS` delayed_gcode macro runs 1 second after Klipper starts and restores all four assignments from disk. You should not need to rescan anything after a reboot or power cut.
+
+**What needs testing:**
+- Does `CLEAR_ACTIVE_SPOOL` firing at the start of every toolchange cause any issues with Spoolman's usage tracking mid-print
+- Does the timing of `SET_ACTIVE_SPOOL` vs `_CHANGE_TOOL` matter — should activation happen before or after the physical toolchange completes
+- Does `RESTORE_SPOOL_IDS` correctly re-activate the last active spool on startup so tracking resumes immediately without needing a scan
