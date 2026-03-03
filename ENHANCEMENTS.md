@@ -39,3 +39,8 @@ All 4 ESPHome YAML files are nearly identical — the only real differences are 
 The middleware already knows when a spool is low or when an unknown tag is scanned — it's just logging it to the console. It could publish to Home Assistant's notification service at the same time so you get a phone alert rather than relying on noticing the LED.
 
 ---
+
+## Klipper
+
+**Automatic spool activation via toolchange macros**
+Currently Fluidd is relied on to display and manage per-toolhead spool assignments. A community member pointed out that since the T0–T3 macros already store `variable_spool_id`, you could call `SET_ACTIVE_SPOOL` and `CLEAR_ACTIVE_SPOOL` directly inside the toolchange logic instead. The active spool would swap automatically every time the toolhead changes — no front end involvement needed. This would make the whole system front-end agnostic, meaning it works identically in Mainsail, Fluidd, or anything else. The only thing lost is the visual dashboard showing all 4 spools at once, which matters less if tracking is fully automatic.
