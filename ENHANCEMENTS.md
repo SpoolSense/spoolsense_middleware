@@ -95,3 +95,12 @@ Potential alert states:
 Since each toolhead has its own LED, alerts would be per-toolhead — if T2 jams, only T2 blinks red. No need to look at a screen to know which toolhead needs attention.
 
 The main thing to validate is whether Moonraker's built-in MQTT client can publish arbitrary messages directly from a gcode macro, or whether the middleware needs to handle the publishing. The ESPHome and LED side of this should be straightforward given what's already built.
+
+## Future Platform Support
+
+**Bondtech INDX compatibility**
+A longer term goal is to get this project working with the Bondtech INDX system once it's publicly available (retail sales expected Q2 2026). INDX supports up to 8 toolheads and is firmware-agnostic — it works with Klipper, Marlin, and RRF — making it a natural fit for this project.
+
+For Klipper-based printers running INDX (Voron, custom builds, etc.) the existing stack should work with minimal changes since the architecture is the same — Klipper, Moonraker, and Spoolman are all still in play. The main things to validate would be toolchange macro compatibility with however INDX implements its tool swaps, and scaling the ESPHome configs and NFC readers beyond 4 toolheads up to 8.
+
+Note: The Prusa CORE One is a high-profile INDX target but runs Prusa's proprietary firmware rather than Klipper, which means Moonraker and Spoolman integration would work completely differently there. The primary focus for this project should be INDX on Klipper-based printers where the existing stack applies directly.
