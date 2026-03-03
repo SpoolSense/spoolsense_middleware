@@ -223,15 +223,4 @@ wifi:
 
 T1, T2, T3 are identical — just change `toolhead_id`, `friendly_name`, `name`, and `static_ip`.
 
----
 
-## What the install script generates
-
-When a user runs `./install.sh` and answers `4` for number of toolheads, the script generates:
-
-- `esphome/toolhead-t0.yaml`
-- `esphome/toolhead-t1.yaml`
-- `esphome/toolhead-t2.yaml`
-- `esphome/toolhead-t3.yaml`
-
-Each with the correct `toolhead_id` substitution and the static IP the user provided for that toolhead. `base.yaml` is never touched by the install script.
