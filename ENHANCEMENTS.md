@@ -6,6 +6,19 @@ For features actively being designed and prototyped, check the `beta/` folder.
 
 ---
 
+## Reliability
+
+**Watchdog timer on ESP32**
+If the MQTT connection drops or the NFC reader hangs, the ESP32 currently just sits there. A watchdog timer would auto-restart the device after a set timeout, so it self-recovers without needing a manual power cycle.
+
+**Retry logic in middleware**
+If Spoolman or Moonraker is temporarily unreachable (reboot, network blip), the middleware currently just logs an error and moves on. Should implement retry logic with a short backoff so transient failures don't result in a missed scan.
+
+**Debounce NFC reads**
+A tag left sitting on the reader will spam repeated scan events continuously. The middleware or ESPHome should debounce this — once a UID has been successfully processed, ignore repeated scans of the same UID for a few seconds before allowing it to trigger again.
+
+---
+
 ## Middleware
 
 **Smarter Spoolman lookups**
