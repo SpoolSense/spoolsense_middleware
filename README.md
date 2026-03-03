@@ -7,7 +7,7 @@ Automatic filament spool tracking for Voron printers using NFC tags, ESP32-S3, a
 > This project is a work in progress — honestly more of a guide than a finished product. Yes, there's custom code here, but the main idea is to leverage as much open-source software and tooling as possible to build a working system. Check back often because there's a lot planned. Ideas and contributions are very welcome — open an issue or submit a PR!
 
 > 🙋 **Help Wanted**
-> - **Case Design** — I'm currently using a basic printed case and would love help designing something slicker. Ideally something that styles well with popular filament dryers — I'm running the Creality Space Pi X4, but open to designs that work across different dryers or mount cleanly on a toolhead. If you're a CAD person, let's collaborate!
+> - **Case Design** — I'm currently using a basic printed case and would love help designing something slicker. Ideally something that styles well with popular filament dryers — I'm running the Creality Space Pi X4, but open to designs that work across different dryers. If you're a CAD person, let's collaborate!
 > - **Testers & Feedback** — If you build this or any variation of it, please open an issue and let me know how it went. Hardware differences, edge cases, things that didn't work — all of it is valuable.
 
 > 🎯 **Stretch Goal — Bondtech INDX Support**
