@@ -46,3 +46,22 @@ The middleware already knows when a spool is low or when an unknown tag is scann
 Currently Fluidd is relied on to display and manage per-toolhead spool assignments. Jim's ID from the #madmax-toolchanger Discord channel pointed out that since the T0–T3 macros already store `variable_spool_id`, you could call `SET_ACTIVE_SPOOL` and `CLEAR_ACTIVE_SPOOL` directly inside the toolchange logic instead. The active spool would swap automatically every time the toolhead changes — no front end involvement needed. This would make the whole system front-end agnostic, meaning it works identically in Mainsail, Fluidd, or anything else. The only thing lost is the visual dashboard showing all 4 spools at once, which matters less if tracking is fully automatic.
 
 *Implementation note: When building this, add a `TOOLHEAD_MODE` config variable to the middleware (`"single"` or `"toolchanger"`) so users who aren't running klipper-toolchanger aren't affected. Single mode works exactly as today — scan a tag, set the active spool, done. Toolchanger mode adds the automatic spool swap on toolchange. The Klipper macros should be similarly split so single toolhead users have a clear stopping point and don't need to add any toolchanger-specific config.*
+
+## Installation
+
+**Interactive install script**
+Right now setup requires manually editing config files, copying files to the right places, and setting up the systemd service — a lot of steps that are easy to get wrong. An interactive install script would walk the user through everything after a `git clone`.
+
+When run, it would prompt for all the values that currently require manual editing:
+
+- MQTT broker IP
+- MQTT username and password
+- Spoolman IP
+- Moonraker/Klipper IP
+- Single toolhead or toolchanger mode (ties into the `TOOLHEAD_MODE` work above)
+- Number of toolheads (if toolchanger mode)
+- Low spool threshold
+
+Once the user answers the prompts, the script would write out the configured `nfc_listener.py`, install dependencies, copy the systemd service file, and start the service — all in one shot. At the end it could do a quick connectivity check against the MQTT broker and Spoolman to confirm everything is reachable before exiting.
+
+The goal is: `git clone` → `./install.sh` → answer a few questions → done.
