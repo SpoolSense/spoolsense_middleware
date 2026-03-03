@@ -3,6 +3,8 @@
 Automatic filament spool tracking for Voron printers using NFC tags, ESP32-S3, and Spoolman. Built for multi-toolhead setups, works just as well with a single toolhead.
 ![IMG_2287](https://github.com/user-attachments/assets/66cfed3d-6f2a-4ca7-aada-d6a62300f70d)
 
+> 🎯 **Stretch Goal — Bondtech INDX Support**
+> A top priority stretch goal is to extend this project to support the [Bondtech INDX](https://www.bondtech.se/indx-by-bondtech/) system as soon as it's publicly available. INDX on a Klipper-based printer is a natural fit for this project — the architecture is already there. If you're from the Bondtech team and want to collaborate, I'd love to hear from you.
 
 ## Overview
 
