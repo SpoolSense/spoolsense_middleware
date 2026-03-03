@@ -80,3 +80,18 @@ When run, it would prompt for all the values that currently require manual editi
 Once the user answers the prompts, the script would write out the configured `nfc_listener.py`, install dependencies, copy the systemd service file, and start the service — all in one shot. At the end it could do a quick connectivity check against the MQTT broker and Spoolman to confirm everything is reachable before exiting.
 
 The goal is: `git clone` → `./install.sh` → answer a few questions → done.
+
+## Quality of Life
+
+**Klipper error alerts via LED**
+When something goes wrong mid-print — filament jam, runout, pause — Klipper could publish an MQTT message to the affected toolhead's ESP32 to trigger a visual alert on the LED. ESPHome already subscribes to MQTT topics and knows how to blink LEDs, so this fits naturally into the existing architecture.
+
+Potential alert states:
+- Slow red blink — filament jam detected on this toolhead (SFS sensor triggered)
+- Fast red blink — more urgent error requiring immediate attention
+- Yellow pulse — print paused, waiting for user input
+- LED returns to spool color automatically when the issue is cleared and print resumes
+
+Since each toolhead has its own LED, alerts would be per-toolhead — if T2 jams, only T2 blinks red. No need to look at a screen to know which toolhead needs attention.
+
+The main thing to validate is whether Moonraker's built-in MQTT client can publish arbitrary messages directly from a gcode macro, or whether the middleware needs to handle the publishing. The ESPHome and LED side of this should be straightforward given what's already built.
