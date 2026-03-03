@@ -2,6 +2,8 @@
 
 Ideas and known improvements for future development. Contributions welcome.
 
+For features actively being designed and prototyped, check the `beta/` folder.
+
 ---
 
 ## Middleware
