@@ -1,6 +1,6 @@
 # Voron NFC Spoolman Integration
 
-Automatic filament spool tracking for multi-toolhead Voron printers using NFC tags, ESP32-S3, and Spoolman.
+Automatic filament spool tracking for Voron printers using NFC tags, ESP32-S3, and Spoolman. Built for multi-toolhead setups, works just as well with a single toolhead.
 ![IMG_2287](https://github.com/user-attachments/assets/66cfed3d-6f2a-4ca7-aada-d6a62300f70d)
 
 
@@ -36,7 +36,7 @@ Tap an NFC tag on your spool and walk away. That's really it — everything else
 
 **Survives reboots** — spool IDs are saved to disk via Klipper's save_variables system and restored automatically on startup. Pull the power, come back the next day, and everything is still assigned correctly.
 
-**Four toolheads, one system** — built specifically for multi-toolhead setups like the MadMax toolchanger. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Fluidd shows per-toolhead spool status natively (Mainsail unfortunately only supports one active spool).
+**Scales from one toolhead to four** — originally built for multi-toolhead setups like MadMax, StealthChanger, and other Voron toolchanger systems, but there's nothing stopping you from running a single reader on a standard setup. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Fluidd shows per-toolhead spool status natively (Mainsail unfortunately only supports one active spool).
 
 **Printable case included** — a custom case is in the `3mf/` folder designed specifically for the Waveshare ESP32-S3-Zero + PN532. Print it clear so the LED glows through. Print the scan target in red so you know where to tap.
 
