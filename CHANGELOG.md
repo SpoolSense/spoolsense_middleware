@@ -34,6 +34,6 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 - **Klipper macros** for spool tracking and filament usage
 - **Spoolman integration** — uses `nfc_id` extra field to map NFC tags to spools
 - **LED feedback** — onboard WS2812 RGB LED flashes white 3x on successful scan, then holds the filament's colour from Spoolman
-- **Fluidd support** — per-toolhead active spool display (note: Mainsail only supports one active spool)
+- **Per-toolhead spool display** — supported in both Fluidd and Mainsail via variable_spool_id in toolchange macros
 - **MQTT broker** via Home Assistant Mosquitto addon
 - **3D printed case** — custom case for Waveshare ESP32-S3-Zero + PN532, modified from MakerWorld model with toolhead labels (T0–T3) and scan target area

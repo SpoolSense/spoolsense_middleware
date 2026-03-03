@@ -20,7 +20,7 @@ gcode:
 
 ## Update Toolhead Macros
 
-Add `variable_spool_id: None` to each of your T0-T3 toolchange macros so Fluidd can display and assign spools per toolhead.
+Add `variable_spool_id: None` to each of your T0-T3 toolchange macros so Fluidd or Mainsail can display and assign spools per toolhead.
 
 Example for T0 (replicate for T1, T2, T3):
 
@@ -87,11 +87,11 @@ The middleware automatically saves spool IDs to disk whenever an NFC scan occurs
 sudo systemctl restart klipper
 ```
 
-## Fluidd Multi-Toolhead Support
+## Multi-Toolhead Front End Support
 
-Fluidd natively supports per-toolhead spool selection when `variable_spool_id` is present in the toolchange macros.
+Both Fluidd and Mainsail support per-toolhead spool selection when `variable_spool_id` is present in the toolchange macros. Mainsail added this support in July 2024.
 
-Install Fluidd alongside Mainsail:
+If you prefer Fluidd alongside Mainsail:
 
 1. Download Fluidd:
 ```bash

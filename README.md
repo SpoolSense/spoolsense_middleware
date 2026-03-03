@@ -8,7 +8,7 @@ Automatic filament spool tracking for Voron printers using NFC tags, ESP32-S3, a
 
 ## Overview
 
-Scan an NFC tag on a filament spool → automatically sets the active spool in Spoolman → updates Fluidd per toolhead → Klipper tracks filament usage → LED on each toolhead confirms the scan and displays the spool color.
+Scan an NFC tag on a filament spool → automatically sets the active spool in Spoolman → updates Spoolman per toolhead → Klipper tracks filament usage → LED on each toolhead confirms the scan and displays the spool color.
 
 ```
 Scan NFC tag
@@ -23,7 +23,7 @@ Spoolman lookup by UID
      ↓
 Moonraker sets active spool
      ↓
-Fluidd shows spool per toolhead
+Mainsail/Fluidd shows spool per toolhead
      ↓
 LED flashes white 3x (scan confirmed) → holds spool color
 ```
@@ -32,13 +32,13 @@ LED flashes white 3x (scan confirmed) → holds spool color
 
 Tap an NFC tag on your spool and walk away. That's really it — everything else happens automatically.
 
-**Scan to track** — each toolhead has its own ESP32-S3 constantly listening for NFC tags. The moment you tap a spool, it's registered as active in Spoolman, Moonraker is updated, and Fluidd reflects it per toolhead. No typing spool IDs, no dropdown menus, no forgetting to update it.
+**Scan to track** — each toolhead has its own ESP32-S3 constantly listening for NFC tags. The moment you tap a spool, it's registered as active in Spoolman, Moonraker is updated, and your front end reflects it per toolhead. No typing spool IDs, no dropdown menus, no forgetting to update it.
 
 **LED feedback that actually tells you something** — the onboard RGB LED isn't just an "it worked" light. It flashes the filament's exact color from Spoolman so you can glance at the toolhead and know what's loaded. Scan an unknown tag and it goes red. Running low (under 100g)? The LED starts breathing in the filament color so it catches your eye without being obnoxious.
 
 **Survives reboots** — spool IDs are saved to disk via Klipper's save_variables system and restored automatically on startup. Pull the power, come back the next day, and everything is still assigned correctly.
 
-**Scales from one toolhead to four** — originally built for multi-toolhead setups like MadMax, StealthChanger, and other Voron toolchanger systems, but there's nothing stopping you from running a single reader on a standard setup. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Fluidd shows per-toolhead spool status natively (Mainsail unfortunately only supports one active spool).
+**Scales from one toolhead to four** — originally built for multi-toolhead setups like MadMax, StealthChanger, and other Voron toolchanger systems, but there's nothing stopping you from running a single reader on a standard setup. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Both Fluidd and Mainsail support per-toolhead spool status natively via variable_spool_id in the toolchange macros (Mainsail added this in July 2024).
 
 **Printable case included** — a custom case is in the `3mf/` folder designed specifically for the Waveshare ESP32-S3-Zero + PN532. Print it clear so the LED glows through. Print the scan target in red so you know where to tap.
 
@@ -66,14 +66,14 @@ The LED color is published via MQTT and driven by the middleware using the `colo
 - [Mosquitto MQTT](https://mosquitto.org) — via Home Assistant addon
 - [Spoolman](https://github.com/Donkie/Spoolman) — filament database
 - [Moonraker](https://moonraker.readthedocs.io) — Klipper API
-- [Fluidd](https://fluidd.xyz) — web interface with per-toolhead spool support. Unfortunetly Mainsail only supports one active spool.
+- [Fluidd](https://fluidd.xyz) or [Mainsail](https://docs.mainsail.xyz) — both support per-toolhead spool display via `variable_spool_id` in toolchange macros.
 
 ## Prerequisites
 
 - Home Assistant with ESPHome and Mosquitto addons
 - Klipper + Moonraker running on Raspberry Pi
 - Spoolman installed and running
-- Fluidd installed (see docs/fluidd-install.md)
+- Fluidd or Mainsail installed
 
 ## 3D Printed Case
 
