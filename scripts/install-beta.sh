@@ -215,8 +215,35 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# Build toolheads list string from user input
+# Generate ESPHome YAML files
+# TODO: When shared base config support is added, replace per-file generation
+#       with a single base yaml + substitutions file approach.
 # ------------------------------------------------------------------------------
+generate_esphome_yaml() {
+    local toolhead="$1"   # e.g. T0
+    local broker="$2"
+    local tl_lower="${toolhead,,}"  # e.g. t0
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    local src="${repo_root}/esphome/toolhead-t0.yaml"
+    local out_dir="${repo_root}/esphome/generated"
+    local out="${out_dir}/toolhead-${tl_lower}.yaml"
+
+    mkdir -p "$out_dir"
+
+    sed \
+        -e "s|toolhead-t0|toolhead-${tl_lower}|g" \
+        -e "s|Toolhead T0 NFC|Toolhead ${toolhead} NFC|g" \
+        -e "s|YOUR_HOME_ASSISTANT_IP|${broker}|g" \
+        -e "s|nfc/toolhead/T0|nfc/toolhead/${toolhead}|g" \
+        -e "s|\"T0 Status LED\"|\"${toolhead} Status LED\"|g" \
+        -e "s|format: \"Tag scanned on T0|format: \"Tag scanned on ${toolhead}|g" \
+        -e "s|Toolhead-T0 Fallback|Toolhead-${toolhead} Fallback|g" \
+        -e "s|\\\\\"toolhead\\\\\": \\\\\"T0\\\\\"|\\\\\"toolhead\\\\\": \\\\\"${toolhead}\\\\\"|g" \
+        "$src" > "$out"
+
+    success "Generated esphome/generated/toolhead-${tl_lower}.yaml"
+}
 build_toolheads_str() {
     local mode="$1"
     local custom="$2"
@@ -338,6 +365,7 @@ echo
 echo -e "  ${BOLD}Will write:${RESET}        ${INSTALLED_LISTENER}"
 echo -e "  ${BOLD}Will install:${RESET}      ${SERVICE_FILE}"
 echo -e "  ${BOLD}Will enable:${RESET}       ${SERVICE_NAME}.service"
+echo -e "  ${BOLD}Will generate:${RESET}     esphome/generated/toolhead-{t}.yaml for each toolhead"
 echo
 
 confirm "Proceed with install?" || { info "Install cancelled."; exit 0; }
@@ -372,6 +400,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}"
 sudo systemctl restart "${SERVICE_NAME}"
 success "Service enabled and started"
+
+# Generate ESPHome YAML files
+echo
+info "Generating ESPHome YAML files..."
+# Parse toolheads from the Python list string — extract quoted identifiers
+IFS=',' read -ra th_raw <<< "$(echo "$TOOLHEADS_STR" | tr -d '[]"' )"
+for th in "${th_raw[@]}"; do
+    th=$(echo "$th" | xargs)  # trim whitespace
+    [[ -n "$th" ]] && generate_esphome_yaml "$th" "$MQTT_BROKER"
+done
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+info "ESPHome files written to ${REPO_ROOT}/esphome/generated/"
+warn "Flash each device manually via web.esphome.io — copy the generated YAML for each toolhead"
 
 # ------------------------------------------------------------------------------
 # Connectivity checks

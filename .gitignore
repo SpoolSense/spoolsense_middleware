@@ -1,6 +1,9 @@
 # ESPHome secrets
 esphome/secrets.yaml
 
+# ESPHome generated configs (produced by install script, not committed)
+esphome/generated/
+
 # Python
 __pycache__/
 *.pyc
