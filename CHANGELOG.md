@@ -11,17 +11,7 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 - **Online status publishing** — middleware publishes `true` to `nfc/middleware/online` on successful broker connection (fired from `on_connect` callback, not after TCP connect, so it only fires once the broker has acknowledged the connection). On clean shutdown via SIGTERM or SIGINT, publishes `false` before disconnecting
 - **Clean shutdown handler** — `SIGTERM` and `SIGINT` now trigger a graceful shutdown that publishes offline status before disconnecting, so a service restart looks different from a crash to any subscribers
 
-### Home Assistant integration
-Add a binary sensor to `configuration.yaml` to surface middleware status on your dashboard:
-```yaml
-mqtt:
-  binary_sensor:
-    - name: "NFC Middleware"
-      state_topic: "nfc/middleware/online"
-      payload_on: "true"
-      payload_off: "false"
-      device_class: connectivity
-```
+Optionally surface middleware status in Home Assistant — see [middleware-setup.md](docs/middleware-setup.md) for the binary sensor config.
 
 ---
 

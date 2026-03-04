@@ -78,3 +78,21 @@ NFC scan on T0: UID=XX-XX-XX-XX
 Found spool: Your Filament Name (ID: 1)
 Set spool 1 as active on T0 via Moonraker
 ```
+
+## Optional: Home Assistant Monitoring
+
+The middleware publishes its online/offline status to `nfc/middleware/online` (retained, QoS 1). If the middleware crashes or loses its MQTT connection, the broker automatically publishes `false` via Last Will and Testament. A clean shutdown also publishes `false` before disconnecting.
+
+If you use Home Assistant, you can optionally surface this as a dashboard sensor. Add the following to your `configuration.yaml`:
+
+```yaml
+mqtt:
+  binary_sensor:
+    - name: "NFC Middleware"
+      state_topic: "nfc/middleware/online"
+      payload_on: "true"
+      payload_off: "false"
+      device_class: connectivity
+```
+
+This gives you a "Connected / Disconnected" indicator in your HA dashboard and makes it easy to build automations — for example, a notification if the middleware goes offline during a print.
