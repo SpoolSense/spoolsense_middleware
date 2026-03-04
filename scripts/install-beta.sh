@@ -224,6 +224,7 @@ EOF
 generate_esphome_yaml() {
     local toolhead="$1"   # e.g. T0
     local broker="$2"
+    local static_ip="$3"  # e.g. 192.168.1.120
     local tl_lower="${toolhead,,}"  # e.g. t0
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -244,7 +245,14 @@ generate_esphome_yaml() {
         -e "s|\\\\\"toolhead\\\\\": \\\\\"T0\\\\\"|\\\\\"toolhead\\\\\": \\\\\"${toolhead}\\\\\"|g" \
         "$src" > "$out"
 
-    success "Generated esphome/generated/toolhead-${tl_lower}.yaml"
+    local gateway
+    gateway="$(echo "$static_ip" | sed 's/\.[0-9]*$/.1/')"
+    sed -i \
+        -e "s|static_ip: 192\.168\.X\.X|static_ip: ${static_ip}|g" \
+        -e "s|gateway: 192\.168\.X\.1|gateway: ${gateway}|g" \
+        "$out"
+
+    success "Generated esphome/generated/toolhead-${tl_lower}.yaml (IP: ${static_ip})"
 }
 build_toolheads_str() {
     local mode="$1"
@@ -283,6 +291,14 @@ echo -e "${BOLD}=================================================${RESET}"
 echo -e "${BOLD}  nfc-toolchanger-spoolman — Install Script${RESET}"
 echo -e "${YELLOW}${BOLD}  BETA — Please report issues on GitHub${RESET}"
 echo -e "${BOLD}=================================================${RESET}"
+echo
+echo -e "${YELLOW}${BOLD}  IMPORTANT: Static IP addresses recommended${RESET}"
+echo -e "  Each NFC scanner (ESP32-S3) should be assigned a static IP"
+echo -e "  address on your network before running this script. Without"
+echo -e "  a static IP, the scanner's address may change after a reboot"
+echo -e "  and ESPHome will lose contact with the device."
+echo -e "  Set static IPs in your router's DHCP reservation table, or"
+echo -e "  configure them directly in the generated ESPHome YAML files."
 echo
 
 # Verify we're running from the repo root
@@ -340,6 +356,20 @@ esac
 
 TOOLHEADS_STR=$(build_toolheads_str "$TH_MODE" "$TH_CUSTOM")
 
+# Prompt for a static IP per scanner
+echo
+echo -e "${BOLD}Scanner IP addresses${RESET}"
+echo -e "  Enter the static IP for each NFC scanner (ESP32-S3)."
+echo -e "  These will be written into the generated ESPHome YAML files."
+echo
+declare -A SCANNER_IPS
+IFS=',' read -ra th_list <<< "$(echo "$TOOLHEADS_STR" | tr -d '[]"' )"
+for th in "${th_list[@]}"; do
+    th=$(echo "$th" | xargs)
+    [[ -z "$th" ]] && continue
+    SCANNER_IPS["$th"]=$(prompt_required "Static IP for ${th} scanner")
+done
+
 echo
 MQTT_BROKER=$(prompt_required "MQTT broker IP (your Home Assistant IP)")
 MQTT_PORT=$(prompt "MQTT port" "1883")
@@ -358,6 +388,9 @@ header "Step 2 of 4 — Review"
 echo
 echo -e "  ${BOLD}Toolhead mode:${RESET}     ${TOOLHEAD_MODE}"
 echo -e "  ${BOLD}Toolheads:${RESET}         ${TOOLHEADS_STR}"
+for th in "${!SCANNER_IPS[@]}"; do
+    echo -e "  ${BOLD}${th} scanner IP:${RESET}    ${SCANNER_IPS[$th]}"
+done
 echo -e "  ${BOLD}MQTT broker:${RESET}       ${MQTT_BROKER}:${MQTT_PORT}"
 echo -e "  ${BOLD}MQTT username:${RESET}     ${MQTT_USERNAME}"
 echo -e "  ${BOLD}MQTT password:${RESET}     $(echo "$MQTT_PASSWORD" | sed 's/./*/g')"
@@ -411,7 +444,7 @@ info "Generating ESPHome YAML files..."
 IFS=',' read -ra th_raw <<< "$(echo "$TOOLHEADS_STR" | tr -d '[]"' )"
 for th in "${th_raw[@]}"; do
     th=$(echo "$th" | xargs)  # trim whitespace
-    [[ -n "$th" ]] && generate_esphome_yaml "$th" "$MQTT_BROKER"
+    [[ -n "$th" ]] && generate_esphome_yaml "$th" "$MQTT_BROKER" "${SCANNER_IPS[$th]}"
 done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 info "ESPHome files written to ${REPO_ROOT}/esphome/generated/"
@@ -446,4 +479,13 @@ echo
 echo -e "  Check service status:  ${BOLD}sudo systemctl status ${SERVICE_NAME}${RESET}"
 echo -e "  Follow logs:           ${BOLD}journalctl -u ${SERVICE_NAME} -f${RESET}"
 echo -e "  Reconfigure/uninstall: ${BOLD}bash scripts/install-beta.sh${RESET}"
+echo
+echo -e "${BOLD}Klipper setup — add to your printer.cfg:${RESET}"
+if [[ "$TOOLHEAD_MODE" == "toolchanger" ]]; then
+    echo -e "  ${CYAN}[include klipper/toolhead_macros_example.cfg]${RESET}"
+    echo -e "  SET_ACTIVE_SPOOL / CLEAR_ACTIVE_SPOOL are handled automatically"
+    echo -e "  by klipper-toolchanger at each toolchange — no further changes needed."
+else
+    echo -e "  ${CYAN}[include klipper/spoolman_macros.cfg]${RESET}"
+fi
 echo
