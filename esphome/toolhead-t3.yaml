@@ -164,6 +164,7 @@ i2c:
 # rgb_order: RGB is correct for this board
 light:
   - platform: esp32_rmt_led_strip
+    chipset: WS2812
     rgb_order: RGB
     pin: GPIO21
     num_leds: 1

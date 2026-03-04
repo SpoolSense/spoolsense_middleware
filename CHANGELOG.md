@@ -4,6 +4,13 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [1.2.1] - 2026-03-03
+
+### Fixed
+- **ESPHome 2026.2.x compatibility** — added `chipset: WS2812` to `esp32_rmt_led_strip` config in all 4 toolhead YAML files. ESPHome 2026.2.2 made `chipset` a required field; omitting it caused a compile error: `Must contain exactly one of chipset, bit0_high`
+
+---
+
 ## [1.2.0] - 2026-03-02
 
 ### Added
