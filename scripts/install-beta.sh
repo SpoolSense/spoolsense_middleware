@@ -175,10 +175,12 @@ write_listener() {
     local spoolman_url="$6"
     local moonraker_url="$7"
     local threshold="$8"
+    local toolhead_mode="$9"
 
     mkdir -p "$INSTALL_DIR"
 
     sed \
+        -e "s|TOOLHEAD_MODE = \"toolchanger\"|TOOLHEAD_MODE = \"${toolhead_mode}\"|" \
         -e "s|MQTT_BROKER = \"YOUR_HOME_ASSISTANT_IP\"|MQTT_BROKER = \"${broker}\"|" \
         -e "s|MQTT_PORT = 1883|MQTT_PORT = ${port}|" \
         -e "s|MQTT_USERNAME = \"your_mqtt_username\"|MQTT_USERNAME = \"${username}\"|" \
@@ -314,35 +316,35 @@ header "Step 1 of 4 — Configuration"
 echo "Press Enter to accept the default shown in [brackets]."
 echo
 
-MQTT_BROKER=$(prompt_required "MQTT broker IP (your Home Assistant IP)")
-MQTT_PORT=$(prompt "MQTT port" "1883")
-MQTT_USERNAME=$(prompt_required "MQTT username")
-MQTT_PASSWORD=$(prompt_password "MQTT password")
-echo
-
 echo -e "${BOLD}Toolhead mode:${RESET}"
 echo -e "  ${BOLD}1)${RESET} Single toolhead"
-echo -e "  ${BOLD}2)${RESET} KTC (e.g. MadMax / StealthChanger — T0, T1, ...)"
-echo -e "  ${BOLD}3)${RESET} Custom"
+echo -e "  ${BOLD}2)${RESET} Toolchanger (e.g. MadMax / StealthChanger — T0, T1, ...)"
+echo -e "  ${BOLD}3)${RESET} Toolchanger — Custom names"
 echo -en "${BOLD}Choose [1/2/3]: ${RESET}"
 read -r th_choice
 
 case "$th_choice" in
-    1) TH_MODE="single"; TH_CUSTOM="" ;;
+    1) TH_MODE="single"; TH_CUSTOM=""; TOOLHEAD_MODE="single" ;;
     2)
-        TH_MODE="ktc"
+        TH_MODE="ktc"; TOOLHEAD_MODE="toolchanger"
         echo -en "${BOLD}How many toolheads? ${RESET}"
         read -r th_count
         TH_CUSTOM="$th_count"
         ;;
     3)
-        TH_MODE="custom"
+        TH_MODE="custom"; TOOLHEAD_MODE="toolchanger"
         TH_CUSTOM=$(prompt_required "Enter toolhead names (comma-separated, e.g. tool_carriage_0, tool_carriage_1)")
         ;;
-    *) warn "Invalid choice, defaulting to KTC 4 toolheads (T0–T3)"; TH_MODE="ktc"; TH_CUSTOM="4" ;;
+    *) warn "Invalid choice, defaulting to toolchanger 4 toolheads (T0–T3)"; TH_MODE="ktc"; TH_CUSTOM="4"; TOOLHEAD_MODE="toolchanger" ;;
 esac
 
 TOOLHEADS_STR=$(build_toolheads_str "$TH_MODE" "$TH_CUSTOM")
+
+echo
+MQTT_BROKER=$(prompt_required "MQTT broker IP (your Home Assistant IP)")
+MQTT_PORT=$(prompt "MQTT port" "1883")
+MQTT_USERNAME=$(prompt_required "MQTT username")
+MQTT_PASSWORD=$(prompt_password "MQTT password")
 
 echo
 SPOOLMAN_URL=$(prompt_required "Spoolman URL (e.g. http://192.168.1.100:7912)")
@@ -354,10 +356,11 @@ LOW_SPOOL_THRESHOLD=$(prompt "Low spool warning threshold (grams)" "100")
 # ------------------------------------------------------------------------------
 header "Step 2 of 4 — Review"
 echo
+echo -e "  ${BOLD}Toolhead mode:${RESET}     ${TOOLHEAD_MODE}"
+echo -e "  ${BOLD}Toolheads:${RESET}         ${TOOLHEADS_STR}"
 echo -e "  ${BOLD}MQTT broker:${RESET}       ${MQTT_BROKER}:${MQTT_PORT}"
 echo -e "  ${BOLD}MQTT username:${RESET}     ${MQTT_USERNAME}"
 echo -e "  ${BOLD}MQTT password:${RESET}     $(echo "$MQTT_PASSWORD" | sed 's/./*/g')"
-echo -e "  ${BOLD}Toolheads:${RESET}         ${TOOLHEADS_STR}"
 echo -e "  ${BOLD}Spoolman URL:${RESET}      ${SPOOLMAN_URL}"
 echo -e "  ${BOLD}Moonraker URL:${RESET}     ${MOONRAKER_URL}"
 echo -e "  ${BOLD}Low spool threshold:${RESET} ${LOW_SPOOL_THRESHOLD}g"
@@ -388,7 +391,7 @@ echo
 
 info "Writing nfc_listener.py to ${INSTALL_DIR}..."
 write_listener "$MQTT_BROKER" "$MQTT_PORT" "$MQTT_USERNAME" "$MQTT_PASSWORD" \
-    "$TOOLHEADS_STR" "$SPOOLMAN_URL" "$MOONRAKER_URL" "$LOW_SPOOL_THRESHOLD"
+    "$TOOLHEADS_STR" "$SPOOLMAN_URL" "$MOONRAKER_URL" "$LOW_SPOOL_THRESHOLD" "$TOOLHEAD_MODE"
 success "nfc_listener.py written"
 
 info "Writing systemd service file..."
