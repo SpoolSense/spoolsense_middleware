@@ -3,8 +3,20 @@
 ## Prerequisites
 
 - Home Assistant with ESPHome addon installed
-- Mosquitto MQTT broker addon installed in Home Assistant
+- Mosquitto MQTT broker addon installed and configured in Home Assistant
 - Chrome or Edge browser (required for USB flashing)
+
+### Setting up Mosquitto MQTT Broker
+
+If you haven't set up Mosquitto yet, this guide walks you through the full process — installing the addon, creating a user, and connecting it to Home Assistant:
+
+👉 **[Setup MQTT & Mosquitto Broker on Home Assistant — HAProfs](https://haprofs.com/setting-up-mqtt-mosquitto-broker-home-assistant/)**
+
+For a deeper dive into MQTT configuration options, see the official Home Assistant documentation:
+
+👉 **[MQTT Integration — Home Assistant](https://www.home-assistant.io/integrations/mqtt/)**
+
+Once Mosquitto is running and you have a username/password configured, come back here to continue.
 
 ## First Flash (USB Required)
 
