@@ -345,6 +345,19 @@ if [[ ! -f "$LISTENER_SRC" ]]; then
     exit 1
 fi
 
+# Validate sudo access upfront — the script needs sudo to write the systemd
+# service file and run systemctl commands. We cache credentials now so the
+# install doesn't pause for a password prompt mid-way through.
+echo -e "${YELLOW}${BOLD}  This script requires sudo to install the systemd service.${RESET}"
+echo -e "  You may be prompted for your password now."
+echo
+if ! sudo -v; then
+    error "sudo access required — cannot continue."
+    exit 1
+fi
+success "sudo access confirmed"
+echo
+
 # Handle existing install
 if already_installed; then
     warn "An existing installation was detected."
