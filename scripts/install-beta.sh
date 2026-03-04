@@ -547,10 +547,8 @@ if [[ "$TOOLHEAD_MODE" == "toolchanger" ]]; then
     echo -e "  required per toolhead config in your klipper-toolchanger directory."
     echo -e "  Full setup instructions: ${CYAN}docs/klipper-setup.md${RESET}"
 else
-    echo -e "  Please check ${CYAN}docs/klipper-setup.md${RESET} for full setup instructions."
     echo -e "  Add the following to your printer.cfg:"
     echo -e "  ${CYAN}[include klipper/spoolman_macros.cfg]${RESET}"
-    echo -e "  Also check ${CYAN}klipper/toolhead_macros_example.cfg${RESET} for the"
-    echo -e "  variable_spool_id and SET_ACTIVE_SPOOL changes needed in your toolhead macro."
+    echo -e "  Full setup instructions: ${CYAN}docs/klipper-setup.md${RESET}"
 fi
 echo
