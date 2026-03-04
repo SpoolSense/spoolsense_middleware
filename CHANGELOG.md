@@ -4,6 +4,27 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [1.2.2] - 2026-03-04
+
+### Added
+- **MQTT Last Will and Testament (LWT)** — broker now automatically publishes `false` to `nfc/middleware/online` if the middleware crashes or loses connection unexpectedly, with QoS 1 and retain so subscribers always have current state
+- **Online status publishing** — middleware publishes `true` to `nfc/middleware/online` on successful broker connection (fired from `on_connect` callback, not after TCP connect, so it only fires once the broker has acknowledged the connection). On clean shutdown via SIGTERM or SIGINT, publishes `false` before disconnecting
+- **Clean shutdown handler** — `SIGTERM` and `SIGINT` now trigger a graceful shutdown that publishes offline status before disconnecting, so a service restart looks different from a crash to any subscribers
+
+### Home Assistant integration
+Add a binary sensor to `configuration.yaml` to surface middleware status on your dashboard:
+```yaml
+mqtt:
+  binary_sensor:
+    - name: "NFC Middleware"
+      state_topic: "nfc/middleware/online"
+      payload_on: "true"
+      payload_off: "false"
+      device_class: connectivity
+```
+
+---
+
 ## [1.2.1] - 2026-03-03
 
 ### Fixed

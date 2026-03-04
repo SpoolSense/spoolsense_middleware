@@ -21,6 +21,8 @@ import paho.mqtt.client as mqtt
 import requests
 import json
 import logging
+import signal
+import sys
 
 # Configure logging to show timestamps and log level
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -164,6 +166,9 @@ def on_connect(client, userdata, flags, rc):
     """
     if rc == 0:
         logging.info("Connected to MQTT broker")
+        # Announce middleware is online — published here so it only fires once
+        # the broker has acknowledged the connection (not just after TCP connect)
+        client.publish("nfc/middleware/online", "true", qos=1, retain=True)
         # Subscribe to toolhead NFC scan topics only (T0, T1, T2, T3)
         # We use a specific pattern to avoid receiving our own colour messages
         # which are published to nfc/toolhead/T0/color etc.
@@ -267,9 +272,24 @@ client = mqtt.Client()
 # Set authentication credentials
 client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
+# Register Last Will and Testament — broker publishes this automatically if
+# the middleware crashes or loses connection unexpectedly
+client.will_set("nfc/middleware/online", payload="false", qos=1, retain=True)
+
 # Register callbacks
 client.on_connect = on_connect   # fired on connection
 client.on_message = on_message   # fired on each received message
+
+
+def on_shutdown(signum, frame):
+    """Publish offline status cleanly before exiting on SIGTERM or SIGINT."""
+    logging.info("Shutting down — publishing offline status")
+    client.publish("nfc/middleware/online", "false", qos=1, retain=True)
+    client.disconnect()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, on_shutdown)
+signal.signal(signal.SIGINT, on_shutdown)
 
 # Connect to the MQTT broker
 logging.info(f"Connecting to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}...")
