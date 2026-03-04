@@ -48,7 +48,9 @@ MQTT_PORT = 1883
 MQTT_USERNAME = "your_mqtt_username"
 MQTT_PASSWORD = "your_mqtt_password"
 
-# Toolhead identifiers — e.g. ["T0"] for single, ["T0", "T1", "T2", "T3"] for quad toolchanger
+# Toolhead identifiers — must match your Klipper tool macro names
+# e.g. ["T0"] for single, ["T0", "T1", "T2", "T3"] for MadMax Toolchanger
+# KTC users with custom tool names: ["tool_carriage_0", "tool_carriage_1", ...]
 TOOLHEADS = ["T0", "T1", "T2", "T3"]
 
 # URL of your Spoolman instance (default port is 7912)
