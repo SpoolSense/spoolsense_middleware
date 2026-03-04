@@ -30,15 +30,15 @@ The script handles everything automatically based on the user's answers. No manu
 
 ## Questions the Script Asks
 
-In order:
+`TOOLHEAD_MODE` is asked first — it determines what follow-up questions are needed and which Klipper instructions to show at the end.
 
-1. **MQTT broker IP** — Home Assistant server address
-2. **MQTT username and password**
-3. **Spoolman IP and port** — default 7912
-4. **Moonraker/Klipper IP**
-5. **Single toolhead or toolchanger mode?** — `single` or `toolchanger`
-6. **Number of toolheads** — only asked if toolchanger mode, 1–4
-7. **Static IP for each toolhead** — asked once per toolhead (e.g. T0 IP, T1 IP...)
+1. **Single toolhead or toolchanger mode?** — `single` or `toolchanger`
+2. **Number of toolheads** — only asked if toolchanger mode, 1–4
+3. **Static IP for each toolhead** — asked once per toolhead (e.g. T0 IP, T1 IP...)
+4. **MQTT broker IP** — Home Assistant server address
+5. **MQTT username and password**
+6. **Spoolman IP and port** — default 7912
+7. **Moonraker/Klipper IP**
 8. **Low spool warning threshold** — default 100g, user can change it
 
 ---
@@ -48,7 +48,7 @@ In order:
 Once all questions are answered:
 
 **Middleware:**
-- Writes configured `nfc_listener.py` with all values substituted
+- Writes configured `nfc_listener.py` with all values substituted, including `TOOLHEAD_MODE`
 - Installs Python dependencies (`paho-mqtt`, `requests`)
 - Copies systemd service file, replacing `YOUR_USERNAME` with the actual user
 - Enables and starts the service
@@ -60,9 +60,25 @@ Once all questions are answered:
 - `base.yaml` is never touched by the install script
 
 **Klipper:**
-- If toolchanger mode, reminds the user to add the KTC macro changes (see `ktc-macro.md`)
-- If single mode, reminds the user to include `spoolman_macros.cfg` in their `printer.cfg`
+- If toolchanger mode, reminds the user to include `toolhead_macros_example.cfg` in their `printer.cfg` and confirms that `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` are already handled by klipper-toolchanger — no additional macro changes needed
+- If single mode, reminds the user to include `spoolman_macros.cfg` in their `printer.cfg` — toolchanger-specific config is not shown
 - Could potentially copy the right `.cfg` files to the Klipper config directory if the path is known
+
+---
+
+## TOOLHEAD_MODE Behavior
+
+**`single`:**
+- Middleware subscribes to a single MQTT topic (`nfc/toolhead/T0` or similar)
+- On scan: look up spool in Spoolman, call `SET_ACTIVE_SPOOL`, publish LED color
+- No `SAVE_VARIABLE` or per-toolhead storage needed
+- Klipper config: `spoolman_macros.cfg` only
+
+**`toolchanger`:**
+- Middleware subscribes to topics for each configured toolhead (`T0`–`TX`)
+- On scan: look up spool in Spoolman, save spool ID via `SAVE_VARIABLE`, publish LED color
+- Does NOT call `SET_ACTIVE_SPOOL` directly — this is handled by klipper-toolchanger macros at toolchange time
+- Klipper config: `toolhead_macros_example.cfg` included, `RESTORE_SPOOL_IDS` runs on startup to restore assignments after reboot
 
 ---
 
@@ -79,7 +95,7 @@ Without those two pieces in place, the install script can't generate ESPHome con
 ## End State Confirmation
 
 After the script completes it should print a summary of what was configured and confirm:
-- ✅ Middleware service is running
+- ✅ Middleware service is running (`TOOLHEAD_MODE` shown)
 - ✅ MQTT broker reachable
 - ✅ Spoolman reachable
 - ✅ ESPHome YAML files generated for T0–TX

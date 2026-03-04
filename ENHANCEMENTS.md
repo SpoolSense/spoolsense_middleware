@@ -57,8 +57,15 @@ The middleware already knows when a spool is low or when an unknown tag is scann
 
 ## Klipper
 
-**Automatic spool activation via toolchange macros**
-Call `SET_ACTIVE_SPOOL` and `CLEAR_ACTIVE_SPOOL` directly inside the T0–T3 toolchange macros so the active spool swaps automatically on every toolchange — no front end involvement needed. Requires adding a `TOOLHEAD_MODE` config variable to the middleware (`"single"` or `"toolchanger"`) so users not running klipper-toolchanger aren't affected. Single mode works exactly as today — scan a tag, set the active spool, done. Toolchanger mode adds the automatic spool swap on toolchange. The Klipper macros should be similarly split so single toolhead users have a clear stopping point and don't need any toolchanger-specific config.
+**`TOOLHEAD_MODE` config variable for single vs. toolchanger setups**
+Automatic spool activation via toolchange macros already works correctly for klipper-toolchanger users — tested and confirmed that `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` fire on every toolchange and Spoolman tracks filament usage per-spool throughout a multi-toolhead print. No Klipper macro changes needed for toolchanger users.
+
+The remaining work is adding a `TOOLHEAD_MODE` config variable (`"single"` or `"toolchanger"`) to the middleware so single toolhead users have a clean, clearly scoped setup:
+
+- `single` — scan a tag, set the active spool, done. No toolchanger-specific config or macros needed.
+- `toolchanger` — middleware stores spool IDs per toolhead via `SAVE_VARIABLE`. Klipper macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange.
+
+The install script should ask this question upfront and configure everything accordingly so users never have to touch toolchanger-specific config they don't need.
 
 ## Installation
 
@@ -67,12 +74,11 @@ Right now setup requires manually editing config files, copying files to the rig
 
 When run, it would prompt for all the values that currently require manual editing:
 
-- MQTT broker IP
-- MQTT username and password
-- Spoolman IP
-- Moonraker/Klipper IP
-- Single toolhead or toolchanger mode (ties into the `TOOLHEAD_MODE` work above)
+- Single toolhead or toolchanger mode (`TOOLHEAD_MODE`) — asked first, drives everything else
 - Number of toolheads (if toolchanger mode)
+- MQTT broker IP, username, and password
+- Spoolman IP and port
+- Moonraker/Klipper IP
 - Low spool threshold
 
 Once the user answers the prompts, the script would write out the configured `nfc_listener.py`, install dependencies, copy the systemd service file, and start the service — all in one shot. At the end it could do a quick connectivity check against the MQTT broker and Spoolman to confirm everything is reachable before exiting.

@@ -4,6 +4,19 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`TOOLHEAD_MODE` config variable** — middleware now supports `"single"` and `"toolchanger"` modes. Single mode works exactly as before — scan a tag, set the active spool, done. Toolchanger mode stores spool IDs per toolhead via `SAVE_VARIABLE` and lets the Klipper toolchange macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange. The install script will ask this question first and configure everything accordingly.
+
+### Confirmed
+- **Automatic spool tracking already works for toolchanger users** — tested and confirmed that Spoolman correctly tracks filament usage per spool throughout a multi-toolhead print. No Klipper macro changes were needed. `ktc-macro.md` removed from `beta/` as the implementation it described is already handled natively by klipper-toolchanger.
+
+### Removed
+- `beta/ktc-macro.md` — design doc for KTC macro changes, removed as the behavior it described is already working correctly without modification
+
+---
+
 ## [1.2.3] - 2026-03-04
 
 ### Changed
