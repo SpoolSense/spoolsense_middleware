@@ -3,18 +3,35 @@
 NFC Spoolman Middleware
 =======================
 Listens for NFC tag scans published via MQTT by ESPHome-flashed ESP32-S3 devices.
-When a tag is scanned, it looks up the spool in Spoolman by NFC UID, then sets
-the active spool in Moonraker so Klipper and Fluidd can track filament usage
-per toolhead.
+When a tag is scanned, it looks up the spool in Spoolman by NFC UID, then updates
+Klipper and Moonraker so filament usage is tracked per toolhead.
 
-Flow:
+TOOLHEAD_MODE controls how spool activation works:
+
+  single      — Middleware calls SET_ACTIVE_SPOOL directly on every scan.
+                Use this for single-toolhead printers.
+
+  toolchanger — Middleware saves the spool ID per toolhead and publishes the LED
+                colour, but does NOT call SET_ACTIVE_SPOOL. klipper-toolchanger
+                handles SET_ACTIVE_SPOOL / CLEAR_ACTIVE_SPOOL automatically at
+                each toolchange. Tested and confirmed working on MadMax T0–T3.
+
+Flow (toolchanger mode):
   ESP32-S3 scans NFC tag
     → publishes UID to MQTT topic nfc/toolhead/T0 (or T1, T2, T3)
       → this script receives the message
         → looks up UID in Spoolman
-          → sets active spool in Moonraker
-            → updates Klipper toolhead macro variable
-              → Fluidd displays correct spool per toolhead
+          → saves spool ID to Klipper variable + disk
+            → publishes filament colour back to ESP32 LED
+              → klipper-toolchanger handles SET_ACTIVE_SPOOL at next toolchange
+
+Flow (single mode):
+  ESP32-S3 scans NFC tag
+    → publishes UID to MQTT topic nfc/toolhead/T0
+      → this script receives the message
+        → looks up UID in Spoolman
+          → calls SET_ACTIVE_SPOOL in Moonraker immediately
+            → publishes filament colour back to ESP32 LED
 """
 
 import paho.mqtt.client as mqtt
@@ -30,6 +47,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 # ============================================================
 # Configuration — update these values for your setup
 # ============================================================
+
+# single     — single toolhead printer, SET_ACTIVE_SPOOL called on every scan
+# toolchanger — multi-toolhead printer, klipper-toolchanger handles SET_ACTIVE_SPOOL
+TOOLHEAD_MODE = "toolchanger"
 
 # IP address of your Home Assistant server (running Mosquitto MQTT broker)
 MQTT_BROKER = "YOUR_HOME_ASSISTANT_IP"       # e.g. "192.168.1.100"
@@ -96,35 +117,48 @@ def find_spool_by_nfc(uid):
 
 def set_active_spool(spool_id, toolhead):
     """
-    Set the active spool in Moonraker and update the Klipper toolhead macro variable.
+    Update Klipper with the scanned spool ID and optionally set it as active in Moonraker.
 
-    This function does two things:
-    1. Calls Moonraker's Spoolman API to set the globally active spool,
-       which enables filament usage tracking.
-    2. Updates the spool_id variable on the specific toolhead's Klipper macro
-       (e.g. T0, T1, T2, T3) so Fluidd can display the correct spool per toolhead.
+    Behaviour depends on TOOLHEAD_MODE:
+
+    single mode:
+        Calls Moonraker's /server/spoolman/spool_id to set the globally active spool,
+        then updates the toolhead macro variable and saves to disk.
+
+    toolchanger mode:
+        Skips the SET_ACTIVE_SPOOL call — klipper-toolchanger handles
+        CLEAR_ACTIVE_SPOOL / SET_ACTIVE_SPOOL automatically at each toolchange.
+        Only updates the toolhead macro variable and saves to disk so the correct
+        spool ID is available when the next toolchange fires.
+
+    Both modes:
+        Updates SET_GCODE_VARIABLE on the toolhead macro so Fluidd/Mainsail can
+        display the correct spool per toolhead. Saves the spool ID via SAVE_VARIABLE
+        so RESTORE_SPOOL_IDS can restore assignments after a reboot or power cut.
 
     Args:
-        spool_id (int): The Spoolman spool ID to set as active.
+        spool_id (int): The Spoolman spool ID to set.
         toolhead (str): The toolhead identifier, e.g. 'T0', 'T1', 'T2', 'T3'.
 
     Returns:
         bool: True if successful, False if an error occurred.
     """
     try:
-        # Step 1: Tell Moonraker which spool is globally active
-        # This enables Spoolman filament usage tracking
-        response = requests.post(
-            f"{MOONRAKER_URL}/server/spoolman/spool_id",
-            json={"spool_id": spool_id},
-            timeout=5
-        )
-        response.raise_for_status()
-        logging.info(f"Set spool {spool_id} as active on {toolhead} via Moonraker")
+        if TOOLHEAD_MODE == "single":
+            # Single mode — set the globally active spool in Moonraker immediately
+            response = requests.post(
+                f"{MOONRAKER_URL}/server/spoolman/spool_id",
+                json={"spool_id": spool_id},
+                timeout=5
+            )
+            response.raise_for_status()
+            logging.info(f"[single] Set spool {spool_id} as active via Moonraker")
+        else:
+            # Toolchanger mode — skip SET_ACTIVE_SPOOL, klipper-toolchanger handles it
+            logging.info(f"[toolchanger] Skipping SET_ACTIVE_SPOOL — klipper-toolchanger will activate spool {spool_id} at next toolchange")
 
-        # Step 2: Update the spool_id variable on the specific toolhead macro
-        # This is what makes Fluidd show the correct spool per toolhead
-        # e.g. toolhead "T0" → macro name "T0"
+        # Update the spool_id variable on the specific toolhead macro
+        # This is what makes Fluidd/Mainsail show the correct spool per toolhead
         macro = f"T{toolhead[-1]}"  # extracts digit from T0, T1, T2, T3
         response2 = requests.post(
             f"{MOONRAKER_URL}/printer/gcode/script",
@@ -134,10 +168,9 @@ def set_active_spool(spool_id, toolhead):
         response2.raise_for_status()
         logging.info(f"Updated {macro} spool_id variable to {spool_id}")
 
-        # Step 3: Persist the spool ID to disk using Klipper's save_variables system
-        # This ensures the spool ID survives Klipper restarts and power cuts.
-        # The RESTORE_SPOOL_IDS delayed_gcode macro reads these values on boot.
-        # Variable name: t0_spool_id, t1_spool_id, t2_spool_id, t3_spool_id
+        # Persist the spool ID to disk using Klipper's save_variables system
+        # RESTORE_SPOOL_IDS reads these on boot to restore spool assignments
+        # after a power cycle without requiring a rescan.
         var_name = f"t{toolhead[-1]}_spool_id"
         response3 = requests.post(
             f"{MOONRAKER_URL}/printer/gcode/script",
@@ -167,7 +200,7 @@ def on_connect(client, userdata, flags, rc):
         rc (int): Return code — 0 means success, anything else is an error.
     """
     if rc == 0:
-        logging.info("Connected to MQTT broker")
+        logging.info(f"Connected to MQTT broker (TOOLHEAD_MODE: {TOOLHEAD_MODE})")
         # Announce middleware is online — published here so it only fires once
         # the broker has acknowledged the connection (not just after TCP connect)
         client.publish("nfc/middleware/online", "true", qos=1, retain=True)
@@ -190,10 +223,12 @@ def publish_color(client, toolhead, color_hex):
         client: The MQTT client instance.
         toolhead (str): The toolhead identifier, e.g. 'T0'.
         color_hex (str): Hex colour string without '#', e.g. 'FF0000'.
+                         Pass 'error' to trigger the red error flash on the ESP32.
     """
     topic = f"nfc/toolhead/{toolhead}/color"
     # Ensure the hex string is clean — no '#' prefix
-    color_hex = color_hex.lstrip("#").upper()
+    if color_hex != "error":
+        color_hex = color_hex.lstrip("#").upper()
     client.publish(topic, color_hex)
     logging.info(f"Published colour #{color_hex} to {topic}")
 
@@ -208,9 +243,11 @@ def on_message(client, userdata, msg):
     Process:
         1. Parse the JSON payload to extract UID and toolhead.
         2. Look up the UID in Spoolman.
-        3. If found, set it as the active spool in Moonraker/Klipper.
+        3. If found, update Klipper spool variable and save to disk.
+           In single mode, also calls SET_ACTIVE_SPOOL in Moonraker immediately.
+           In toolchanger mode, klipper-toolchanger handles SET_ACTIVE_SPOOL at toolchange.
         4. Publish the filament colour to MQTT so the ESP32 LED updates.
-        5. If not found, log a warning — the spool needs to be registered in Spoolman.
+        5. If not found, publish 'error' so the ESP32 flashes red.
 
     Args:
         client: The MQTT client instance.
@@ -228,7 +265,7 @@ def on_message(client, userdata, msg):
         spool = find_spool_by_nfc(uid)
 
         if spool:
-            # Spool found — set it as active
+            # Spool found — update Klipper and publish LED colour
             spool_id = spool["id"]
             filament = spool.get("filament", {})
             name = filament.get("name", "Unknown")
@@ -242,7 +279,6 @@ def on_message(client, userdata, msg):
             publish_color(client, toolhead, color_hex)
 
             # Check remaining filament weight — warn if at or below LOW_SPOOL_THRESHOLD
-            # Spoolman stores remaining weight in grams under 'remaining_weight'
             remaining = spool.get("remaining_weight")
             topic_low = f"nfc/toolhead/{toolhead}/low_spool"
             if remaining is not None and remaining <= LOW_SPOOL_THRESHOLD:
@@ -289,6 +325,9 @@ def on_shutdown(signum, frame):
 
 signal.signal(signal.SIGTERM, on_shutdown)
 signal.signal(signal.SIGINT, on_shutdown)
+
+# Log active mode at startup so it's visible in systemd journal
+logging.info(f"Starting NFC Spoolman Middleware (TOOLHEAD_MODE: {TOOLHEAD_MODE})")
 
 # Connect to the MQTT broker
 logging.info(f"Connecting to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}...")

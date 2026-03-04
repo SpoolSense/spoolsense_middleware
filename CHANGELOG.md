@@ -4,7 +4,7 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
-## [Unreleased]
+## [1.3.0] - 2026-03-04
 
 ### Added
 - **`TOOLHEAD_MODE` config variable** — middleware now supports `"single"` and `"toolchanger"` modes. Single mode works exactly as before — scan a tag, set the active spool, done. Toolchanger mode stores spool IDs per toolhead via `SAVE_VARIABLE` and lets the Klipper toolchange macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange. The install script will ask this question first and configure everything accordingly.
