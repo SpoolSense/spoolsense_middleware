@@ -463,10 +463,19 @@ confirm "Proceed with install?" || { info "Install cancelled."; exit 0; }
 # ------------------------------------------------------------------------------
 header "Step 3 of 4 — Installing dependencies"
 echo
-info "Installing paho-mqtt and requests..."
-pip3 install paho-mqtt requests --break-system-packages --quiet && \
-    success "Dependencies installed" || \
-    { error "pip3 install failed — check your Python environment"; exit 1; }
+info "Checking Python dependencies..."
+MISSING_DEPS=()
+python3 -c "import paho.mqtt.client" 2>/dev/null || MISSING_DEPS+=("paho-mqtt")
+python3 -c "import requests" 2>/dev/null || MISSING_DEPS+=("requests")
+
+if [[ ${#MISSING_DEPS[@]} -eq 0 ]]; then
+    success "Dependencies already installed (paho-mqtt, requests)"
+else
+    info "Installing missing dependencies: ${MISSING_DEPS[*]}..."
+    pip3 install "${MISSING_DEPS[@]}" --break-system-packages --quiet && \
+        success "Dependencies installed: ${MISSING_DEPS[*]}" || \
+        { error "pip3 install failed — check your Python environment"; exit 1; }
+fi
 
 # ------------------------------------------------------------------------------
 # Write listener + service
@@ -532,12 +541,12 @@ echo -e "  Check service status:  ${BOLD}sudo systemctl status ${SERVICE_NAME}${
 echo -e "  Follow logs:           ${BOLD}journalctl -u ${SERVICE_NAME} -f${RESET}"
 echo -e "  Reconfigure/uninstall: ${BOLD}bash scripts/install-beta.sh${RESET}"
 echo
-echo -e "${BOLD}Klipper setup — add to your printer.cfg:${RESET}"
+echo -e "${BOLD}Klipper setup:${RESET}"
 if [[ "$TOOLHEAD_MODE" == "toolchanger" ]]; then
-    echo -e "  ${CYAN}[include klipper/toolhead_macros_example.cfg]${RESET}"
-    echo -e "  SET_ACTIVE_SPOOL / CLEAR_ACTIVE_SPOOL are handled automatically"
-    echo -e "  by klipper-toolchanger at each toolchange — no further changes needed."
+    echo -e "  Please check ${CYAN}klipper/toolhead_macros_example.cfg${RESET} for the changes"
+    echo -e "  required per toolhead config in your klipper-toolchanger directory."
 else
+    echo -e "  Add the following to your printer.cfg:"
     echo -e "  ${CYAN}[include klipper/spoolman_macros.cfg]${RESET}"
 fi
 echo
