@@ -222,8 +222,16 @@ build_toolheads_str() {
     local custom="$2"
     if [[ "$mode" == "single" ]]; then
         echo '["T0"]'
-    elif [[ "$mode" == "madmax" ]]; then
-        echo '["T0", "T1", "T2", "T3"]'
+    elif [[ "$mode" == "ktc" ]]; then
+        # Build T0..T(n-1) based on count
+        local count="$custom"
+        local result='['
+        for (( i=0; i<count; i++ )); do
+            if [[ $i -gt 0 ]]; then result+=', '; fi
+            result+="\"T${i}\""
+        done
+        result+=']'
+        echo "$result"
     else
         # Custom — user provided comma-separated names, build Python list
         local result='['
@@ -287,19 +295,24 @@ echo
 
 echo -e "${BOLD}Toolhead mode:${RESET}"
 echo -e "  ${BOLD}1)${RESET} Single toolhead"
-echo -e "  ${BOLD}2)${RESET} MadMax Toolchanger (T0–T3)"
+echo -e "  ${BOLD}2)${RESET} KTC (e.g. MadMax / StealthChanger — T0, T1, ...)"
 echo -e "  ${BOLD}3)${RESET} Custom"
 echo -en "${BOLD}Choose [1/2/3]: ${RESET}"
 read -r th_choice
 
 case "$th_choice" in
     1) TH_MODE="single"; TH_CUSTOM="" ;;
-    2) TH_MODE="madmax"; TH_CUSTOM="" ;;
+    2)
+        TH_MODE="ktc"
+        echo -en "${BOLD}How many toolheads? ${RESET}"
+        read -r th_count
+        TH_CUSTOM="$th_count"
+        ;;
     3)
         TH_MODE="custom"
         TH_CUSTOM=$(prompt_required "Enter toolhead names (comma-separated, e.g. tool_carriage_0, tool_carriage_1)")
         ;;
-    *) warn "Invalid choice, defaulting to MadMax (T0–T3)"; TH_MODE="madmax"; TH_CUSTOM="" ;;
+    *) warn "Invalid choice, defaulting to KTC 4 toolheads (T0–T3)"; TH_MODE="ktc"; TH_CUSTOM="4" ;;
 esac
 
 TOOLHEADS_STR=$(build_toolheads_str "$TH_MODE" "$TH_CUSTOM")
