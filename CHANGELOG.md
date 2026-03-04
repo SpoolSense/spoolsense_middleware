@@ -4,6 +4,13 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [1.2.3] - 2026-03-04
+
+### Changed
+- **`TOOLHEADS` config variable** — replaces the hardcoded `["T0", "T1", "T2", "T3"]` list in the subscribe loop. Adjust to match your setup — single toolhead users set `["T0"]`, larger toolchanger setups add entries as needed. Previously the number of toolheads was not configurable without editing code.
+
+---
+
 ## [1.2.2] - 2026-03-04
 
 ### Added
