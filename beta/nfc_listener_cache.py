@@ -48,8 +48,8 @@ MQTT_PORT = 1883
 MQTT_USERNAME = "your_mqtt_username"
 MQTT_PASSWORD = "your_mqtt_password"
 
-# MQTT topic to subscribe to — the # wildcard matches T0, T1, T2, T3
-MQTT_TOPIC = "nfc/toolhead/#"
+# Toolhead identifiers — e.g. ["T0"] for single, ["T0", "T1", "T2", "T3"] for quad toolchanger
+TOOLHEADS = ["T0", "T1", "T2", "T3"]
 
 # URL of your Spoolman instance (default port is 7912)
 SPOOLMAN_URL = "http://YOUR_SPOOLMAN_IP:7912"  # e.g. "http://192.168.1.101:7912"
@@ -231,12 +231,9 @@ def on_connect(client, userdata, flags, rc):
         # Announce middleware is online — published here so it only fires once
         # the broker has acknowledged the connection (not just after TCP connect)
         client.publish("nfc/middleware/online", "true", qos=1, retain=True)
-        # Subscribe to toolhead NFC scan topics only (T0, T1, T2, T3)
-        # We use a specific pattern to avoid receiving our own colour messages
-        # which are published to nfc/toolhead/T0/color etc.
-        for t in ["T0", "T1", "T2", "T3"]:
+        for t in TOOLHEADS:
             client.subscribe(f"nfc/toolhead/{t}")
-        logging.info("Subscribed to nfc/toolhead/T0-T3")
+        logging.info(f"Subscribed to nfc/toolhead/ for {', '.join(TOOLHEADS)}")
     else:
         logging.error(f"MQTT connection failed with code {rc}")
 
