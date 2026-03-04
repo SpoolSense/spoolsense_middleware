@@ -57,15 +57,8 @@ The middleware already knows when a spool is low or when an unknown tag is scann
 
 ## Klipper
 
-**`TOOLHEAD_MODE` config variable for single vs. toolchanger setups**
-Automatic spool activation via toolchange macros already works correctly for klipper-toolchanger users — tested and confirmed that `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` fire on every toolchange and Spoolman tracks filament usage per-spool throughout a multi-toolhead print. No Klipper macro changes needed for toolchanger users.
-
-The remaining work is adding a `TOOLHEAD_MODE` config variable (`"single"` or `"toolchanger"`) to the middleware so single toolhead users have a clean, clearly scoped setup:
-
-- `single` — scan a tag, set the active spool, done. No toolchanger-specific config or macros needed.
-- `toolchanger` — middleware stores spool IDs per toolhead via `SAVE_VARIABLE`. Klipper macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange.
-
-The install script should ask this question upfront and configure everything accordingly so users never have to touch toolchanger-specific config they don't need.
+~~**`TOOLHEAD_MODE` config variable for single vs. toolchanger setups**
+Automatic spool activation via toolchange macros already works correctly for klipper-toolchanger users — tested and confirmed that `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` fire on every toolchange and Spoolman tracks filament usage per-spool throughout a multi-toolhead print. No Klipper macro changes needed for toolchanger users. `TOOLHEAD_MODE` config variable added to middleware (`"single"` or `"toolchanger"`). Single mode calls `SET_ACTIVE_SPOOL` directly on scan. Toolchanger mode skips it and lets klipper-toolchanger handle activation at each toolchange.~~ ✅ Done — `TOOLHEAD_MODE` added to middleware in v1.3.0.
 
 ## Installation
 
