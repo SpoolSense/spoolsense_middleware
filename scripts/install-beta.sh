@@ -79,6 +79,43 @@ prompt_password() {
     echo "$value"
 }
 
+normalize_spoolman_url() {
+    # Accept bare IP, IP:port, or full http:// URL
+    # Defaults to port 7912 if no port given
+    local input="$1"
+    # Strip trailing slash
+    input="${input%/}"
+    # If already has http://, check if port is present
+    if [[ "$input" == http://* ]]; then
+        # Has scheme — check if port is included
+        local host="${input#http://}"
+        if [[ "$host" == *:* ]]; then
+            echo "$input"
+        else
+            echo "${input}:7912"
+        fi
+    else
+        # No scheme — check if port is included
+        if [[ "$input" == *:* ]]; then
+            echo "http://${input}"
+        else
+            echo "http://${input}:7912"
+        fi
+    fi
+}
+
+normalize_moonraker_url() {
+    # Accept bare IP or full http:// URL — no default port (Moonraker uses 80)
+    local input="$1"
+    # Strip trailing slash
+    input="${input%/}"
+    if [[ "$input" == http://* ]]; then
+        echo "$input"
+    else
+        echo "http://${input}"
+    fi
+}
+
 # ------------------------------------------------------------------------------
 # Constants
 # ------------------------------------------------------------------------------
@@ -377,8 +414,10 @@ MQTT_USERNAME=$(prompt_required "MQTT username")
 MQTT_PASSWORD=$(prompt_password "MQTT password")
 
 echo
-SPOOLMAN_URL=$(prompt_required "Spoolman URL (e.g. http://192.168.1.100:7912)")
-MOONRAKER_URL=$(prompt_required "Moonraker URL (e.g. http://192.168.1.100)")
+SPOOLMAN_RAW=$(prompt_required "Spoolman IP or URL (e.g. 192.168.1.100 or http://192.168.1.100:7912)")
+SPOOLMAN_URL=$(normalize_spoolman_url "$SPOOLMAN_RAW")
+MOONRAKER_RAW=$(prompt_required "Moonraker IP or URL (e.g. 192.168.1.100 or http://192.168.1.100)")
+MOONRAKER_URL=$(normalize_moonraker_url "$MOONRAKER_RAW")
 LOW_SPOOL_THRESHOLD=$(prompt "Low spool warning threshold (grams)" "100")
 
 # ------------------------------------------------------------------------------
