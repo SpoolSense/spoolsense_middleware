@@ -1,3 +1,7 @@
+# User config — never overwrite on git pull
+# config.example.yaml is the tracked template
+config.yaml
+
 # ESPHome secrets
 esphome/secrets.yaml
 

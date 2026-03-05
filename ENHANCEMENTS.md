@@ -30,6 +30,9 @@ The middleware has no reconnect logic. If the MQTT broker goes down (Home Assist
 ~~**Configurable low spool threshold**
 The 100g low spool warning is hardcoded. Should be a variable at the top of the config alongside the other settings — people running 250g mini spools have very different needs than someone running 3kg spools.~~ ✅ Done — `LOW_SPOOL_THRESHOLD` added to middleware config.
 
+~~**External config file**
+All configuration (MQTT credentials, Spoolman/Moonraker URLs, toolhead mode, toolheads list, low spool threshold) was hardcoded at the top of `nfc_listener.py`. This meant every `git pull` or update could overwrite the user's settings, and made it impossible to use Moonraker's `update_manager` for automatic updates. Config should live in a separate file that's never touched by git.~~ ✅ Done — middleware now loads all settings from `~/nfc_spoolman/config.yaml`. The Python source is safe to overwrite on updates. See `config.example.yaml` for the documented template.
+
 ---
 
 ## ESPHome

@@ -1,0 +1,59 @@
+# =============================================================
+# NFC Spoolman Middleware — Configuration
+# =============================================================
+# Copy this file to ~/nfc_spoolman/config.yaml and fill in your values.
+#
+#   cp config.example.yaml ~/nfc_spoolman/config.yaml
+#
+# The middleware reads ~/nfc_spoolman/config.yaml on startup.
+# This file (config.example.yaml) is a reference template only.
+# =============================================================
+
+# Toolhead mode — controls how spool activation works
+#
+#   single      — calls SET_ACTIVE_SPOOL directly on every NFC scan.
+#                 Use this for single-toolhead printers.
+#
+#   toolchanger — saves spool ID per toolhead and publishes LED colour,
+#                 but does NOT call SET_ACTIVE_SPOOL. klipper-toolchanger
+#                 handles activation automatically at each toolchange.
+#                 Tested on MadMax T0–T3.
+toolhead_mode: "toolchanger"
+
+# Toolhead identifiers — must match your Klipper tool macro names.
+#
+# Single toolhead:
+#   toolheads: ["T0"]
+#
+# MadMax / StealthChanger:
+#   toolheads: ["T0", "T1", "T2", "T3"]
+#
+# KTC with custom names:
+#   toolheads: ["tool_carriage_0", "tool_carriage_1"]
+toolheads:
+  - "T0"
+  - "T1"
+  - "T2"
+  - "T3"
+
+# MQTT broker — usually your Home Assistant server running Mosquitto
+mqtt:
+  broker: "YOUR_HOME_ASSISTANT_IP"    # e.g. "192.168.1.100"
+  port: 1883
+  username: "your_mqtt_username"
+  password: "your_mqtt_password"
+
+# Spoolman instance URL (default port is 7912)
+spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
+
+# Moonraker / Klipper instance URL
+moonraker_url: "http://YOUR_KLIPPER_IP"
+
+# Low spool warning threshold in grams.
+# When remaining filament drops to this level or below, the LED
+# will pulse to indicate the spool is running low.
+# Adjust based on your spool sizes:
+#   50  — mini/sample spools (250g)
+#   100 — standard 1kg spools (default)
+#   200 — early warning for large prints
+low_spool_threshold: 100

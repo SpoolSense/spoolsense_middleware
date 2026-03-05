@@ -4,6 +4,29 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [1.3.0] - 2026-03-05
+
+### Added
+- **External config file** — all middleware settings now live in `~/nfc_spoolman/config.yaml` instead of being hardcoded in the Python source. This means `nfc_listener.py` is safe to overwrite on updates (`git pull`, Moonraker `update_manager`, etc.) without losing your configuration. The middleware validates the config on startup and exits with clear error messages if required fields are missing or still have placeholder values.
+- **`config.example.yaml`** — documented template with all available options and sensible defaults. Copy to `~/nfc_spoolman/config.yaml` and fill in your values.
+- **PyYAML dependency** — `pyyaml` added to required Python packages for config file parsing.
+- **Startup config logging** — middleware now logs the loaded config summary (toolhead mode, toolheads, Spoolman/Moonraker URLs, threshold) at startup for easier debugging via `journalctl`.
+
+### Changed
+- **Config no longer lives in `nfc_listener.py`** — the hardcoded configuration block at the top of the file has been replaced with a `load_config()` function that reads from the external YAML file. Existing users should copy their current values into a new `config.yaml` before updating.
+- **`.gitignore`** — `config.yaml` is now ignored so user config is never overwritten by `git pull`.
+- **`docs/middleware-setup.md`** — rewritten for the new config file workflow.
+- **`scripts/install-beta.sh`** (beta) — updated to write `config.yaml` instead of sed-patching the Python source, and added `pyyaml` to dependency checks.
+
+### Migration from v1.2.x
+1. Create your config file: `cp middleware/config.example.yaml ~/nfc_spoolman/config.yaml`
+2. Copy your existing values (MQTT, Spoolman URL, Moonraker URL, etc.) into `config.yaml`
+3. Copy the new `nfc_listener.py`: `cp middleware/nfc_listener.py ~/nfc_spoolman/`
+4. Install pyyaml: `pip3 install pyyaml --break-system-packages`
+5. Restart the service: `sudo systemctl restart nfc-spoolman`
+
+---
+
 ## [1.2.2] - 2026-03-04
 
 ### Added

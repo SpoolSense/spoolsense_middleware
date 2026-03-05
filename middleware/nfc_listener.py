@@ -6,6 +6,9 @@ Listens for NFC tag scans published via MQTT by ESPHome-flashed ESP32-S3 devices
 When a tag is scanned, it looks up the spool in Spoolman by NFC UID, then updates
 Klipper and Moonraker so filament usage is tracked per toolhead.
 
+Configuration is loaded from ~/nfc_spoolman/config.yaml — see config.example.yaml
+for a documented template with all available options.
+
 TOOLHEAD_MODE controls how spool activation works:
 
   single      — Middleware calls SET_ACTIVE_SPOOL directly on every scan.
@@ -40,42 +43,124 @@ import json
 import logging
 import signal
 import sys
+import os
+import yaml
 
 # Configure logging to show timestamps and log level
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 # ============================================================
-# Configuration — update these values for your setup
+# Configuration — loaded from ~/nfc_spoolman/config.yaml
 # ============================================================
 
-# single     — single toolhead printer, SET_ACTIVE_SPOOL called on every scan
-# toolchanger — multi-toolhead printer, klipper-toolchanger handles SET_ACTIVE_SPOOL
-TOOLHEAD_MODE = "toolchanger"
+CONFIG_PATH = os.path.expanduser("~/nfc_spoolman/config.yaml")
 
-# IP address of your Home Assistant server (running Mosquitto MQTT broker)
-MQTT_BROKER = "YOUR_HOME_ASSISTANT_IP"       # e.g. "192.168.1.100"
+# Default values — used when a key is missing from config.yaml.
+# Required fields default to None and are validated after loading.
+DEFAULTS = {
+    "toolhead_mode": "toolchanger",
+    "toolheads": ["T0", "T1", "T2", "T3"],
+    "mqtt": {
+        "broker": None,
+        "port": 1883,
+        "username": None,
+        "password": None,
+    },
+    "spoolman_url": None,
+    "moonraker_url": None,
+    "low_spool_threshold": 100,
+}
 
-# Default MQTT port — change only if you've configured a custom port
-MQTT_PORT = 1883
 
-# Your Home Assistant username and password (used for MQTT authentication)
-MQTT_USERNAME = "your_mqtt_username"
-MQTT_PASSWORD = "your_mqtt_password"
+def load_config():
+    """
+    Load and validate configuration from ~/nfc_spoolman/config.yaml.
 
-# Toolhead identifiers — must match your Klipper tool macro names
-# e.g. ["T0"] for single, ["T0", "T1", "T2", "T3"] for MadMax Toolchanger
-# KTC users with custom tool names: ["tool_carriage_0", "tool_carriage_1", ...]
-TOOLHEADS = ["T0", "T1", "T2", "T3"]
+    Merges user config with DEFAULTS so new config keys added in future
+    releases don't break existing installs — only required fields must
+    be present.
 
-# URL of your Spoolman instance (default port is 7912)
-SPOOLMAN_URL = "http://YOUR_SPOOLMAN_IP:7912"  # e.g. "http://192.168.1.101:7912"
+    Returns:
+        dict: The merged configuration.
 
-# URL of your Klipper/Moonraker instance
-MOONRAKER_URL = "http://YOUR_KLIPPER_IP"       # e.g. "http://192.168.1.102"
+    Exits:
+        If config.yaml is missing, unreadable, or missing required fields.
+    """
+    if not os.path.exists(CONFIG_PATH):
+        logging.error(f"Config file not found: {CONFIG_PATH}")
+        logging.error("Copy the template to get started:")
+        logging.error("  cp config.example.yaml ~/nfc_spoolman/config.yaml")
+        sys.exit(1)
 
-# Remaining filament threshold in grams — LED will breathe when a spool hits this level or below
-# Adjust based on your typical spool sizes (e.g. 50 for mini spools, 200 for cautious early warning)
-LOW_SPOOL_THRESHOLD = 100
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            user_config = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        logging.error(f"Failed to parse {CONFIG_PATH}: {e}")
+        sys.exit(1)
+    except OSError as e:
+        logging.error(f"Failed to read {CONFIG_PATH}: {e}")
+        sys.exit(1)
+
+    # Merge MQTT settings — user values override defaults
+    mqtt_defaults = DEFAULTS["mqtt"].copy()
+    mqtt_user = user_config.get("mqtt", {}) or {}
+    mqtt_config = {**mqtt_defaults, **mqtt_user}
+
+    # Build the final merged config
+    config = {
+        "toolhead_mode": user_config.get("toolhead_mode", DEFAULTS["toolhead_mode"]),
+        "toolheads": user_config.get("toolheads", DEFAULTS["toolheads"]),
+        "mqtt": mqtt_config,
+        "spoolman_url": user_config.get("spoolman_url", DEFAULTS["spoolman_url"]),
+        "moonraker_url": user_config.get("moonraker_url", DEFAULTS["moonraker_url"]),
+        "low_spool_threshold": user_config.get("low_spool_threshold", DEFAULTS["low_spool_threshold"]),
+    }
+
+    # Validate required fields — catch both missing values and unchanged placeholders
+    missing = []
+    if not config["mqtt"]["broker"] or config["mqtt"]["broker"] == "YOUR_HOME_ASSISTANT_IP":
+        missing.append("mqtt.broker")
+    if not config["mqtt"]["username"] or config["mqtt"]["username"] == "your_mqtt_username":
+        missing.append("mqtt.username")
+    if not config["mqtt"]["password"] or config["mqtt"]["password"] == "your_mqtt_password":
+        missing.append("mqtt.password")
+    if not config["spoolman_url"] or "YOUR_SPOOLMAN_IP" in str(config["spoolman_url"]):
+        missing.append("spoolman_url")
+    if not config["moonraker_url"] or "YOUR_KLIPPER_IP" in str(config["moonraker_url"]):
+        missing.append("moonraker_url")
+
+    if missing:
+        logging.error(f"Missing or unconfigured values in {CONFIG_PATH}:")
+        for field in missing:
+            logging.error(f"  - {field}")
+        logging.error(f"Edit {CONFIG_PATH} and fill in your values.")
+        sys.exit(1)
+
+    # Validate toolhead_mode
+    if config["toolhead_mode"] not in ("single", "toolchanger"):
+        logging.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be 'single' or 'toolchanger'")
+        sys.exit(1)
+
+    # Strip trailing slashes from URLs
+    config["spoolman_url"] = config["spoolman_url"].rstrip("/")
+    config["moonraker_url"] = config["moonraker_url"].rstrip("/")
+
+    return config
+
+
+# Load config at startup
+cfg = load_config()
+
+TOOLHEAD_MODE = cfg["toolhead_mode"]
+TOOLHEADS = cfg["toolheads"]
+MQTT_BROKER = cfg["mqtt"]["broker"]
+MQTT_PORT = cfg["mqtt"]["port"]
+MQTT_USERNAME = cfg["mqtt"]["username"]
+MQTT_PASSWORD = cfg["mqtt"]["password"]
+SPOOLMAN_URL = cfg["spoolman_url"]
+MOONRAKER_URL = cfg["moonraker_url"]
+LOW_SPOOL_THRESHOLD = cfg["low_spool_threshold"]
 
 # ============================================================
 
@@ -289,7 +374,7 @@ def on_message(client, userdata, msg):
         else:
             # No spool found — user needs to register this NFC tag in Spoolman
             logging.warning(f"No spool found in Spoolman for UID: {uid}")
-            logging.warning(f"Go to Spoolman and add this UID to a spool's nfc_id field.")
+            logging.warning("Go to Spoolman and add this UID to a spool's nfc_id field.")
             # Publish error status — ESPHome will flash red to indicate unknown tag
             publish_color(client, toolhead, "error")
 
@@ -326,8 +411,13 @@ def on_shutdown(signum, frame):
 signal.signal(signal.SIGTERM, on_shutdown)
 signal.signal(signal.SIGINT, on_shutdown)
 
-# Log active mode at startup so it's visible in systemd journal
+# Log active config at startup so it's visible in systemd journal
 logging.info(f"Starting NFC Spoolman Middleware (TOOLHEAD_MODE: {TOOLHEAD_MODE})")
+logging.info(f"Config loaded from {CONFIG_PATH}")
+logging.info(f"Toolheads: {', '.join(TOOLHEADS)}")
+logging.info(f"Spoolman: {SPOOLMAN_URL}")
+logging.info(f"Moonraker: {MOONRAKER_URL}")
+logging.info(f"Low spool threshold: {LOW_SPOOL_THRESHOLD}g")
 
 # Connect to the MQTT broker
 logging.info(f"Connecting to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}...")
