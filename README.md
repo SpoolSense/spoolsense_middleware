@@ -45,7 +45,9 @@ Tap an NFC tag on your spool and walk away. That's really it — everything else
 
 **Survives reboots** — spool IDs are saved to disk via Klipper's save_variables system and restored automatically on startup. Pull the power, come back the next day, and everything is still assigned correctly.
 
-**Scales from one toolhead to four** — originally built for multi-toolhead setups like MadMax, StealthChanger, and other Voron toolchanger systems, but there's nothing stopping you from running a single reader on a standard setup. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Both Fluidd and Mainsail support per-toolhead spool status natively via variable_spool_id in the toolchange macros (Mainsail added this in July 2024).
+**Scales from single to as many toolheads as you need** — originally built for multi-toolhead setups like MadMax, StealthChanger, and other Voron toolchanger systems, but there's nothing stopping you from running a single reader on a standard setup. Each toolhead is completely independent with its own reader and ESP32, but they all feed into the same Spoolman instance. Configure the `TOOLHEADS` list in the middleware to match your setup — `["T0"]` for single, or as many as you're running. Both Fluidd and Mainsail support per-toolhead spool status natively via `variable_spool_id` in the toolchange macros (Mainsail added this in July 2024).
+
+**Single or toolchanger mode** — set `TOOLHEAD_MODE` in the middleware config to match your printer. Single mode calls `SET_ACTIVE_SPOOL` directly on every scan. Toolchanger mode stores the spool ID per toolhead and lets klipper-toolchanger handle activation automatically at each toolchange — tested and confirmed working on MadMax T0–T3.
 
 **Printable case included** — a custom case is in the `3mf/` folder designed specifically for the Waveshare ESP32-S3-Zero + PN532. Print it clear so the LED glows through. Print the scan target in red so you know where to tap.
 
@@ -56,6 +58,8 @@ Each toolhead's onboard WS2812 RGB LED provides visual feedback. This project is
 
 - **3x white flash** — NFC tag successfully scanned
 - **Solid spool color** — displays the filament color pulled from Spoolman after a successful scan
+- **3x red flash** — tag scanned but not found in Spoolman (unknown or unregistered tag)
+- **Breathing in spool color** — spool is running low (at or below `LOW_SPOOL_THRESHOLD`, default 100g)
 
 The LED color is published via MQTT and driven by the middleware using the `color_hex` value stored in Spoolman for each spool.
 
@@ -102,11 +106,22 @@ Modifications made:
 ├── middleware/       # Python MQTT listener script
 ├── klipper/          # Klipper macro configs
 ├── 3mf/              # 3D printable case files
-└── docs/             # Setup guides
+├── docs/             # Setup guides
+├── scripts/          # Install script (beta)
+└── beta/             # Beta features and design docs
 ```
 
 ## Quick Start
 
+**Option A — Interactive install script (beta):**
+```bash
+git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+cd nfc-toolchanger-spoolman
+bash scripts/install-beta.sh
+```
+The script walks you through configuration, installs dependencies, sets up the systemd service, and generates ESPHome YAML files for each scanner.
+
+**Option B — Manual setup:**
 1. Wire the PN532 to each ESP32-S3 (see docs/wiring.md)
 2. Flash ESPHome configs (see docs/esphome-setup.md)
 3. Deploy middleware script (see docs/middleware-setup.md)
