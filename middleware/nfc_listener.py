@@ -208,18 +208,20 @@ def set_active_spool(spool_id, toolhead):
 
     single mode:
         Calls Moonraker's /server/spoolman/spool_id to set the globally active spool,
-        then updates the toolhead macro variable and saves to disk.
+        then saves the spool ID to disk for persistence across reboots.
+        Does NOT call SET_GCODE_VARIABLE — single toolhead printers don't have
+        T0-T3 gcode macros, so that call would error.
 
     toolchanger mode:
         Skips the SET_ACTIVE_SPOOL call — klipper-toolchanger handles
         CLEAR_ACTIVE_SPOOL / SET_ACTIVE_SPOOL automatically at each toolchange.
-        Only updates the toolhead macro variable and saves to disk so the correct
+        Updates the toolhead macro variable (SET_GCODE_VARIABLE) so Fluidd/Mainsail
+        can display the correct spool per toolhead, and saves to disk so the correct
         spool ID is available when the next toolchange fires.
 
     Both modes:
-        Updates SET_GCODE_VARIABLE on the toolhead macro so Fluidd/Mainsail can
-        display the correct spool per toolhead. Saves the spool ID via SAVE_VARIABLE
-        so RESTORE_SPOOL_IDS can restore assignments after a reboot or power cut.
+        Saves the spool ID via SAVE_VARIABLE so the restore macro can re-activate
+        the correct spool after a reboot or power cut.
 
     Args:
         spool_id (int): The Spoolman spool ID to set.
@@ -244,14 +246,17 @@ def set_active_spool(spool_id, toolhead):
 
         # Update the spool_id variable on the specific toolhead macro
         # This is what makes Fluidd/Mainsail show the correct spool per toolhead
-        macro = f"T{toolhead[-1]}"  # extracts digit from T0, T1, T2, T3
-        response2 = requests.post(
-            f"{MOONRAKER_URL}/printer/gcode/script",
-            json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"},
-            timeout=5
-        )
-        response2.raise_for_status()
-        logging.info(f"Updated {macro} spool_id variable to {spool_id}")
+        # Only needed in toolchanger mode — single toolhead printers don't have
+        # T0-T3 gcode macros, so this call would error
+        if TOOLHEAD_MODE == "toolchanger":
+            macro = f"T{toolhead[-1]}"  # extracts digit from T0, T1, T2, T3
+            response2 = requests.post(
+                f"{MOONRAKER_URL}/printer/gcode/script",
+                json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"},
+                timeout=5
+            )
+            response2.raise_for_status()
+            logging.info(f"Updated {macro} spool_id variable to {spool_id}")
 
         # Persist the spool ID to disk using Klipper's save_variables system
         # RESTORE_SPOOL_IDS reads these on boot to restore spool assignments
