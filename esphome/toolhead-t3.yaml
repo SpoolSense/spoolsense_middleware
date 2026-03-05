@@ -147,6 +147,7 @@ mqtt:
                     auto call = id(status_led).turn_on();
                     call.set_effect("none");
                     call.set_rgb(r / 255.0, g / 255.0, b / 255.0);
+                    call.set_transition_length(0);
                     call.perform();
                   } else if (hex == "000000") {
                     id(status_led).turn_off().perform();
@@ -190,7 +191,6 @@ light:
     num_leds: 1
     name: "T3 Status LED"
     id: status_led
-    default_transition_length: 0s
     effects:
       # Breathing effect for low spool warning — pulses between 10% and 80% brightness
       # Uses the current LED colour (filament colour) so it stays visually meaningful
