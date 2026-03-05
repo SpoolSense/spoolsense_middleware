@@ -64,6 +64,19 @@ wifi:
 # Captive portal serves the WiFi config page when in fallback hotspot mode
 captive_portal:
 
+# Globals — store current filament RGB so the low spool pulse effect
+# inherits the correct colour when activated
+globals:
+  - id: current_r
+    type: float
+    initial_value: '0.0'
+  - id: current_g
+    type: float
+    initial_value: '0.0'
+  - id: current_b
+    type: float
+    initial_value: '0.0'
+
 # MQTT — publishes NFC scan events and subscribes to colour updates
 # Both the scan publish and colour subscription live in this single block
 mqtt:
@@ -126,6 +139,10 @@ mqtt:
                     int r = stoi(hex.substr(0, 2), nullptr, 16);
                     int g = stoi(hex.substr(2, 2), nullptr, 16);
                     int b = stoi(hex.substr(4, 2), nullptr, 16);
+                    // Store RGB globally so low spool effect inherits the correct colour
+                    id(current_r) = r / 255.0;
+                    id(current_g) = g / 255.0;
+                    id(current_b) = b / 255.0;
                     // Set the LED to the filament colour, clearing any active effect
                     auto call = id(status_led).turn_on();
                     call.set_effect("none");
@@ -144,6 +161,9 @@ mqtt:
               # Start breathing effect — pulses the current filament colour
               - light.turn_on:
                   id: status_led
+                  red: !lambda 'return id(current_r);'
+                  green: !lambda 'return id(current_g);'
+                  blue: !lambda 'return id(current_b);'
                   effect: "Low Spool Warning"
             else:
               # Clear breathing effect — restore solid colour
