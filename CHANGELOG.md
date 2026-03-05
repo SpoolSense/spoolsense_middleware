@@ -11,6 +11,7 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 - **`config.example.yaml`** — documented template with all available options and sensible defaults. Copy to `~/nfc_spoolman/config.yaml` and fill in your values.
 - **PyYAML dependency** — `pyyaml` added to required Python packages for config file parsing.
 - **Startup config logging** — middleware now logs the loaded config summary (toolhead mode, toolheads, Spoolman/Moonraker URLs, threshold) at startup for easier debugging via `journalctl`.
+- **`RESTORE_SPOOL` macro for single toolhead mode** — `spoolman_macros.cfg` now includes a delayed gcode that re-activates the last scanned spool after a Klipper restart. Previously, single toolhead users lost their active spool assignment on reboot even though the middleware was saving it to disk.
 
 ### Changed
 - **Config no longer lives in `nfc_listener.py`** — the hardcoded configuration block at the top of the file has been replaced with a `load_config()` function that reads from the external YAML file. Existing users should copy their current values into a new `config.yaml` before updating.
