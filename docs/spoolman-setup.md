@@ -35,6 +35,24 @@ For each spool:
 
 > **Note:** Spoolman stores the nfc_id with extra quotes internally. The middleware handles this automatically by stripping them during comparison.
 
+## Low Spool Warning
+
+The LED breathing effect and low spool warning require Spoolman to track filament usage **by weight in grams**. If a spool is only tracking by length (meters), the middleware cannot read `remaining_weight` and the warning will never fire.
+
+To enable weight-based tracking:
+
+1. Go to Spoolman → **Filaments**
+2. Find the filament type used by the spool
+3. Edit it and set **Spool Weight** — this is the weight of a full new spool in grams (e.g. `1000` for a 1kg spool)
+4. Go to Spoolman → **Spools**
+5. Edit the spool and set **Used Weight** to reflect how much has been used, or set **Remaining Weight** directly
+
+Once `spool_weight` is set on the filament profile, Spoolman will calculate and return `remaining_weight` in grams. The middleware compares this against `LOW_SPOOL_THRESHOLD` (default: 100g) and triggers the breathing LED effect if the spool is at or below that level.
+
+> **Note:** If your spool is showing remaining length in meters instead of grams in Mainsail or Fluidd, this means `spool_weight` is not set on the filament profile. Set it and the display will switch to grams.
+
+---
+
 ## Moonraker Integration
 
 Add the following to your `moonraker.conf`:
