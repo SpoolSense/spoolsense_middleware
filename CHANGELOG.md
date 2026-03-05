@@ -32,7 +32,7 @@ Optionally surface middleware status in Home Assistant — see [middleware-setup
 
 ---
 
-## [1.1.0] - 2026-03-02
+## [1.2.0] - 2026-03-02
 
 ### Added
 - **Configurable low spool threshold** — `LOW_SPOOL_THRESHOLD` variable added to middleware config (default: 100g). Adjust to suit your spool sizes — bump up for an earlier warning, drop down for mini spools.
