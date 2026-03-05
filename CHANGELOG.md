@@ -7,31 +7,21 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 ## [1.3.0] - 2026-03-04
 
 ### Added
-- **`TOOLHEAD_MODE` config variable** — middleware now supports `"single"` and `"toolchanger"` modes. Single mode works exactly as before — scan a tag, set the active spool, done. Toolchanger mode stores spool IDs per toolhead via `SAVE_VARIABLE` and lets the Klipper toolchange macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange. The install script will ask this question first and configure everything accordingly.
-
-### Confirmed
-- **Automatic spool tracking already works for toolchanger users** — tested and confirmed that Spoolman correctly tracks filament usage per spool throughout a multi-toolhead print. No Klipper macro changes were needed. `ktc-macro.md` removed from `beta/` as the implementation it described is already handled natively by klipper-toolchanger.
-
-### Removed
-- `beta/ktc-macro.md` — design doc for KTC macro changes, removed as the behavior it described is already working correctly without modification
-
----
-
-## [1.2.3] - 2026-03-04
-
-### Changed
-- **`TOOLHEADS` config variable** — replaces the hardcoded `["T0", "T1", "T2", "T3"]` list in the subscribe loop. Adjust to match your setup — single toolhead users set `["T0"]`, larger toolchanger setups add entries as needed. Previously the number of toolheads was not configurable without editing code.
-
----
-
-## [1.2.2] - 2026-03-04
-
-### Added
+- **`TOOLHEAD_MODE` config variable** — middleware now supports `"single"` and `"toolchanger"` modes. Single mode works exactly as before — scan a tag, set the active spool, done. Toolchanger mode stores spool IDs per toolhead via `SAVE_VARIABLE` and lets the Klipper toolchange macros handle `SET_ACTIVE_SPOOL` / `CLEAR_ACTIVE_SPOOL` automatically at each toolchange.
 - **MQTT Last Will and Testament (LWT)** — broker now automatically publishes `false` to `nfc/middleware/online` if the middleware crashes or loses connection unexpectedly, with QoS 1 and retain so subscribers always have current state
-- **Online status publishing** — middleware publishes `true` to `nfc/middleware/online` on successful broker connection (fired from `on_connect` callback, not after TCP connect, so it only fires once the broker has acknowledged the connection). On clean shutdown via SIGTERM or SIGINT, publishes `false` before disconnecting
+- **Online status publishing** — middleware publishes `true` to `nfc/middleware/online` on successful broker connection. On clean shutdown via SIGTERM or SIGINT, publishes `false` before disconnecting
 - **Clean shutdown handler** — `SIGTERM` and `SIGINT` now trigger a graceful shutdown that publishes offline status before disconnecting, so a service restart looks different from a crash to any subscribers
 
 Optionally surface middleware status in Home Assistant — see [middleware-setup.md](docs/middleware-setup.md) for the binary sensor config.
+
+### Changed
+- **`TOOLHEADS` config variable** — replaces the hardcoded `["T0", "T1", "T2", "T3"]` list in the subscribe loop. Adjust to match your setup — single toolhead users set `["T0"]`, larger toolchanger setups add entries as needed.
+
+### Confirmed
+- **Automatic spool tracking works for toolchanger users** — tested and confirmed that Spoolman correctly tracks filament usage per spool throughout a multi-toolhead print with no Klipper macro changes needed.
+
+### Removed
+- `beta/ktc-macro.md` — design doc for KTC macro changes, removed as the behavior it described is already handled natively by klipper-toolchanger
 
 ---
 
