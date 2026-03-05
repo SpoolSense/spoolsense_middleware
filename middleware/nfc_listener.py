@@ -309,6 +309,10 @@ def publish_color(client, toolhead, color_hex):
     ESPHome subscribes to nfc/toolhead/T0/color and sets the onboard WS2812 LED
     to that colour after the scan flash animation completes.
 
+    Published with retain=True so the broker remembers the last colour per toolhead.
+    If the ESP32 reconnects (power cycle, wifi drop) or Klipper restarts, the LED
+    will restore to the correct colour automatically without needing a rescan.
+
     Args:
         client: The MQTT client instance.
         toolhead (str): The toolhead identifier, e.g. 'T0'.
@@ -319,8 +323,8 @@ def publish_color(client, toolhead, color_hex):
     # Ensure the hex string is clean — no '#' prefix
     if color_hex != "error":
         color_hex = color_hex.lstrip("#").upper()
-    client.publish(topic, color_hex)
-    logging.info(f"Published colour #{color_hex} to {topic}")
+    client.publish(topic, color_hex, retain=True)
+    logging.info(f"Published colour #{color_hex} to {topic} (retained)")
 
 
 def on_message(client, userdata, msg):
@@ -373,9 +377,9 @@ def on_message(client, userdata, msg):
             topic_low = f"nfc/toolhead/{toolhead}/low_spool"
             if remaining is not None and remaining <= LOW_SPOOL_THRESHOLD:
                 logging.warning(f"Low spool warning: {name} has {remaining:.1f}g remaining on {toolhead} (threshold: {LOW_SPOOL_THRESHOLD}g)")
-                client.publish(topic_low, "true")
+                client.publish(topic_low, "true", retain=True)
             else:
-                client.publish(topic_low, "false")
+                client.publish(topic_low, "false", retain=True)
         else:
             # No spool found — user needs to register this NFC tag in Spoolman
             logging.warning(f"No spool found in Spoolman for UID: {uid}")
