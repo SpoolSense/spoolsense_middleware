@@ -15,7 +15,7 @@ Set the DIP switches on the PN532 board as follows:
 | SDA       | GPIO1             |
 | SCL       | GPIO2             |
 
-> **Note:** The 3.3V pin on the Waveshare ESP32-S3-Zero is labeled **3U3** on the board.
+> **Note:** The 3.3V pin on the Waveshare ESP32-S3-Zero is labeled **3V3** on the board.
 > Do NOT connect VCC to 5V — the PN532 runs fine on 3.3V.
 
 ### Solder Points on the ESP32-S3-Zero
