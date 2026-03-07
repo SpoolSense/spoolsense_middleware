@@ -1,0 +1,14 @@
+[Unit]
+Description=NFC Spoolman Listener — AFC Edition
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/nfc_spoolman
+ExecStart=/usr/bin/python3 /home/YOUR_USERNAME/nfc_spoolman/nfc_listener.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
