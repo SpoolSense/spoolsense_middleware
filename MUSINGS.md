@@ -52,7 +52,17 @@ After researching AFC's codebase and documentation, the integration turns out to
 
 **AFC already handles Spoolman active spool tracking.** Recent PRs (#568/#576) added `spool_id` to lane data and active spool updates on lane changes. Our middleware in `ams` mode doesn't need to call `SET_ACTIVE_SPOOL` at all — AFC manages that automatically when it loads a lane's filament into the toolhead.
 
-**`afc-spool-scan`** — AFC references a USB QR code scanner implementation that uses the same `SET_NEXT_SPOOL_ID` hook. Our NFC approach is a parallel scanning method using the same integration point — NFC tags instead of QR codes, ESP32 readers instead of USB scanners.
+**`afc-spool-scan` — now reviewed.** The [afc-spool-scan](https://github.com/kekiefer/afc-spool-scan) project by kekiefer is a simple bash script that reads a USB QR code scanner (HID keyboard device) via `evtest`, extracts the Spoolman spool ID from the scanned code, and calls `SET_NEXT_SPOOL_ID SPOOL_ID=<id>` via Moonraker's gcode script API. That's the entire integration — one curl call to Moonraker. AFC handles everything else (lane assignment, Spoolman metadata pull, active spool tracking).
+
+Key takeaway: `afc-spool-scan` uses `SET_NEXT_SPOOL_ID` (not `SET_SPOOL_ID LANE=...`). It doesn't specify a lane — AFC queues the spool ID and assigns it to whichever lane gets loaded next. The workflow is: scan QR code → load filament into a lane → AFC associates the queued spool ID with that lane automatically.
+
+This reveals two integration patterns for our NFC approach:
+
+**Pattern 1 — lane-agnostic (what afc-spool-scan does):** Call `SET_NEXT_SPOOL_ID` after an NFC scan. No lane mapping needed. AFC assigns the spool to whichever lane gets filament loaded next. This would work with a single handheld NFC scanner rather than per-lane mounted readers — scan the spool, then load it into any lane.
+
+**Pattern 2 — lane-aware (our per-lane reader approach):** Since we have a physical reader mounted at each lane, we always know which lane the spool is in. Call `SET_SPOOL_ID LANE=<lane> SPOOL_ID=<id>` directly for immediate, explicit lane assignment. No queuing, no ambiguity.
+
+Pattern 2 is better for our use case — it's more explicit, works automatically when the spool is placed on the respooler, and doesn't require the user to coordinate scan order with load order. But Pattern 1 could be supported as a simpler fallback for users who only want one NFC reader instead of four.
 
 **AFC state is exposed via Moonraker.** AFC's Mainsail integration (PR #2089 to mainsail-crew) confirms that lane states are queryable through Moonraker's object system. This is important for the scan-lock-clear lifecycle (see below).
 
