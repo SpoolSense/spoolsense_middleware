@@ -128,6 +128,36 @@ The script walks you through configuration, installs dependencies, sets up the s
 4. Add Klipper macros (see docs/klipper-setup.md)
 5. Configure Spoolman extra fields (see docs/spoolman-setup.md)
 
+## Automatic Updates via Moonraker
+
+You can add this project to Moonraker's `update_manager` so it appears alongside Klipper, Moonraker, and your other components in Fluidd/Mainsail's update panel. When an update is available, click update and Moonraker will pull the latest code and restart the middleware service automatically.
+
+Add the following to your `moonraker.conf`:
+
+```ini
+[update_manager nfc-spoolman]
+type: git_repo
+path: ~/nfc-toolchanger-spoolman
+origin: https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+primary_branch: master
+managed_services: nfc-spoolman
+```
+
+Then clone the repo to your home directory if you haven't already:
+
+```bash
+cd ~
+git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+```
+
+Restart Moonraker to pick up the new config:
+
+```bash
+sudo systemctl restart moonraker
+```
+
+The project should now appear in your update manager panel. Your configuration in `~/nfc_spoolman/config.yaml` is separate from the repo and will never be overwritten by updates.
+
 ## License
 
 GPL-3.0
