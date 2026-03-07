@@ -40,47 +40,73 @@ The core NFC flow doesn't change: tag scanned → UID published via MQTT → mid
 
 **`toolchanger`** — multiple toolheads (MadMax, StealthChanger, etc.), spool IDs stored per toolhead, `SET_ACTIVE_SPOOL` called by klipper-toolchanger at each toolchange. Scanner mounted at each toolhead.
 
-**`ams`** — multiple lanes feeding a single toolhead through a filament changer. Spool IDs stored per lane. `SET_ACTIVE_SPOOL` called on every lane change. Scanner mounted at each lane inside the BoxTurtle/NightOwl unit.
+**`ams`** — multiple lanes feeding a single toolhead through a filament changer. Spool IDs stored per lane. AFC handles `SET_ACTIVE_SPOOL` automatically on lane changes. Scanner mounted at each lane inside the BoxTurtle/NightOwl unit.
 
-### AFC-Klipper Add-On — what we can hook into
+### AFC-Klipper Add-On — the integration is simpler than expected
 
-AFC already has deep Spoolman integration and several features we can leverage directly:
+After researching AFC's codebase and documentation, the integration turns out to be much cleaner than originally anticipated. AFC was designed with scanner integrations in mind and does most of the heavy lifting for us.
 
-**`SET_SPOOL_ID LANE=<lane> SPOOL_ID=<id>`** — AFC's existing command to assign a Spoolman spool ID to a lane. Our middleware could call this directly after an NFC scan instead of (or in addition to) calling `SET_ACTIVE_SPOOL`. This would let AFC manage the spool-to-lane mapping natively, and AFC would handle setting the active spool in Spoolman whenever it loads that lane.
+**The key discovery: `SET_SPOOL_ID` does everything.** When you call `SET_SPOOL_ID LANE=lane1 SPOOL_ID=5`, AFC doesn't just store the ID — it automatically queries Spoolman and pulls the material type, color, and weight for that spool. One call from our middleware and AFC has complete spool metadata for the lane. We don't need to separately call `SET_COLOR`, `SET_MATERIAL`, or `SET_WEIGHT`.
 
-**`SET_NEXT_SPOOL_ID SPOOL_ID=<id>`** — AFC's command designed specifically for scanner integrations. The docs say "this can be used in a scanning macro to prepare the spool to be loaded next into the AFC." This is essentially the hook point built for us. After an NFC scan, the middleware calls `SET_NEXT_SPOOL_ID` with the Spoolman spool ID, and AFC takes it from there.
+**`SET_NEXT_SPOOL_ID SPOOL_ID=<id>`** — AFC's command explicitly designed for scanner integrations. Their docs describe it as intended for "a scanning macro to prepare the AFC for the next spool to be loaded." This is the hook point they built for projects like ours. After an NFC scan, the middleware calls this and AFC takes it from there.
 
-**`SET_COLOR LANE=<lane> COLOR=<hex>`** — AFC can set the color per lane. Our middleware already knows the filament color from Spoolman's `color_hex` field — after a scan, we could push the color to both the ESP32 LED and to AFC's lane color so the Mainsail/Fluidd UI shows the correct color per lane.
+**AFC already handles Spoolman active spool tracking.** Recent PRs (#568/#576) added `spool_id` to lane data and active spool updates on lane changes. Our middleware in `ams` mode doesn't need to call `SET_ACTIVE_SPOOL` at all — AFC manages that automatically when it loads a lane's filament into the toolhead.
 
-**`SET_MATERIAL LANE=<lane> MATERIAL=<type>`** — AFC can set material type per lane. Spoolman knows the filament material. After a scan, the middleware could push material info to AFC automatically.
+**`afc-spool-scan`** — AFC references a USB QR code scanner implementation that uses the same `SET_NEXT_SPOOL_ID` hook. Our NFC approach is a parallel scanning method using the same integration point — NFC tags instead of QR codes, ESP32 readers instead of USB scanners.
 
-**`SET_WEIGHT LANE=<lane> WEIGHT=<grams>`** — AFC tracks remaining weight per lane. Spoolman has `remaining_weight`. After a scan, the middleware could sync weight data so AFC's print assist and spool management features have accurate data.
+**AFC state is exposed via Moonraker.** AFC's Mainsail integration (PR #2089 to mainsail-crew) confirms that lane states are queryable through Moonraker's object system. This is important for the scan-lock-clear lifecycle (see below).
 
-**Spoolman active spool tracking** — AFC already calls Moonraker's Spoolman API to set the active spool on lane changes (recent PR #568/#576 added `spool_id` to lane data). If AFC is handling the active spool, our middleware in `ams` mode might not need to call `SET_ACTIVE_SPOOL` at all — just do the NFC lookup and push the spool ID into AFC, and let AFC manage everything downstream.
+### The simplified AMS flow
 
-**`afc-spool-scan`** — AFC already has a USB QR code scanner implementation. Our NFC approach would be a parallel scanning method — the middleware integration points would be the same (`SET_NEXT_SPOOL_ID` or `SET_SPOOL_ID`).
-
-### Scanning approach
-
-Two options for when scanning happens:
-
-**Option A — Scan on spool load (preferred).** Mount the PN532 where it can read the NFC tag as the spool is placed on the respooler. The ESP32 uses continuous `on_tag` scanning (same as current toolchanger mode). When you drop a spool in, the tag is scanned immediately, the middleware looks it up, and pushes the spool ID into AFC via `SET_SPOOL_ID` or `SET_NEXT_SPOOL_ID`. No macro integration needed on the AFC side — the scan happens at the physical moment of loading.
-
-**Option B — Triggered scan on AFC load.** AFC's lane load macro fires an MQTT message telling the ESP32 to scan. The ESP32 reads the tag on demand. This requires AFC macro modifications and is more complex, but would work if the NFC reader can't be positioned for continuous scanning.
-
-Option A is simpler and keeps the AFC add-on unmodified. The NFC system operates independently — AFC doesn't need to know about NFC at all, it just receives spool IDs through its existing commands.
-
-### Middleware changes for AMS mode
-
-The middleware in `ams` mode would:
+Given what AFC handles natively, the middleware's job in `ams` mode is minimal:
 
 1. Receive NFC scan from ESP32 via MQTT (same as today)
-2. Look up spool in Spoolman (same as today)
-3. Instead of calling `SET_ACTIVE_SPOOL` or `SET_GCODE_VARIABLE`, call AFC's `SET_SPOOL_ID` for the lane via Moonraker's gcode script API
-4. Optionally push color, material, and weight to AFC via `SET_COLOR`, `SET_MATERIAL`, `SET_WEIGHT`
-5. Publish LED color to the ESP32 (same as today)
+2. Look up UID in Spoolman → get spool ID (same as today)
+3. Call `SET_SPOOL_ID LANE=<lane> SPOOL_ID=<id>` via Moonraker's gcode script API
+4. AFC automatically pulls color, material, weight from Spoolman and updates the lane
+5. Publish LED color to ESP32 and send lock command (see below)
+6. Done — one gcode call and AFC knows everything
 
-The config would look like:
+### Physical scanning approach — inline with spool rotation
+
+The PN532 reader would be mounted inline with the spool on the respooler — positioned so the NFC tag on the spool passes through the read zone as the spool rotates. When a spool is first loaded, it rotates into range and the tag gets scanned. The ESP32 uses continuous `on_tag` scanning (same as current toolchanger mode) — no AFC macro modifications needed.
+
+This means during printing, the spool is rotating and the tag will pass through the PN532's read zone on every revolution. ESPHome's PN532 component has built-in deduplication — `on_tag` only fires once when a tag enters the field, not on every poll. However, depending on rotation speed and the PN532's poll interval (~1 second default), the tag entering and exiting the read zone on each revolution could trigger repeated scan events.
+
+### Scan-lock-clear lifecycle
+
+Rather than dealing with debounce timers or duplicate scan logic, the ESP32 operates in two explicit states:
+
+**Scanning state** — PN532 is actively polling. LED shows a "waiting for spool" indicator (dim white pulse or off). When a tag is read, the UID is published to MQTT and the middleware processes it.
+
+**Locked state** — after a successful scan, the middleware publishes a lock command to the ESP32. The ESP32 stops polling the PN532 and holds the filament color on the LED. No more scan events fire regardless of spool rotation. The scanner is dormant until explicitly unlocked.
+
+**Clear/unlock** — when a spool is ejected, the ESP32 receives a clear command, resumes PN532 polling, and returns to scanning state. LED goes back to the "waiting" indicator.
+
+The MQTT topic for this could reuse the existing color topic: a hex color value means "lock and show this color," a value of `"clear"` means "unlock and resume scanning." Simple, one topic, no extra state management.
+
+### How the middleware detects lane ejection (for the clear command)
+
+This is the one piece that requires further research. The middleware needs to know when a spool is ejected from a lane so it can send the clear command to that lane's ESP32. Options explored:
+
+**Moonraker websocket subscription (most promising)** — AFC's lane states are exposed via Moonraker's object system (confirmed by the Mainsail AFC integration PR). The middleware could open a persistent websocket connection to Moonraker and subscribe to AFC lane object updates. When a lane state transitions to empty/ejected, the middleware publishes the clear command to that lane's ESP32.
+
+This is the biggest middleware change — going from a simple MQTT listener to a dual-protocol system (MQTT for ESP32 communication, websocket for Moonraker/AFC state). But it's the right architecture and opens the door for future features (print start/end events, error state monitoring, etc.).
+
+**What still needs research:**
+- The exact Moonraker object path and state values for AFC lanes (e.g. `AFC_stepper lane1` → what fields indicate loaded/empty?)
+- Whether AFC publishes state change events via Moonraker's notification system or if we need to poll/subscribe to objects
+- How the `afc-spool-scan` QR scanner project handles this same problem (if the repo becomes available)
+- Whether the ArmoredTurtle team would be open to adding an MQTT publish on eject events as a first-class feature in AFC, which would eliminate the websocket requirement entirely
+
+### Hardware considerations
+
+- **ESP32 board** — the Waveshare ESP32-S3-Zero works but a different form factor might mount better inside a BoxTurtle enclosure. Main requirements are just I2C for the PN532 and WiFi/MQTT.
+- **PN532 mounting** — custom mount to position the reader inline with the spool rotation path on the respooler. The PN532 reads at about 5cm, so the tag needs to pass within range during rotation. Mount design would need to account for different spool sizes.
+- **One reader per lane** — 4 lanes = 4 ESP32 + PN532 units, same cost as a 4-toolhead setup.
+- **Possible single ESP32 with multiplexed I2C** — since scans are per-lane and the lock state means only one lane scans at a time (during spool loading), a single ESP32 with an I2C multiplexer driving 4 PN532 modules could work. Reduces cost and wiring but adds firmware complexity. Nice optimization for later.
+
+### Config
 
 ```yaml
 toolhead_mode: "ams"
@@ -91,22 +117,24 @@ toolheads:      # these become lane names in AMS mode
   - "lane4"
 ```
 
-MQTT topics would follow the same pattern: `nfc/toolhead/lane1`, `nfc/toolhead/lane1/color`, etc.
-
-### Hardware considerations
-
-- **ESP32 board** — the Waveshare ESP32-S3-Zero works but a different form factor might mount better inside a BoxTurtle enclosure. Main requirements are just I2C for the PN532 and WiFi/MQTT.
-- **PN532 mounting** — custom mount to position the reader where it can read a tag on the spool sitting on the respooler. The PN532 reads at about 5cm, so reader and tag placement need to be within range.
-- **One reader per lane** — 4 lanes = 4 ESP32 + PN532 units, same cost as a 4-toolhead setup.
-- **Possible single ESP32 with multiplexed I2C** — since scans are per-lane and not simultaneous, one ESP32 with an I2C multiplexer driving 4 PN532 modules could work. Reduces cost and wiring but adds firmware complexity. Nice optimization for later.
+MQTT topics follow the same pattern: `nfc/toolhead/lane1`, `nfc/toolhead/lane1/color`, etc.
 
 ### Why this fits in one project
 
 The NFC scanning, MQTT transport, Spoolman lookup, LED feedback, and ESPHome firmware are all identical between modes. The only differences are:
 - Where the scanner is physically mounted
-- Which Klipper/Moonraker API calls the middleware makes after a successful scan
+- Which Klipper/Moonraker API calls the middleware makes after a successful scan (one `SET_SPOOL_ID` call vs `SET_ACTIVE_SPOOL` / `SET_GCODE_VARIABLE`)
+- The scan-lock-clear lifecycle (new for AMS mode, not needed for toolchanger where the tag is always in range)
 - How the config names positions (toolheads vs lanes)
 
-All three modes share the same middleware, same ESPHome base.yaml, same Spoolman integration, and same hardware. Keeping it in one project avoids duplicating everything for what amounts to a few lines of mode-switching logic.
+All three modes share the same middleware, same ESPHome base.yaml, same Spoolman integration, and same hardware. Keeping it in one project avoids duplicating everything for what amounts to a mode-switching branch in the middleware.
+
+### Next steps
+
+1. Research AFC's Moonraker object namespace to confirm lane state is subscribable
+2. Look at `afc-spool-scan` source code when available to see how they handle the scanner → AFC pipeline
+3. Consider reaching out to the ArmoredTurtle team on Discord about potential collaboration or MQTT event publishing
+4. Prototype a PN532 mount for the BoxTurtle respooler to validate read geometry with rotating spools
+5. Implement the Moonraker websocket client in the middleware as a foundation for AMS mode
 
 ---
