@@ -142,9 +142,49 @@ All three modes share the same middleware, same ESPHome base.yaml, same Spoolman
 ### Next steps
 
 1. Research AFC's Moonraker object namespace to confirm lane state is subscribable
-2. Look at `afc-spool-scan` source code when available to see how they handle the scanner → AFC pipeline
+2. Look at `afc-spool-scan` source code when available to see how they handle the scanner → AFC pipeline — ✅ Done, see findings above
 3. Consider reaching out to the ArmoredTurtle team on Discord about potential collaboration or MQTT event publishing
 4. Prototype a PN532 mount for the BoxTurtle respooler to validate read geometry with rotating spools
 5. Implement the Moonraker websocket client in the middleware as a foundation for AMS mode
+
+### Using BoxTurtle's own LEDs instead of the ESP32 LED
+
+Since the ESP32 would be mounted at the bottom of the BoxTurtle where it's not visible, it makes more sense to push the filament color to the BoxTurtle's existing per-lane WS2812 LEDs rather than relying on the ESP32's onboard LED.
+
+**How AFC controls its LEDs:** AFC uses a standard Klipper addressable LED chain defined as `[AFC_led AFC_Indicator]` with one LED per lane. AFC's internal state machine sets each lane's LED to a predefined color based on the lane's operational state. The LEDs are standard Klipper LEDs, so they can be controlled via `SET_LED LED=AFC_Indicator RED=<r> GREEN=<g> BLUE=<b> INDEX=<lane>` from any gcode macro or Moonraker API call.
+
+**The complete set of AFC LED states:**
+
+| State | Default Color | Meaning |
+|---|---|---|
+| `led_fault` | Red (1,0,0,0) | Error/fault on this lane |
+| `led_ready` | Green (0,0.8,0,0) | Filament loaded in lane, ready to print |
+| `led_not_ready` | Red (1,0,0,0) | Lane not ready (no filament or prep incomplete) |
+| `led_loading` | White (1,1,1,0) | Filament actively being loaded |
+| `led_tool_loaded` | Blue (0,0,1,0) | This lane's filament is in the toolhead right now |
+| `led_buffer_advancing` | Blue (0,0,1,0) | Buffer advancing during lane change |
+| `led_buffer_trailing` | Green (0,1,0,0) | Buffer trailing during lane change |
+| `led_buffer_disable` | Dim white (0,0,0,0.25) | Buffer disabled |
+| `led_spool_illuminate` | White (1,1,1,0) | Spool illumination (QuattroBox only) |
+
+The key distinction: `led_ready` = "filament is in this lane, waiting to be called." `led_tool_loaded` = "this lane's filament is currently the one in the nozzle." During a multicolor print, one lane would be blue (active) and the others green (standing by).
+
+**The problem:** AFC's state machine controls the LEDs. If our middleware sets a lane LED to the filament color via `SET_LED`, AFC will overwrite it on the next state transition (lane finishes loading → goes to ready → AFC sets it back to green).
+
+**Intelligent override strategy:** The middleware monitors AFC lane states via Moonraker's websocket. It maintains a map of lane → filament color from NFC scans. When AFC transitions a lane to certain states, the middleware re-applies the filament color. When AFC transitions to critical operational states, the middleware stands down and lets AFC's native colors show.
+
+States we **override** with filament color:
+- `led_ready` → show filament color instead of green. User sees what's loaded in each lane at a glance.
+- `led_tool_loaded` → show filament color instead of blue (maybe brighter or with a subtle pulse to distinguish from "ready" lanes).
+
+States we **never override** (let AFC handle):
+- `led_fault` → red must always show. User needs to see errors immediately.
+- `led_loading` → white flash during active load operation. Don't interfere.
+- `led_not_ready` → red indicates a problem. Don't mask it.
+- `led_buffer_*` → brief transitional states during lane changes. Leave alone.
+
+The flow: NFC scan → middleware stores filament color for that lane → calls `SET_SPOOL_ID` → AFC transitions lane to `ready` → middleware detects state change via websocket → middleware calls `SET_LED` with the filament color for that lane index. If AFC later transitions the lane to `fault`, the middleware sees that and does NOT re-apply the filament color. When the fault clears and the lane returns to `ready`, the filament color is re-applied.
+
+**Alternative: Feature request to ArmoredTurtle.** The cleanest long-term solution would be for AFC to natively support a "spool color" LED mode — where `led_ready` and `led_tool_loaded` use the lane's color from Spoolman instead of a fixed color. Since `SET_SPOOL_ID` already pulls the color into AFC's lane data, the information is already there. AFC just doesn't currently use it for the physical LEDs. This would be a relatively small change in AFC's LED handling code and would benefit all AFC users, not just NFC scanner users. Worth proposing on the ArmoredTurtle Discord.
 
 ---
