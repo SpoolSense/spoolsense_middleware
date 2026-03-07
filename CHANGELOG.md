@@ -13,9 +13,11 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 - **Startup config logging** — middleware now logs the loaded config summary (toolhead mode, toolheads, Spoolman/Moonraker URLs, threshold) at startup for easier debugging via `journalctl`.
 - **`RESTORE_SPOOL` macro for single toolhead mode** — `spoolman_macros.cfg` now includes a delayed gcode that re-activates the last scanned spool after a Klipper restart. Previously, single toolhead users lost their active spool assignment on reboot even though the middleware was saving it to disk.
 - **Retained MQTT messages for LED persistence** — colour and low spool topics are now published with `retain=True`, so the MQTT broker remembers the last state per toolhead. The ESP32 LED restores to the correct colour automatically after a Klipper restart, ESP32 reboot, or wifi reconnect — no rescan needed.
+- **Shared ESPHome base config** — all 4 toolhead YAML files refactored into a single `base.yaml` with shared logic and thin per-toolhead wrappers using ESPHome substitutions. Changes to LED effects, MQTT handlers, or NFC behavior now only need to be made in one place. Dead no-op lambda in the colour handler also removed.
 
 ### Changed
 - **Config no longer lives in `nfc_listener.py`** — the hardcoded configuration block at the top of the file has been replaced with a `load_config()` function that reads from the external YAML file. Existing users should copy their current values into a new `config.yaml` before updating.
+- **ESPHome configs refactored** — `toolhead-t0.yaml` through `toolhead-t3.yaml` are now thin wrappers that include `base.yaml` via `packages: !include`. MQTT broker IP moved from a hardcoded placeholder to `!secret mqtt_broker` — add `mqtt_broker` to your ESPHome secrets file.
 - **`.gitignore`** — `config.yaml` is now ignored so user config is never overwritten by `git pull`.
 - **`docs/middleware-setup.md`** — rewritten for the new config file workflow.
 - **`scripts/install-beta.sh`** (beta) — updated to write `config.yaml` instead of sed-patching the Python source, and added `pyyaml` to dependency checks.

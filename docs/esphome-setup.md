@@ -18,6 +18,15 @@ For a deeper dive into MQTT configuration options, see the official Home Assista
 
 Once Mosquitto is running and you have a username/password configured, come back here to continue.
 
+## Config Structure
+
+The ESPHome configs use a shared base + thin wrapper approach:
+
+- **`base.yaml`** — all shared logic (LED, NFC, MQTT handlers, I2C). Never edit directly.
+- **`toolhead-t0.yaml` through `toolhead-t3.yaml`** — one per toolhead. Only contains the device name, static IP, and substitution variables that identify the toolhead.
+
+Any changes to shared logic (LED effects, MQTT topics, scan behavior) only need to be made in `base.yaml` — all toolheads inherit the changes automatically.
+
 ## First Flash (USB Required)
 
 The first flash must be done via USB. After that, all updates are wireless (OTA).
@@ -40,23 +49,23 @@ The first flash must be done via USB. After that, all updates are wireless (OTA)
 ## Push Full Config
 
 1. Click **Edit** on the device in ESPHome dashboard
-2. Replace the config with the appropriate YAML from the `esphome/` folder
-3. Update placeholder values:
-   - `YOUR_HOME_ASSISTANT_IP` → your HA server IP
-   - `static_ip` → your desired static IP for this device
-   - `gateway` → your router IP
-4. Update the **Secrets** file in ESPHome with:
+2. Replace the config with the contents of the appropriate toolhead YAML (e.g. `toolhead-t0.yaml`)
+3. Update the static IP and gateway in the toolhead file for your network
+4. Make sure `base.yaml` is also present in your ESPHome config directory — the toolhead files include it via `packages: !include base.yaml`
+5. Update the **Secrets** file in ESPHome with:
    ```yaml
    wifi_ssid: "YourNetworkName"
    wifi_password: "YourWiFiPassword"
+   mqtt_broker: "192.168.1.100"
    mqtt_username: "your_ha_username"
    mqtt_password: "your_ha_password"
    ```
-5. Click **Save** then **Install → Wirelessly**
+   Note: `mqtt_broker` is your Home Assistant / Mosquitto server IP.
+6. Click **Save** then **Install → Wirelessly**
 
 ## Repeat for T1, T2, T3
 
-Repeat the entire process for each ESP32-S3, using the corresponding YAML config file.
+Repeat the entire process for each ESP32-S3, using the corresponding toolhead YAML config file. Each toolhead file only differs in its name, toolhead ID, and static IP — all shared logic comes from `base.yaml`.
 
 ## Verify
 

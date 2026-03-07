@@ -40,14 +40,14 @@ All configuration (MQTT credentials, Spoolman/Moonraker URLs, toolhead mode, too
 **Fix scan flash vs. MQTT publish order**
 Right now the white flash plays out fully before the MQTT publish fires. That means there's a window where the flash is done but the LED hasn't updated to the spool color yet. The publish should fire immediately when the tag is scanned, with the flash happening in parallel while the middleware does its work.
 
-**Remove dead lambda in color handler**
-There's a leftover no-op lambda at the top of the color MQTT handler that does nothing. Just noise — should be cleaned up.
+~~**Remove dead lambda in color handler**
+There's a leftover no-op lambda at the top of the color MQTT handler that does nothing. Just noise — should be cleaned up.~~ ✅ Done — removed in the base.yaml refactor.
 
 **`on_tag_removed` handling**
 The PN532 supports an `on_tag_removed` event that fires when a tag leaves the reader. Right now the LED holds the last color indefinitely after you pull the spool away. Could dim the LED or turn it off when the tag is removed to make it clearer nothing is actively on the reader.
 
-**Single shared base config**
-All 4 ESPHome YAML files are nearly identical — the only real differences are the toolhead name, static IP, and topic names. Any change to shared logic (like the LED effects we just added) has to be copy-pasted across all 4 files. ESPHome supports `!include` and packages — a single `base.yaml` with all the logic, and each toolhead file just defines its name and IP, would make maintenance much cleaner.
+~~**Single shared base config**
+All 4 ESPHome YAML files are nearly identical — the only real differences are the toolhead name, static IP, and topic names. Any change to shared logic (like the LED effects we just added) has to be copy-pasted across all 4 files. ESPHome supports `!include` and packages — a single `base.yaml` with all the logic, and each toolhead file just defines its name and IP, would make maintenance much cleaner.~~ ✅ Done — `base.yaml` contains all shared logic, toolhead files are thin wrappers with substitutions. Dead lambda in color handler also removed.
 
 ---
 
