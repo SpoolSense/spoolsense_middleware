@@ -102,6 +102,43 @@ sudo systemctl restart nfc-spoolman
 
 The config file is never touched by `git pull`, so your settings are safe across updates.
 
+## Optional: Automatic Updates via Moonraker
+
+If you cloned the repo to your home directory, you can add it to Moonraker's `update_manager` so updates appear in Fluidd/Mainsail alongside Klipper and Moonraker. When an update is available, click update and Moonraker will pull the latest code and restart the middleware service automatically.
+
+Add the following to your `moonraker.conf`:
+
+```ini
+[update_manager nfc-spoolman]
+type: git_repo
+path: ~/nfc-toolchanger-spoolman
+origin: https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+primary_branch: master
+managed_services: nfc-spoolman
+```
+
+If you haven't already cloned the repo:
+
+```bash
+cd ~
+git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+```
+
+Restart Moonraker to pick up the new config:
+
+```bash
+sudo systemctl restart moonraker
+```
+
+After an update pulls new code, you may still need to manually copy the updated `nfc_listener.py` to `~/nfc_spoolman/`:
+
+```bash
+cp ~/nfc-toolchanger-spoolman/middleware/nfc_listener.py ~/nfc_spoolman/
+sudo systemctl restart nfc-spoolman
+```
+
+Your `~/nfc_spoolman/config.yaml` is never overwritten — it lives outside the repo.
+
 ## Optional: Home Assistant Monitoring
 
 The middleware publishes its online/offline status to `nfc/middleware/online` (retained, QoS 1). If the middleware crashes or loses its MQTT connection, the broker automatically publishes `false` via Last Will and Testament. A clean shutdown also publishes `false` before disconnecting.
