@@ -226,7 +226,7 @@ hardware.
 
 The override is re-asserted on every `AFC.var.unit` file change, since AFC
 resets LEDs to defaults on state transitions. The middleware's gcode command
-runs after AFC's internal LED set, so it reliably wins the race.
+runs after AFC's internal LED set.
 
 ### AFC Integration
 
