@@ -146,9 +146,7 @@ requires a Klipper macro.
    Lane 1 should dim to 20% brightness. Run with `R=0 G=0 B=0` to turn it off.
 
 > **Low spool warning:** When a spool is running low, the LED dims to 20% of
-> the filament color so you can tell at a glance which lanes need attention —
-> no plugins required. If you want a true pulsing/breathing animation, the
-> macro includes instructions for using the `led_effect` Klipper plugin.
+> the filament color so you can tell at a glance which lanes need attention.
 
 ## Step 6 — Configure Spoolman
 
