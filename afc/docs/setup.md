@@ -109,7 +109,7 @@ assignments and power distribution.
 The middleware overrides BoxTurtle's default lane LED colors (green for ready,
 blue for tool loaded) with the actual filament color from Spoolman, so you can
 see at a glance what color filament is in each lane. When a spool is running
-low, the LED will breathe (pulse) in the filament color to draw your attention.
+low, the LED dims to 20% brightness so low lanes are immediately obvious.
 This only affects the "ready" and "tool loaded" states — **AFC's critical LED
 states are never touched**: faults (red), loading animations (white), and
 not-ready indicators all continue to work exactly as AFC intended. This
@@ -139,12 +139,16 @@ requires a Klipper macro.
    ```
    _SET_LANE_LED LANE=lane1 R=1.0 G=0.0 B=0.0 BREATH=0
    ```
-   Lane 1's LED should turn red. Run with `R=0 G=0 B=0` to turn it off.
+   Lane 1's LED should turn red. Test low spool dimming with:
+   ```
+   _SET_LANE_LED LANE=lane1 R=1.0 G=0.0 B=0.0 BREATH=1
+   ```
+   Lane 1 should dim to 20% brightness. Run with `R=0 G=0 B=0` to turn it off.
 
-> **Note:** The breathing effect for low spool is a placeholder. Without the
-> `led_effect` Klipper plugin, low spool lanes show a static filament color.
-> If you have `led_effect` installed, edit the macro to add `SET_LED_EFFECT`
-> commands in the `breath == 1` block.
+> **Low spool warning:** When a spool is running low, the LED dims to 20% of
+> the filament color so you can tell at a glance which lanes need attention —
+> no plugins required. If you want a true pulsing/breathing animation, the
+> macro includes instructions for using the `led_effect` Klipper plugin.
 
 ## Step 6 — Configure Spoolman
 
@@ -208,8 +212,10 @@ This middleware overrides those with the actual filament color from Spoolman,
 so your BoxTurtle LEDs show what color filament is in each lane.
 
 The override works via a Klipper macro (`_SET_LANE_LED`) that you define in
-your config. The middleware calls it with RGB values and a breath flag for
-low spool warning. The macro maps these to your BoxTurtle's LED hardware.
+your config. The middleware calls it with RGB values and a low spool flag.
+When a spool is running low, the macro dims the LED to 20% brightness so
+you can spot it at a glance. The macro maps these to your BoxTurtle's LED
+hardware.
 
 **Protected states** — the middleware never overrides these AFC LED states:
 - `led_fault` (red) — indicates a real problem

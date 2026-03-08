@@ -248,7 +248,7 @@ def update_klipper_led(lane, color_hex, is_low=False, force=False):
     Args:
         lane: AFC lane name (e.g. 'lane1').
         color_hex: Hex color string (e.g. 'FF0000').
-        is_low: If True, the macro should enable a breathing effect.
+        is_low: If True, the macro dims the LED to 20% as a low spool warning.
         force: If True, send the command even if state hasn't changed.
     """
     if cfg["toolhead_mode"] != "ams":
