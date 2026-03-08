@@ -1,41 +1,66 @@
 # =============================================================
-# NFC Spoolman Middleware — AFC/BoxTurtle Configuration
+# NFC Spoolman Middleware — Configuration
 # =============================================================
 # Copy this file to ~/nfc_spoolman/config.yaml and fill in your values.
 #
 #   cp config.example.yaml ~/nfc_spoolman/config.yaml
 #
-# This config is for AMS mode — lane-based filament changers
-# like BoxTurtle running the AFC-Klipper Add-On.
+# This middleware supports three modes. Set toolhead_mode below.
 # =============================================================
 
-# AMS mode — for lane-based filament changers (BoxTurtle, NightOwl, etc.)
-# The middleware calls AFC's SET_SPOOL_ID instead of Klipper's SET_ACTIVE_SPOOL.
-# AFC handles spool tracking, color, material, and weight automatically.
+# ---- Toolhead Mode ------------------------------------------
+#
+# single      — For single-toolhead printers. Calls SET_ACTIVE_SPOOL
+#               directly on every scan. One ESP32, one PN532.
+#
+# toolchanger — For multi-toolhead printers (e.g. MadMax, Stealthchanger).
+#               Saves spool ID per toolhead and publishes LED color.
+#               klipper-toolchanger handles SET_ACTIVE_SPOOL at toolchange.
+#
+# ams         — For lane-based filament changers (BoxTurtle, NightOwl, etc.)
+#               running the AFC-Klipper Add-On. Calls AFC's SET_SPOOL_ID
+#               to register the spool in the correct lane. AFC handles
+#               spool tracking, color, material, and weight automatically.
+#
 toolhead_mode: "ams"
 
-# Lane identifiers — must match your AFC lane config names.
-# These are the lane names defined in your AFC_stepper sections.
+# ---- Toolheads / Lanes --------------------------------------
+#
+# For single mode:      ["T0"]
+# For toolchanger mode: ["T0", "T1", "T2", "T3"]
+# For ams mode:         ["lane1", "lane2", "lane3", "lane4"]
+#
+# These must match your MQTT topics and (for ams mode) your AFC
+# lane config names from your AFC_stepper sections.
+#
 toolheads:
   - "lane1"
   - "lane2"
   - "lane3"
   - "lane4"
 
-# MQTT broker — usually your Home Assistant server running Mosquitto
+# ---- MQTT Broker --------------------------------------------
+# Usually your Home Assistant server running Mosquitto.
 mqtt:
   broker: "YOUR_HOME_ASSISTANT_IP"    # e.g. "192.168.1.100"
   port: 1883
   username: "your_mqtt_username"
   password: "your_mqtt_password"
 
-# Spoolman instance URL (default port is 7912)
+# ---- Spoolman URL -------------------------------------------
+# Default port is 7912.
 spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
 
-# Moonraker / Klipper instance URL
+# ---- Moonraker URL ------------------------------------------
+# Your Klipper/Moonraker instance.
 moonraker_url: "http://YOUR_KLIPPER_IP"
 
-# Low spool warning threshold in grams.
-# In AMS mode this is used for logging only — AFC manages its own
-# low spool behavior via enable_assist_weight.
+# ---- Low Spool Threshold ------------------------------------
+# Remaining weight (grams) that triggers a low spool warning.
+#
+# single/toolchanger: publishes low_spool status to MQTT and
+#   triggers the ESP32 LED pulse effect.
+# ams: logged to journal only — AFC manages its own low spool
+#   behavior via enable_assist_weight.
+#
 low_spool_threshold: 100
