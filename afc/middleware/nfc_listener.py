@@ -229,15 +229,40 @@ def on_message(client, userdata, msg):
         spool = find_spool_by_nfc(uid)
         if spool:
             spool_id = spool["id"]
+            filament = spool.get("filament", {})
+            name = filament.get("name", "Unknown")
+            color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
+            logging.info(f"Found spool: {name} (ID: {spool_id})")
+
             if activate_spool(spool_id, toolhead):
                 active_spools[toolhead] = spool_id
+                
+                # Mode-specific feedback
                 if cfg["toolhead_mode"] == "ams":
                     publish_lock(toolhead, "lock")
                 else:
-                    color = spool.get("filament", {}).get("color_hex", "FFFFFF") or "FFFFFF"
-                    client.publish(f"nfc/toolhead/{toolhead}/color", color.lstrip("#").upper(), retain=True)
+                    client.publish(f"nfc/toolhead/{toolhead}/color", color_hex.lstrip("#").upper(), retain=True)
+
+                # Low spool check
+                remaining = spool.get("remaining_weight")
+                if cfg["toolhead_mode"] == "ams":
+                    # AMS: log only — AFC manages its own low spool behavior
+                    if remaining is not None and remaining <= cfg["low_spool_threshold"]:
+                        logging.warning(f"Low spool: {name} has {remaining:.1f}g remaining on {toolhead}")
+                else:
+                    # Single/toolchanger: publish low_spool status to MQTT
+                    topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+                    if remaining is not None and remaining <= cfg["low_spool_threshold"]:
+                        logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                        client.publish(topic_low, "true", qos=1, retain=True)
+                    else:
+                        client.publish(topic_low, "false", qos=1, retain=True)
         else:
             logging.warning(f"No spool found for UID: {uid}")
+            if cfg["toolhead_mode"] != "ams":
+                # Clear low spool state and flash red
+                client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
+                client.publish(f"nfc/toolhead/{toolhead}/color", "ERROR", retain=True)
     except Exception as e:
         logging.error(f"Message error: {e}")
 
