@@ -1,28 +1,9 @@
 #!/usr/bin/env python3
 """
-NFC Spoolman Middleware — Unified Edition
-==========================================
-Listens for NFC tag scans published via MQTT by ESPHome-flashed ESP32 devices.
-When a tag is scanned, it looks up the spool in Spoolman by NFC UID, then
-updates Klipper/Moonraker so filament usage is tracked automatically.
-
-Supports three toolhead modes (set toolhead_mode in config.yaml):
-
-  single      — Calls SET_ACTIVE_SPOOL directly on every scan.
-                Use for single-toolhead printers (one ESP32, one PN532).
-
-  toolchanger — Saves the spool ID per toolhead and publishes the LED color,
-                but does NOT call SET_ACTIVE_SPOOL. klipper-toolchanger handles
-                activation at each toolchange. Tested on MadMax T0–T3.
-
-  ams         — Calls AFC's SET_SPOOL_ID to register the spool in the correct
-                lane. AFC auto-pulls color, material, and weight from Spoolman.
-                After a successful scan, locks the scanner on that lane to
-                prevent repeated triggers from spool rotation during printing.
-                Designed for BoxTurtle, NightOwl, and other AFC-based units.
-
-Configuration is loaded from ~/nfc_spoolman/config.yaml — see config.example.yaml
-for a documented template with all available options.
+NFC Spoolman Middleware — Unified Edition with AFC & Klipper Sync
+=================================================================
+Listens for NFC tag scans via MQTT and updates Klipper/Spoolman.
+Includes automatic "Sync/Clear" logic by watching variable files.
 """
 
 import paho.mqtt.client as mqtt
@@ -34,114 +15,120 @@ import sys
 import os
 import yaml
 import time
+import threading
+import configparser
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
-# Configure logging to show timestamps and log level
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 # ============================================================
-# Configuration — loaded from ~/nfc_spoolman/config.yaml
-# ============================================================
-
 CONFIG_PATH = os.path.expanduser("~/nfc_spoolman/config.yaml")
 
-# Default values — used when a key is missing from config.yaml.
-# Required fields default to None and are validated after loading.
 DEFAULTS = {
-    "toolhead_mode": "toolchanger",
-    "toolheads": ["T0", "T1", "T2", "T3"],
+    "toolhead_mode": "ams",
+    "toolheads": ["lane1", "lane2", "lane3", "lane4"],
     "mqtt": {
-        "broker": None,
+        "broker": "localhost",
         "port": 1883,
         "username": None,
         "password": None,
     },
-    "spoolman_url": None,
-    "moonraker_url": None,
+    "spoolman_url": "http://localhost:7912",
+    "moonraker_url": "http://localhost:7125",
     "low_spool_threshold": 100,
+    "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
+    "klipper_var_path": None, # Will be auto-discovered
 }
 
 VALID_MODES = ("single", "toolchanger", "ams")
 
-# Global cache for Spoolman data
+# Global state
 spool_cache = {}
 last_cache_refresh = 0
-CACHE_TTL = 3600  # Refresh cache every hour
-
+CACHE_TTL = 3600
+lane_locks = {} # lane_name -> bool (True if locked)
+active_spools = {} # toolhead -> spool_id (for single/toolchanger sync)
+mqtt_client = None
+watcher = None
 
 def load_config():
-    """Load and validate configuration from ~/nfc_spoolman/config.yaml."""
+    """Load and validate configuration."""
     if not os.path.exists(CONFIG_PATH):
-        logging.error(f"Config file not found: {CONFIG_PATH}")
-        sys.exit(1)
+        logging.warning(f"Config not found at {CONFIG_PATH}, using defaults")
+        return DEFAULTS
 
     try:
         with open(CONFIG_PATH, "r") as f:
             user_config = yaml.safe_load(f) or {}
     except Exception as e:
-        logging.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
-        sys.exit(1)
+        logging.error(f"Failed to parse config: {e}")
+        return DEFAULTS
 
-    mqtt_defaults = DEFAULTS["mqtt"].copy()
-    mqtt_user = user_config.get("mqtt", {}) or {}
-    mqtt_config = {**mqtt_defaults, **mqtt_user}
-
-    config = {
-        "toolhead_mode": user_config.get("toolhead_mode", DEFAULTS["toolhead_mode"]),
-        "toolheads": user_config.get("toolheads", DEFAULTS["toolheads"]),
-        "mqtt": mqtt_config,
-        "spoolman_url": user_config.get("spoolman_url", DEFAULTS["spoolman_url"]),
-        "moonraker_url": user_config.get("moonraker_url", DEFAULTS["moonraker_url"]),
-        "low_spool_threshold": user_config.get("low_spool_threshold", DEFAULTS["low_spool_threshold"]),
-    }
-
-    # Basic validation
-    missing = []
-    if not config["mqtt"]["broker"]: missing.append("mqtt.broker")
-    if not config["spoolman_url"]: missing.append("spoolman_url")
-    if not config["moonraker_url"]: missing.append("moonraker_url")
-
-    if missing:
-        logging.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
-        sys.exit(1)
-
-    # Validate toolhead_mode
-    if config["toolhead_mode"] not in VALID_MODES:
-        logging.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
-        sys.exit(1)
-
-    config["spoolman_url"] = config["spoolman_url"].rstrip("/")
-    config["moonraker_url"] = config["moonraker_url"].rstrip("/")
-
+    mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
+    config = {**DEFAULTS, **user_config}
+    config["mqtt"] = mqtt_cfg
+    config["afc_var_path"] = os.path.expanduser(config["afc_var_path"])
+    if config["klipper_var_path"]:
+        config["klipper_var_path"] = os.path.expanduser(config["klipper_var_path"])
+    
     return config
 
-
-# Load config at startup
 cfg = load_config()
 
-TOOLHEAD_MODE = cfg["toolhead_mode"]
-TOOLHEADS = cfg["toolheads"]
-MQTT_BROKER = cfg["mqtt"]["broker"]
-MQTT_PORT = cfg["mqtt"]["port"]
-MQTT_USERNAME = cfg["mqtt"]["username"]
-MQTT_PASSWORD = cfg["mqtt"]["password"]
-SPOOLMAN_URL = cfg["spoolman_url"]
-MOONRAKER_URL = cfg["moonraker_url"]
-LOW_SPOOL_THRESHOLD = cfg["low_spool_threshold"]
-
-# Track spool assignments per lane for AMS lock/clear management
-lane_spools = {}  # lane_name → spool_id
-
 # ============================================================
-# Spoolman cache
+# Discovery Helpers
 # ============================================================
 
+def discover_klipper_var_path():
+    """Query Moonraker to find the actual save_variables file path."""
+    if cfg["klipper_var_path"]:
+        return cfg["klipper_var_path"]
+
+    try:
+        logging.info("Discovering Klipper save_variables path...")
+        response = requests.get(f"{cfg['moonraker_url']}/printer/configfile/settings", timeout=5)
+        response.raise_for_status()
+        settings = response.json().get("result", {}).get("settings", {})
+        
+        save_vars = settings.get("save_variables", {})
+        filename = save_vars.get("filename")
+        
+        if not filename:
+            logging.warning("No [save_variables] section found in Klipper config. Klipper sync disabled.")
+            return None
+
+        # If it's a relative path, it's usually in the config folder
+        if not filename.startswith("/"):
+            config_dir = os.path.expanduser("~/printer_data/config")
+            filename = os.path.join(config_dir, filename)
+        
+        logging.info(f"Discovered Klipper variables file: {filename}")
+        return filename
+    except Exception as e:
+        logging.error(f"Failed to discover Klipper variables path: {e}")
+        return None
+
+# ============================================================
+# Spoolman Helpers
+# ============================================================
+
+def get_spool_by_id(spool_id):
+    """Fetch a single spool by ID from Spoolman."""
+    try:
+        response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool/{spool_id}", timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logging.error(f"Failed to fetch spool {spool_id}: {e}")
+        return None
 
 def refresh_spool_cache():
-    """Fetch all spools from Spoolman and update the local cache."""
     global spool_cache, last_cache_refresh
     try:
         logging.info("Refreshing Spoolman cache...")
-        response = requests.get(f"{SPOOLMAN_URL}/api/v1/spool", timeout=5)
+        response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool", timeout=5)
         response.raise_for_status()
         spools = response.json()
 
@@ -160,247 +147,214 @@ def refresh_spool_cache():
         logging.error(f"Failed to refresh Spoolman cache: {e}")
         return False
 
-
 def find_spool_by_nfc(uid):
-    """Look up a spool in the local cache by its NFC tag UID."""
     uid_lower = uid.lower()
-    now = time.time()
-
-    if now - last_cache_refresh > CACHE_TTL:
+    if time.time() - last_cache_refresh > CACHE_TTL:
         refresh_spool_cache()
-
     if uid_lower in spool_cache:
         return spool_cache[uid_lower]
-
-    logging.info(f"UID {uid} not in cache, performing forced refresh...")
     if refresh_spool_cache():
         return spool_cache.get(uid_lower)
-
     return None
 
-
 # ============================================================
-# Mode-specific spool activation functions
+# Klipper/Moonraker Actions
 # ============================================================
-
-
-def activate_spool_single(spool_id, toolhead):
-    """
-    Single mode — set the globally active spool in Moonraker immediately,
-    then persist the spool ID to disk for RESTORE_SPOOL after reboots.
-    """
-    try:
-        response = requests.post(
-            f"{MOONRAKER_URL}/server/spoolman/spool_id",
-            json={"spool_id": spool_id},
-            timeout=5
-        )
-        response.raise_for_status()
-        logging.info(f"[single] Set spool {spool_id} as active via Moonraker")
-
-        var_name = f"t{toolhead[-1]}_spool_id"
-        response2 = requests.post(
-            f"{MOONRAKER_URL}/printer/gcode/script",
-            json={"script": f"SAVE_VARIABLE VARIABLE={var_name} VALUE={spool_id}"},
-            timeout=5
-        )
-        response2.raise_for_status()
-        logging.info(f"Saved {var_name}={spool_id} to disk")
-        return True
-
-    except Exception as e:
-        logging.error(f"[single] Error setting active spool: {e}")
-        return False
-
-
-def activate_spool_toolchanger(spool_id, toolhead):
-    """
-    Toolchanger mode — update the toolhead macro variable and persist to disk.
-    klipper-toolchanger handles SET_ACTIVE_SPOOL at each toolchange.
-    """
-    try:
-        macro = f"T{toolhead[-1]}"
-        response = requests.post(
-            f"{MOONRAKER_URL}/printer/gcode/script",
-            json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"},
-            timeout=5
-        )
-        response.raise_for_status()
-        logging.info(f"[toolchanger] Updated {macro} spool_id variable to {spool_id}")
-
-        var_name = f"t{toolhead[-1]}_spool_id"
-        response2 = requests.post(
-            f"{MOONRAKER_URL}/printer/gcode/script",
-            json={"script": f"SAVE_VARIABLE VARIABLE={var_name} VALUE={spool_id}"},
-            timeout=5
-        )
-        response2.raise_for_status()
-        logging.info(f"Saved {var_name}={spool_id} to disk")
-        return True
-
-    except Exception as e:
-        logging.error(f"[toolchanger] Error setting spool: {e}")
-        return False
-
-
-def activate_spool_ams(spool_id, lane):
-    """
-    AMS mode — register a spool in an AFC lane via SET_SPOOL_ID.
-    AFC automatically pulls color, material, and weight from Spoolman.
-    """
-    try:
-        response = requests.post(
-            f"{MOONRAKER_URL}/printer/gcode/script",
-            json={"script": f"SET_SPOOL_ID LANE={lane} SPOOL_ID={spool_id}"},
-            timeout=5
-        )
-        response.raise_for_status()
-        logging.info(f"[ams] Set spool {spool_id} on {lane} via AFC SET_SPOOL_ID")
-        return True
-    except Exception as e:
-        logging.error(f"[ams] Error setting AFC spool: {e}")
-        return False
-
 
 def activate_spool(spool_id, toolhead):
-    """Route spool activation to the correct mode handler."""
-    if TOOLHEAD_MODE == "single":
-        return activate_spool_single(spool_id, toolhead)
-    elif TOOLHEAD_MODE == "toolchanger":
-        return activate_spool_toolchanger(spool_id, toolhead)
-    elif TOOLHEAD_MODE == "ams":
-        return activate_spool_ams(spool_id, toolhead)
-    else:
-        logging.error(f"Unknown toolhead_mode: {TOOLHEAD_MODE}")
+    mode = cfg["toolhead_mode"]
+    try:
+        if mode == "single":
+            requests.post(f"{cfg['moonraker_url']}/server/spoolman/spool_id", json={"spool_id": spool_id}, timeout=5)
+            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script", json={"script": f"SAVE_VARIABLE VARIABLE=t0_spool_id VALUE={spool_id}"}, timeout=5)
+            logging.info(f"[single] Activated spool {spool_id}")
+        elif mode == "toolchanger":
+            macro = f"T{toolhead[-1]}"
+            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script", json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"}, timeout=5)
+            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script", json={"script": f"SAVE_VARIABLE VARIABLE=t{toolhead[-1]}_spool_id VALUE={spool_id}"}, timeout=5)
+            logging.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
+        elif mode == "ams":
+            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script", json={"script": f"SET_SPOOL_ID LANE={toolhead} SPOOL_ID={spool_id}"}, timeout=5)
+            logging.info(f"[ams] Set spool {spool_id} on {toolhead} via AFC")
+        return True
+    except Exception as e:
+        logging.error(f"Activation failed: {e}")
         return False
 
-
 # ============================================================
-# MQTT helpers
+# MQTT Logic
 # ============================================================
 
-
-def publish_color(client, toolhead, color_hex):
-    """Publish the filament color to MQTT so the ESPHome LED can display it."""
-    topic = f"nfc/toolhead/{toolhead}/color"
-    if color_hex != "error":
-        color_hex = color_hex.lstrip("#").upper()
-    client.publish(topic, color_hex, qos=1, retain=True)
-    logging.info(f"Published color #{color_hex} to {topic}")
-
-
-def publish_lock(client, lane):
-    """Publish a lock command to stop the ESP32 from scanning on this lane."""
+def publish_lock(lane, state):
+    """state: 'lock' or 'clear'"""
+    if not mqtt_client: return
     topic = f"nfc/toolhead/{lane}/lock"
-    client.publish(topic, "lock", retain=True)
-    logging.info(f"Published lock to {topic}")
-
-
-def publish_clear(client, lane):
-    """Publish a clear command to resume scanning on this lane."""
-    topic = f"nfc/toolhead/{lane}/lock"
-    client.publish(topic, "clear", retain=True)
-    logging.info(f"Published clear to {topic}")
-
-
-# ============================================================
-# MQTT callbacks
-# ============================================================
-
+    mqtt_client.publish(topic, state, retain=True)
+    lane_locks[lane] = (state == "lock")
+    logging.info(f"MQTT: {lane} -> {state}")
 
 def on_connect(client, userdata, flags, rc):
-    """Callback for MQTT connection."""
     if rc == 0:
-        logging.info(f"Connected to MQTT broker (Mode: {TOOLHEAD_MODE})")
-        client.publish("nfc/middleware/online", "true", qos=1, retain=True)
-        for t in TOOLHEADS:
+        logging.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
+        client.publish("nfc/middleware/online", "true", retain=True)
+        for t in cfg["toolheads"]:
             client.subscribe(f"nfc/toolhead/{t}")
-        logging.info(f"Subscribed to: {', '.join(TOOLHEADS)}")
-        # Initial cache load
         refresh_spool_cache()
+        
+        # Discovery and Initial sync
+        if cfg["toolhead_mode"] == "ams":
+            sync_from_afc_file()
+        else:
+            cfg["klipper_var_path"] = discover_klipper_var_path()
+            sync_from_klipper_vars()
+            # Restart watcher if path was discovered after startup
+            global watcher
+            if watcher:
+                watcher.stop()
+                watcher.join()
+            watcher = start_watcher()
     else:
-        logging.error(f"MQTT connection failed: {rc}")
-
+        logging.error(f"MQTT Connection failed: {rc}")
 
 def on_message(client, userdata, msg):
-    """Callback for received MQTT messages."""
     try:
         payload = json.loads(msg.payload.decode())
         uid = payload.get("uid")
         toolhead = payload.get("toolhead")
-        logging.info(f"NFC scan on {toolhead}: UID={uid}")
+        
+        if lane_locks.get(toolhead):
+            logging.info(f"Ignoring scan on {toolhead} (lane is locked)")
+            return
 
         spool = find_spool_by_nfc(uid)
-
         if spool:
             spool_id = spool["id"]
-            filament = spool.get("filament", {})
-            name = filament.get("name", "Unknown")
-            color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
-            logging.info(f"Found spool: {name} (ID: {spool_id})")
-
-            success = activate_spool(spool_id, toolhead)
-
-            if success:
-                if TOOLHEAD_MODE == "ams":
-                    # AMS: track assignment and lock the scanner
-                    lane_spools[toolhead] = spool_id
-                    publish_lock(client, toolhead)
+            if activate_spool(spool_id, toolhead):
+                active_spools[toolhead] = spool_id
+                if cfg["toolhead_mode"] == "ams":
+                    publish_lock(toolhead, "lock")
                 else:
-                    # Single/toolchanger: publish filament color to ESP32 LED
-                    publish_color(client, toolhead, color_hex)
-
-                # Check remaining filament weight — warn if below threshold
-                remaining = spool.get("remaining_weight")
-                if TOOLHEAD_MODE == "ams":
-                    # AMS: log only — AFC manages its own low spool behavior
-                    if remaining is not None and remaining <= LOW_SPOOL_THRESHOLD:
-                        logging.warning(f"Low spool: {name} has {remaining:.1f}g remaining on {toolhead}")
-                else:
-                    # Single/toolchanger: publish low_spool status to MQTT
-                    topic_low = f"nfc/toolhead/{toolhead}/low_spool"
-                    if remaining is not None and remaining <= LOW_SPOOL_THRESHOLD:
-                        logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
-                        client.publish(topic_low, "true", qos=1, retain=True)
-                    else:
-                        client.publish(topic_low, "false", qos=1, retain=True)
+                    color = spool.get("filament", {}).get("color_hex", "FFFFFF") or "FFFFFF"
+                    client.publish(f"nfc/toolhead/{toolhead}/color", color.lstrip("#").upper(), retain=True)
         else:
             logging.warning(f"No spool found for UID: {uid}")
-            if TOOLHEAD_MODE != "ams":
-                # Clear low spool state and flash red
-                client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
-                publish_color(client, toolhead, "error")
-
     except Exception as e:
-        logging.error(f"Error processing message: {e}")
-
+        logging.error(f"Message error: {e}")
 
 # ============================================================
-# Main — set up MQTT client and start listening
+# Variable Watchers (AFC & Klipper)
 # ============================================================
 
-client = mqtt.Client()
-if MQTT_USERNAME and MQTT_PASSWORD:
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+def sync_from_klipper_vars():
+    """Read Klipper's variables file and update LEDs for single/toolchanger modes."""
+    path = cfg["klipper_var_path"]
+    if not path or not os.path.exists(path):
+        return
 
-client.will_set("nfc/middleware/online", payload="false", qos=1, retain=True)
-client.on_connect = on_connect
-client.on_message = on_message
+    try:
+        config = configparser.ConfigParser()
+        config.read(path)
+        if 'variables' not in config: return
 
+        for t in cfg["toolheads"]:
+            var_name = f"t{t[-1]}_spool_id"
+            spool_id_str = config['variables'].get(var_name, None)
+            
+            if spool_id_str:
+                try:
+                    spool_id = int(spool_id_str)
+                    if active_spools.get(t) != spool_id:
+                        logging.info(f"Klipper Sync: {t} has spool {spool_id}, updating LED.")
+                        spool = get_spool_by_id(spool_id)
+                        if spool:
+                            color = spool.get("filament", {}).get("color_hex", "FFFFFF") or "FFFFFF"
+                            mqtt_client.publish(f"nfc/toolhead/{t}/color", color.lstrip("#").upper(), retain=True)
+                            active_spools[t] = spool_id
+                except ValueError:
+                    pass
+            elif active_spools.get(t):
+                logging.info(f"Klipper Sync: {t} spool cleared, resetting LED.")
+                mqtt_client.publish(f"nfc/toolhead/{t}/color", "000000", retain=True)
+                active_spools[t] = None
+    except Exception as e:
+        logging.error(f"Klipper Sync failed: {e}")
+
+def sync_from_afc_file():
+    """Read the AFC variable file and update locks based on spool presence."""
+    path = cfg["afc_var_path"]
+    if not os.path.exists(path):
+        logging.warning(f"AFC var file not found at {path}")
+        return
+
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        for unit_name, unit_data in data.items():
+            if unit_name == "system": continue
+            for lane_name, lane_data in unit_data.items():
+                spool_id = lane_data.get("spool_id")
+                is_locked = lane_locks.get(lane_name, False)
+                if spool_id and not is_locked:
+                    logging.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking scanner.")
+                    publish_lock(lane_name, "lock")
+                elif not spool_id and is_locked:
+                    logging.info(f"AFC Sync: {lane_name} is empty, clearing scanner.")
+                    publish_lock(lane_name, "clear")
+    except Exception as e:
+        logging.error(f"AFC Sync failed: {e}")
+
+class VarFileHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        time.sleep(0.5)
+        if event.src_path == cfg["afc_var_path"]:
+            sync_from_afc_file()
+        elif event.src_path == cfg["klipper_var_path"]:
+            sync_from_klipper_vars()
+
+def start_watcher():
+    afc_dir = os.path.dirname(cfg["afc_var_path"])
+    observer = Observer()
+    handler = VarFileHandler()
+    
+    if os.path.exists(afc_dir) and cfg["toolhead_mode"] == "ams":
+        observer.schedule(handler, afc_dir, recursive=False)
+        logging.info(f"Watching for AFC changes in {afc_dir}")
+    
+    if cfg["klipper_var_path"] and cfg["toolhead_mode"] != "ams":
+        klipper_dir = os.path.dirname(cfg["klipper_var_path"])
+        if os.path.exists(klipper_dir):
+            observer.schedule(handler, klipper_dir, recursive=False)
+            logging.info(f"Watching for Klipper changes in {klipper_dir}")
+    
+    observer.start()
+    return observer
+
+# ============================================================
+# Main Loop
+# ============================================================
 
 def on_shutdown(signum, frame):
     logging.info("Shutting down...")
-    client.publish("nfc/middleware/online", "false", qos=1, retain=True)
-    # AMS mode: clear all lane locks so scanners resume on next startup
-    if TOOLHEAD_MODE == "ams":
-        for lane in TOOLHEADS:
-            publish_clear(client, lane)
-    client.disconnect()
+    if mqtt_client:
+        mqtt_client.publish("nfc/middleware/online", "false", retain=True)
+        mqtt_client.disconnect()
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, on_shutdown)
 signal.signal(signal.SIGINT, on_shutdown)
 
-logging.info(f"Starting NFC Middleware (Mode: {TOOLHEAD_MODE})")
-client.connect(MQTT_BROKER, MQTT_PORT, 60)
-client.loop_forever()
+mqtt_client = mqtt.Client()
+if cfg["mqtt"]["username"]:
+    mqtt_client.username_pw_set(cfg["mqtt"]["username"], cfg["mqtt"]["password"])
+
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+mqtt_client.will_set("nfc/middleware/online", "false", retain=True)
+
+try:
+    mqtt_client.connect(cfg["mqtt"]["broker"], cfg["mqtt"]["port"], 60)
+    watcher = start_watcher()
+    mqtt_client.loop_forever()
+except Exception as e:
+    logging.error(f"Main loop error: {e}")
+    sys.exit(1)
