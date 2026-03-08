@@ -108,10 +108,12 @@ assignments and power distribution.
 
 The middleware overrides BoxTurtle's default lane LED colors (green for ready,
 blue for tool loaded) with the actual filament color from Spoolman, so you can
-see at a glance what color filament is in each lane. This only affects the
-"ready" and "tool loaded" states — **AFC's critical LED states are never
-touched**: faults (red), loading animations (white), and not-ready indicators
-all continue to work exactly as AFC intended. This requires a Klipper macro.
+see at a glance what color filament is in each lane. When a spool is running
+low, the LED will breathe (pulse) in the filament color to draw your attention.
+This only affects the "ready" and "tool loaded" states — **AFC's critical LED
+states are never touched**: faults (red), loading animations (white), and
+not-ready indicators all continue to work exactly as AFC intended. This
+requires a Klipper macro.
 
 1. Copy the macro to your AFC config directory:
    ```bash
