@@ -262,7 +262,7 @@ def on_message(client, userdata, msg):
             if cfg["toolhead_mode"] != "ams":
                 # Clear low spool state and flash red
                 client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
-                client.publish(f"nfc/toolhead/{toolhead}/color", "ERROR", retain=True)
+                client.publish(f"nfc/toolhead/{toolhead}/color", "error", retain=True)
     except Exception as e:
         logging.error(f"Message error: {e}")
 
