@@ -4,6 +4,19 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 
 ---
 
+## [1.3.2] - 2026-03-08
+
+### Fixed
+- **ESPHome scan/response race condition** — moved the `mqtt.publish` block to the top of `on_tag` in `base.yaml`, before the white flash animation. Previously the middleware couldn't start its Spoolman lookup until after the ~650ms of white flashes finished, so fast responses from the middleware would collide with the still-running animation and cancel the error/color LED update. Now the UID publishes immediately and the lookup runs in parallel with the flash sequence.
+- **Low spool breathing overriding error flash** — when an unknown tag was scanned on a toolhead that previously had a low spool, the `low_spool` topic stayed `true` and the breathing effect would override the red error flash. The middleware now publishes `low_spool: false` on unknown tag scans to clear that state before sending the error color.
+
+### Changed
+- **Spoolman spool cache** — middleware now caches all spools locally with a 1-hour TTL instead of querying the Spoolman API on every scan. On cache miss (e.g. newly registered tag), it does a forced refresh. Reduces network overhead for frequent scans.
+- **QoS 1 on color and low_spool publishes** — bumped from QoS 0 to QoS 1 to ensure LED state commands are delivered reliably, especially over flaky wifi.
+- **Conditional MQTT auth** — `username_pw_set` is now only called when credentials are provided in config, allowing unauthenticated broker setups.
+
+---
+
 ## [1.3.1] - 2026-03-07
 
 ### Added
