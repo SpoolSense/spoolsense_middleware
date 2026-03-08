@@ -35,8 +35,14 @@ AFC-Lite GND ─┬── ESP32 GND
               └── PN532 #4 GND
 ```
 
-Use a Wago connector, terminal block, or solder junction as a distribution
-point for the 5V and GND lines.
+Use WAGO lever-nut connectors as distribution points for 5V and GND:
+- **2x WAGO 221-415 (5-port)** — one for 5V (AFC-Lite → ESP32 VIN + 4 PN532 VCC),
+  one for GND (AFC-Lite → ESP32 GND + 4 PN532 GND).
+- If you want spare ports for future expansion (e.g. a status LED or fan),
+  use **2x WAGO 221-615 (6-port)** instead.
+
+No WAGOs are needed for I2C — each PN532 has its own dedicated bus with
+point-to-point wiring to the ESP32.
 
 ## I2C Wiring
 
