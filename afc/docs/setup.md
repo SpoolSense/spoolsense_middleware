@@ -81,7 +81,7 @@ assignments and power distribution.
 
 4. Install dependencies:
    ```bash
-   pip3 install paho-mqtt requests pyyaml --break-system-packages
+   pip3 install paho-mqtt requests pyyaml watchdog --break-system-packages
    ```
 
 5. Test manually:
@@ -141,9 +141,46 @@ is actively polling. Any NFC tag that enters the read zone triggers a scan.
 publishes a "lock" command. The ESP32 stops polling the PN532 on that lane.
 The spool can rotate freely during printing without triggering more scans.
 
-**Clear** — when the middleware shuts down, it publishes "clear" to all
-lanes to resume scanning on next startup. Future versions will detect
-AFC lane ejection events to clear individual lanes automatically.
+**Clear** — the middleware watches AFC's variable file (`AFC.var.unit`) for
+changes. When a lane is ejected and the spool_id is cleared, the middleware
+automatically publishes "clear" to resume scanning on that lane. On shutdown,
+all lanes are cleared so scanners resume on next startup.
+
+### AFC Variable File Watcher
+
+The middleware uses `watchdog` to monitor `AFC.var.unit` for changes. When
+the file is written (e.g. after a lane load, eject, or state change), the
+middleware reads the updated lane data and:
+- Locks scanners for lanes with spools, clears empty lanes
+- Re-asserts filament color on BoxTurtle LEDs (see below)
+- Caches lane statuses so NFC scan handlers can check AFC state instantly
+
+For single/toolchanger modes, the middleware similarly watches Klipper's
+`save_variables` file and syncs LED colors when spool assignments change
+outside the middleware (e.g. after a reboot).
+
+### LED Color Override (AMS Mode)
+
+AFC sets lane LEDs to hardcoded colors (green = ready, blue = tool loaded).
+This middleware overrides those with the actual filament color from Spoolman,
+so your BoxTurtle LEDs show what color filament is in each lane.
+
+The override works via a Klipper macro (`_SET_LANE_LED`) that you define in
+your config. The middleware calls it with RGB values and a breath flag for
+low spool warning. The macro maps these to your BoxTurtle's LED hardware.
+
+**Protected states** — the middleware never overrides these AFC LED states:
+- `led_fault` (red) — indicates a real problem
+- `led_loading` (white) — animation in progress
+- `led_not_ready` (red) — lane needs attention
+
+**Override states** — filament color replaces these defaults:
+- `led_ready` (green → filament color)
+- `led_tool_loaded` (blue → filament color)
+
+The override is re-asserted on every `AFC.var.unit` file change, since AFC
+resets LEDs to defaults on state transitions. The middleware's gcode command
+runs after AFC's internal LED set, so it reliably wins the race.
 
 ### AFC Integration
 
@@ -154,8 +191,6 @@ Moonraker's gcode script API. AFC then:
 - Pulls remaining weight from Spoolman → sets lane weight
 - Manages active spool tracking automatically on lane changes
 
-No additional Klipper macros are needed — AFC handles everything.
-
 ## Differences from Toolchanger Mode
 
 | Feature | Toolchanger | AFC/AMS |
@@ -163,6 +198,7 @@ No additional Klipper macros are needed — AFC handles everything.
 | Scanner location | Per toolhead | Per lane in BoxTurtle |
 | ESP32 count | One per toolhead | One for all 4 lanes |
 | Spool registration | SET_ACTIVE_SPOOL / SET_GCODE_VARIABLE | SET_SPOOL_ID (AFC) |
-| LED feedback | ESP32 onboard WS2812 | BoxTurtle lane LEDs (via AFC) |
+| LED feedback | ESP32 onboard WS2812 | BoxTurtle lane LEDs (via Klipper macro) |
 | Scan behavior | Always scanning | Scan-lock-clear lifecycle |
-| Klipper macros | spoolman_macros.cfg + toolhead macros | None — AFC handles everything |
+| File watcher | Klipper save_variables | AFC.var.unit |
+| Klipper macros | spoolman_macros.cfg + toolhead macros | _SET_LANE_LED for LED color |
