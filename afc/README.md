@@ -39,12 +39,19 @@ afc/
 
 The `stl/` folder contains a modified BoxTurtle tray (`Tray_plain_pn532.stl`) with a built-in PN532 mounting area and a cable routing hole for connecting to the ESP32. This is a hack of the original BoxTurtle plain tray — it works but could use refinement. See the call for help below!
 
+![PN532 mounted in the modified BoxTurtle tray](docs/tray-pn532-mounted.jpg)
+
+*Modified BoxTurtle tray with PN532 NFC Module V3 mounted in the recessed area. The 4-wire I2C + power cable routes out through the hole in the tray wall.*
+
+> **ESP32 mount needed!** The tray handles the PN532 but there's currently no mount or enclosure for the ESP32 board itself. If you have ideas for where to mount it inside (or on the side of) the BoxTurtle, please share — a simple bracket or clip design would be a great contribution.
+
 ## 🙏 Help Wanted — Testers & CAD Contributors
 
 This project is in early development and we need your help:
 
 - **Testers** — If you have a BoxTurtle and some PN532 modules, we'd love for you to try this out and report back. Does the tray fit? Does the PN532 reliably read tags through the spool? What's the scan distance like? Open an issue with your findings.
 - **CAD help** — The current tray STL is a functional hack, not a polished design. If you have CAD skills (Fusion 360, SolidWorks, FreeCAD, etc.) and want to help improve the PN532 mount, cable routing, or overall fit, contributions are very welcome. The tray needs proper parametric source files, better PN532 retention, and cleaner cable management.
+- **ESP32 mount** — We need a mount or bracket for the ESP32 DevKit board inside (or on the side of) the BoxTurtle. Something that keeps it accessible for USB flashing but out of the way of the filament path. Even a simple zip-tie bracket or DIN rail clip would be great.
 
 If you're interested in contributing, open an issue or submit a PR — all skill levels welcome.
 
