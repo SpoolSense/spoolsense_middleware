@@ -362,7 +362,17 @@ def on_shutdown(signum, frame):
     logging.info("Shutting down...")
     if mqtt_client:
         mqtt_client.publish("nfc/middleware/online", "false", retain=True)
+        # AMS mode: clear all lane locks so scanners are in a known state
+        if cfg["toolhead_mode"] == "ams":
+            for lane in cfg["toolheads"]:
+                publish_lock(lane, "clear")
         mqtt_client.disconnect()
+    
+    if watcher:
+        watcher.stop()
+        # No join() here to avoid blocking shutdown if the thread is stuck, 
+        # but stop() signals the thread to exit.
+    
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, on_shutdown)
