@@ -106,8 +106,12 @@ assignments and power distribution.
 
 ## Step 5 — Install the LED Macro
 
-The middleware overrides BoxTurtle's default lane LED colors with the actual
-filament color from Spoolman. This requires a Klipper macro.
+The middleware overrides BoxTurtle's default lane LED colors (green for ready,
+blue for tool loaded) with the actual filament color from Spoolman, so you can
+see at a glance what color filament is in each lane. This only affects the
+"ready" and "tool loaded" states — **AFC's critical LED states are never
+touched**: faults (red), loading animations (white), and not-ready indicators
+all continue to work exactly as AFC intended. This requires a Klipper macro.
 
 1. Copy the macro to your AFC config directory:
    ```bash
