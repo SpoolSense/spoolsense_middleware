@@ -15,20 +15,38 @@ afc/
 ├── esphome/
 │   └── boxturtle-nfc.yaml    # ESPHome config: 1 ESP32, 4 PN532 readers
 ├── middleware/
-│   ├── nfc_listener.py       # AFC-aware middleware (AMS mode)
-│   ├── config.example.yaml   # Config template for AMS mode
+│   ├── nfc_listener.py       # Unified middleware (single, toolchanger, and AMS modes)
+│   ├── config.example.yaml   # Config template with all three modes documented
 │   └── nfc-spoolman.service  # Systemd service file
+├── stl/
+│   └── Tray_plain_pn532.stl  # Modified BoxTurtle tray with PN532 mount
 └── docs/
     ├── setup.md              # Full setup guide
     └── wiring.md             # Wiring guide with pin assignments
 ```
 
+> **Note:** The middleware in `afc/middleware/` is the unified version — it supports all three toolhead modes (`single`, `toolchanger`, `ams`) via the `toolhead_mode` setting in `config.yaml`. You don't need a separate middleware for each mode.
+
+## 3D Printed Tray
+
+The `stl/` folder contains a modified BoxTurtle tray (`Tray_plain_pn532.stl`) with a built-in PN532 mounting area and a cable routing hole for connecting to the ESP32. This is a hack of the original BoxTurtle plain tray — it works but could use refinement. See the call for help below!
+
+## 🙏 Help Wanted — Testers & CAD Contributors
+
+This project is in early development and we need your help:
+
+- **Testers** — If you have a BoxTurtle and some PN532 modules, we'd love for you to try this out and report back. Does the tray fit? Does the PN532 reliably read tags through the spool? What's the scan distance like? Open an issue with your findings.
+- **CAD help** — The current tray STL is a functional hack, not a polished design. If you have CAD skills (Fusion 360, SolidWorks, FreeCAD, etc.) and want to help improve the PN532 mount, cable routing, or overall fit, contributions are very welcome. The tray needs proper parametric source files, better PN532 retention, and cleaner cable management.
+
+If you're interested in contributing, open an issue or submit a PR — all skill levels welcome.
+
 ## Quick Start
 
 1. Wire 4 PN532 modules to an ESP32 DevKit ([wiring guide](docs/wiring.md))
-2. Flash ESPHome with `boxturtle-nfc.yaml`
-3. Deploy the middleware with AMS mode config
-4. Place tagged spools on the respoolers — they auto-identify
+2. Print the modified tray from `stl/Tray_plain_pn532.stl`
+3. Flash ESPHome with `boxturtle-nfc.yaml`
+4. Deploy the middleware with AMS mode config
+5. Place tagged spools on the respoolers — they auto-identify
 
 See [docs/setup.md](docs/setup.md) for the full walkthrough.
 
@@ -38,6 +56,7 @@ See [docs/setup.md](docs/setup.md) for the full walkthrough.
 - 4x PN532 NFC Module (I2C mode)
 - NFC tags on each spool
 - Power from AFC-Lite 5V rail
+- 4x Modified BoxTurtle tray (print from `stl/Tray_plain_pn532.stl`)
 
 ## Requirements
 
