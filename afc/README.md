@@ -1,6 +1,12 @@
 # AFC / BoxTurtle NFC Integration
 
-> ⚠️ **Experimental** — this is a new addition and has not been tested on hardware yet. The middleware and ESPHome configs are functional but the physical PN532 mounting inside a BoxTurtle has not been validated. Feedback welcome!
+> ⚠️ **Experimental** — this is a new addition and has not been tested on hardware yet. The middleware, ESPHome configs, and Klipper macros are functional but the physical PN532 mounting inside a BoxTurtle has not been validated.
+>
+> **Current status:** I have a BoxTurtle but it is not hooked up yet. My current printer is a Voron Trident with a MadMax 4-toolhead toolchanger running klipper-toolchanger — none of my toolheads have filament sensors. I need to research how to incorporate AFC-Klipper into my existing klipper-toolchanger setup before I can test the AMS mode end-to-end. The toolchanger and single modes are tested and working on my MadMax.
+>
+> 📸 **Pictures and build photos coming soon** — once the BoxTurtle is wired up and the PN532 trays are mounted, I'll add photos of the full setup, wiring, and tray fitment.
+>
+> Feedback and testing from the community is very welcome in the meantime!
 
 NFC spool scanning for [BoxTurtle](https://github.com/ArmoredTurtle/BoxTurtle) and other AFC-based filament changers. One ESP32 drives 4 PN532 NFC readers (one per lane) and integrates with the [AFC-Klipper Add-On](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) via Spoolman.
 
