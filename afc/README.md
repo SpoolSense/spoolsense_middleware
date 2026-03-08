@@ -14,6 +14,8 @@ Place a spool on a BoxTurtle lane → NFC tag rotates into the reader → middle
 afc/
 ├── esphome/
 │   └── boxturtle-nfc.yaml    # ESPHome config: 1 ESP32, 4 PN532 readers
+├── klipper/
+│   └── nfc_led_macro.cfg     # Klipper macro for BoxTurtle LED color override
 ├── middleware/
 │   ├── nfc_listener.py       # Unified middleware (single, toolchanger, and AMS modes)
 │   ├── config.example.yaml   # Config template with all three modes documented

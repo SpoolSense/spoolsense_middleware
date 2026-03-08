@@ -104,7 +104,43 @@ assignments and power distribution.
    sudo systemctl start nfc-spoolman
    ```
 
-## Step 5 — Configure Spoolman
+## Step 5 — Install the LED Macro
+
+The middleware overrides BoxTurtle's default lane LED colors with the actual
+filament color from Spoolman. This requires a Klipper macro.
+
+1. Copy the macro to your AFC config directory:
+   ```bash
+   cp ~/nfc-toolchanger-spoolman/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
+   ```
+
+2. Add the include to your `printer.cfg` (or wherever you include AFC configs):
+   ```ini
+   [include AFC/nfc_led_macro.cfg]
+   ```
+
+3. Edit the macro file and change `bt_leds` to match your LED section name:
+   ```bash
+   nano ~/printer_data/config/AFC/nfc_led_macro.cfg
+   ```
+   Common LED names: `AFC_Indicator` (AFC default), or your `[neopixel]` name.
+   Also verify the lane-to-index mapping matches your `led_index` values in
+   your `AFC_stepper` sections.
+
+4. Restart Klipper to load the macro.
+
+5. Test it manually from the Klipper console:
+   ```
+   _SET_LANE_LED LANE=lane1 R=1.0 G=0.0 B=0.0 BREATH=0
+   ```
+   Lane 1's LED should turn red. Run with `R=0 G=0 B=0` to turn it off.
+
+> **Note:** The breathing effect for low spool is a placeholder. Without the
+> `led_effect` Klipper plugin, low spool lanes show a static filament color.
+> If you have `led_effect` installed, edit the macro to add `SET_LED_EFFECT`
+> commands in the `breath == 1` block.
+
+## Step 6 — Configure Spoolman
 
 Each spool needs an NFC tag UID registered in Spoolman:
 
@@ -113,7 +149,7 @@ Each spool needs an NFC tag UID registered in Spoolman:
 2. For each spool, edit it and add the NFC tag UID in the `nfc_id` field
 3. The UID format should match what your PN532 reads (e.g. `04-67-EE-A9-8F-61-80`)
 
-## Step 6 — Test
+## Step 7 — Test
 
 1. Place a tagged spool on lane 1's respooler
 2. Watch the middleware logs:
