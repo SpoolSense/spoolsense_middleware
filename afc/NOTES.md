@@ -96,25 +96,14 @@ on_message:
 
 ## Proposed Module: `openprinttag.py`
 
-The OpenPrintTag encode/decode logic, CBOR key mapping, and data validation should live in a dedicated module, separate from the main middleware. This keeps `nfc_listener.py` focused on MQTT/Spoolman orchestration.
+The OpenPrintTag encode/decode logic, CBOR key mapping, and data validation should live in a dedicated module, separate from the main middleware. This keeps `nfc_listener.py` focused on MQTT/Spoolman
 
 Responsibilities:
 - **CBOR encode/decode** — wraps `cbor2` with OpenPrintTag's integer key mapping
 - **Key constants** — maps OpenPrintTag spec keys (remaining_length, material, color, etc.) to their integer IDs per `specs.openprinttag.org`
 - **Read tag data** — decode an OpenPrintTag NDEF payload into a Python dict with human-readable keys
 - **Build write payloads** — construct valid CBOR payloads for writing back to tags (e.g. updated remaining_length)
-- **Reconciliation helpers** — compare tag data vs Spoolman data and return a recommended action (see Reconciliation section below)
-
-This module gets imported by `nfc_listener.py` and the future `tag_writer.py`.
-
-```
-afc/middleware/
-├── nfc_listener.py       # Main middleware (MQTT, Spoolman, AFC sync)
-├── openprinttag.py       # CBOR encode/decode, key mapping, reconciliation
-├── tag_writer.py         # Write queue, retry logic, targeted write commands
-├── config.example.yaml
-└── nfc-spoolman.service
-```
+- **Reconciliation helpers** — compare tag data vs Spoolman data and return a recommended action (see Reconciliation section below
 
 ---
 
