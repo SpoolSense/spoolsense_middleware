@@ -1,8 +1,11 @@
-Ideas for writing updates on filament usage to a OpenPrintTag
+# Ideas for Writing Updates on Filament Usage to an OpenPrintTag
 
-The Write Logic 
-Function to be triggered 60 seconds after a filament unload is detected.
+This document outlines the logic and implementation details for updating filament usage data on an NFC tag using the OpenPrintTag standard.
 
+## The Write Logic
+The following function is designed to be triggered **60 seconds** after a filament unload is detected. This delay ensures that the final usage data is correctly recorded in Spoolman before being written back to the physical tag.
+
+```python
 def write_usage_to_tag(lane_id, spool_id):
     """Fetch current usage from Spoolman and write to NFC tag."""
     try:
@@ -27,11 +30,12 @@ def write_usage_to_tag(lane_id, spool_id):
                 logging.info(f"Wrote {usage}g to tag on Lane {lane_id} via {reader_id}")
     except Exception as e:
         logging.error(f"Failed to write usage to tag: {e}")
+```
 
+## CBOR Encoding
+OpenPrintTag uses the **CBOR** (Concise Binary Object Representation) format for data storage. We use the `cbor2` library to convert a Python dictionary into the compact binary format required by the tag.
 
-CBOR Encoding
-Uses the cbor2 library to convert the Python dictionary into the compact binary format required by OpenPrintTag.
-
+```python
 def encode_openprinttag(data_dict):
     """Encode dictionary to CBOR hex string."""
     try:
@@ -39,12 +43,14 @@ def encode_openprinttag(data_dict):
         encoded = cbor2.dumps(data_dict)
         return encoded.hex()
     except Exception as e:
-        logging.error(f"CBOR Encode Error: {e}")
+        logging.error(f"CBOR Error: {e}")
         return None
+```
 
-ESP32
-On the ESP32 side (the YAML I provide), the reader listens for that nfc/readerX/write topic and executes this lambda to perform the physical write:
+## ESP32 Firmware (ESPHome)
+On the ESP32 side, the reader listens for the `nfc/readerX/write` topic and executes a C++ lambda to perform the physical write to the tag's NDEF area.
 
+```yaml
 on_message:
   - topic: nfc/reader1/write
     then:
@@ -52,18 +58,21 @@ on_message:
           // Converts the hex string back to bytes and writes to the tag's NDEF area
           std::vector<uint8_t> data = hex_to_bytes(x);
           id(reader1).write_ndef(data);
+```
 
-Possible Problems I forsee (spooky tone)
-Using one pn5180 to read two lanes I am certain there will be times when it tries to write updates but the scanner is picking up the wrong nfc tag. 
-My idea to correct this is to do the following. Although it may not be worth doing....maybe better to just have a macro that you run manually after an unload to update the tag using a 3rd pn5180.
+---
 
-Targeted Write
-Python Side: When the 1-minute timer expires, have the script look up the target_uid that was originally assigned to the lane. Have it send a JSON message containing both that uid and the ndef data.
+## 👻 Possible Problems I Foresee
+Using a single **PN5180** to read two lanes introduces a significant risk: there will almost certainly be times when the system tries to write an update, but the scanner picks up the **wrong NFC tag** because both are in the field.
 
-ESP32 Side: The ESP32 parses the JSON and checks if the target_uid is actually present in the reader's field. If it finds a match, it performs the write. If not (e.g., the tag was swapped during the 60-second window), 
-it aborts the write and logs a warning. 
+While it might be tempting to just use a manual macro with a 3rd dedicated "update station" PN5180, we can implement a **Targeted Write** to solve this programmatically.
 
-I have already thought about how to handle the mismatches when loading new filaments because this same exact issue will come up:
-If a mismatch occurs during Loading:
-If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. Update Spoolman to match the tag
-If Tag Usage < Spoolman Usage: This is the problem above. Log a warning but stick with Spoolman's higher number and hope we can write the changes to the tag at some point.
+### Targeted Write Solution
+
+#### Python Side
+When the 1-minute timer expires, the script looks up the `target_uid` that was originally assigned to the lane. It sends a JSON message containing both that **UID** and the **NDEF data**.
+
+#### ESP32 Side
+The ESP32 firmware parses the JSON and checks if the `target_uid` is actually present in the reader's field.
+*   **Match Found:** It performs the write.
+*   **No Match:** (e.g., the tag was swapped during the 60-second window) It aborts the write and logs a warning to prevent data corruption.
