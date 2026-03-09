@@ -89,4 +89,8 @@ FeliCa. Essentially reads everything.
   filament color support for `led_ready` and `led_tool_loaded` states, which
   would eliminate the need for the LED override macro entirely
 - **AFC + klipper-toolchanger** — research how to run AFC-Klipper alongside
-  klipper-toolchanger on a MadMax setup without filament sensors
+  klipper-toolchanger on a MadMax setup without filament sensors. There is a
+  `multi_extruder` branch on the AFC repo that may support this:
+  https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/blob/multi_extruder/CHANGELOG.md
+  (mentioned by jimmyjon711 on the ArmoredTurtle Discord). Need to test this
+  branch to get the BoxTurtle working with the existing MadMax toolchanger setup.
