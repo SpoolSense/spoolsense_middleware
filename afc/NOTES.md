@@ -1,4 +1,6 @@
-The Write Logic
+Ideas for writing updates on filament usage to a OpenPrintTag
+
+The Write Logic 
 Function to be triggered 60 seconds after a filament unload is detected.
 
 def write_usage_to_tag(lane_id, spool_id):
@@ -50,3 +52,18 @@ on_message:
           // Converts the hex string back to bytes and writes to the tag's NDEF area
           std::vector<uint8_t> data = hex_to_bytes(x);
           id(reader1).write_ndef(data);
+
+Possible Problems I forsee (spooky tone)
+Using one pn5180 to read two lanes I am certain there will be times when it tries to write updates but the scanner is picking up the wrong nfc tag. 
+My idea to correct this is to do the following. Although it may not be worth doing....maybe better to just have a macro that you run manually after an unload to update the tag using a 3rd pn5180.
+
+Targeted Write
+Python Side: When the 1-minute timer expires, have the script look up the target_uid that was originally assigned to the lane. Have it send a JSON message containing both that uid and the ndef data.
+
+ESP32 Side: The ESP32 parses the JSON and checks if the target_uid is actually present in the reader's field. If it finds a match, it performs the write. If not (e.g., the tag was swapped during the 60-second window), 
+it aborts the write and logs a warning. 
+
+I have already thought about how to handle the mismatches when loading new filaments because this same exact issue will come up:
+If a mismatch occurs during Loading:
+If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. Update Spoolman to match the tag
+If Tag Usage < Spoolman Usage: This is the problem above. Log a warning but stick with Spoolman's higher number and hope we can write the changes to the tag at some point.
