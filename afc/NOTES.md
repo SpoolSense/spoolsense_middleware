@@ -2,7 +2,7 @@
 
 ## The Write Logic to OpenPrintTag
 Function to be triggered **60 seconds** after a filament unload is detected. This delay ensures that the final usage data is correctly recorded in Spoolman before being written back to the physical tag.
-<<<<<<< HEAD
+
 =======
 
 > **Alternative to fixed delay:** Instead of a hard 60-second timer, consider
@@ -133,7 +133,7 @@ The PN5180 supports anti-collision with UID-specific selection in a multi-tag fi
 
 This is something I actually have already been pondering for loading filament and having mismatches.
 
-If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. We update Spoolman to match the tag so you don't run out of filament mid-print.
+If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. We update Spoolman to match the tag
 
 If Tag Usage < Spoolman Usage: Same issue as above. Log a warning but stick with Spoolman's higher number
 =======
