@@ -1,9 +1,7 @@
 # Ideas for Writing Updates on Filament Usage to an OpenPrintTag
 
-This document outlines the logic and implementation details for updating filament usage data on an NFC tag using the OpenPrintTag standard.
-
-## The Write Logic
-The following function is designed to be triggered **60 seconds** after a filament unload is detected. This delay ensures that the final usage data is correctly recorded in Spoolman before being written back to the physical tag.
+## The Write Logic to OpenPrintTag
+Function to be triggered **60 seconds** after a filament unload is detected. This delay ensures that the final usage data is correctly recorded in Spoolman before being written back to the physical tag.
 
 ```python
 def write_usage_to_tag(lane_id, spool_id):
@@ -33,7 +31,7 @@ def write_usage_to_tag(lane_id, spool_id):
 ```
 
 ## CBOR Encoding
-OpenPrintTag uses the **CBOR** (Concise Binary Object Representation) format for data storage. We use the `cbor2` library to convert a Python dictionary into the compact binary format required by the tag.
+OpenPrintTag uses the **CBOR** format for data storage. Use the `cbor2` library to convert a Python dictionary into the binary format required by the tag.
 
 ```python
 def encode_openprinttag(data_dict):
@@ -48,7 +46,7 @@ def encode_openprinttag(data_dict):
 ```
 
 ## ESP32 Firmware (ESPHome)
-On the ESP32 side, the reader listens for the `nfc/readerX/write` topic and executes a C++ lambda to perform the physical write to the tag's NDEF area.
+On the ESP32 side, the reader listens for the `nfc/readerX/write` topic and executes a C lambda to perform the physical write to the tag's NDEF area.
 
 ```yaml
 on_message:
@@ -65,7 +63,8 @@ on_message:
 ## 👻 Possible Problems I Foresee
 Using a single **PN5180** to read two lanes introduces a significant risk: there will almost certainly be times when the system tries to write an update, but the scanner picks up the **wrong NFC tag** because both are in the field.
 
-While it might be tempting to just use a manual macro with a 3rd dedicated "update station" PN5180, we can implement a **Targeted Write** to solve this programmatically.
+I might be tempted to just use a manual macro with a 3rd dedicated "update station" PN5180;....but I think I can implement a **Targeted Write** to solve this programmatically.
+I can always fallback to the manual method if this doesn't work out
 
 ### Targeted Write Solution
 
@@ -76,3 +75,10 @@ When the 1-minute timer expires, the script looks up the `target_uid` that was o
 The ESP32 firmware parses the JSON and checks if the `target_uid` is actually present in the reader's field.
 *   **Match Found:** It performs the write.
 *   **No Match:** (e.g., the tag was swapped during the 60-second window) It aborts the write and logs a warning to prevent data corruption.
+
+This is something I actually have already been pondering for loading filament and having mismatches.
+
+If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. We update Spoolman to match the tag so you don't run out of filament mid-print.
+
+If Tag Usage < Spoolman Usage: Same issue as above. Log a warning but stick with Spoolman's higher number
+
