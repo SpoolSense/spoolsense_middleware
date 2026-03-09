@@ -131,7 +131,6 @@ The PN5180 supports anti-collision with UID-specific selection in a multi-tag fi
 *   **Match Found:** It performs the write.
 *   **No Match:** (e.g., the tag was swapped during the 60-second window) It aborts the write and logs a warning to prevent data corruption.
 
-<<<<<<< HEAD
 This is something I actually have already been pondering for loading filament and having mismatches.
 
 If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. We update Spoolman to match the tag so you don't run out of filament mid-print.
