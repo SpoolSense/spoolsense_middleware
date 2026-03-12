@@ -15,14 +15,14 @@ Supports three toolhead modes (set toolhead_mode in config.yaml):
                 but does NOT call SET_ACTIVE_SPOOL. klipper-toolchanger handles
                 activation at each toolchange. Tested on MadMax T0–T3.
 
-  ams         — Calls AFC's SET_SPOOL_ID to register the spool in the correct
+  afc         — Calls AFC's SET_SPOOL_ID to register the spool in the correct
                 lane. AFC auto-pulls color, material, and weight from Spoolman.
                 After a successful scan, locks the scanner on that lane.
                 Watches AFC.var.unit for lane changes (eject → clear scanner).
                 Overrides BoxTurtle LEDs with filament color via a Klipper macro.
                 Designed for BoxTurtle, NightOwl, and other AFC-based units.
 
-LED Override Strategy (AMS mode):
+LED Override Strategy (AFC mode):
   AFC sets lane LEDs to hardcoded colors (green=ready, blue=loaded, etc.).
   This middleware overrides led_ready and led_tool_loaded with the actual
   filament color from Spoolman, so the BoxTurtle LEDs show what color
@@ -60,7 +60,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 CONFIG_PATH = os.path.expanduser("~/SpoolSense/config.yaml")
 
 DEFAULTS = {
-    "toolhead_mode": "ams",
+    "toolhead_mode": "afc",
     "toolheads": ["lane1", "lane2", "lane3", "lane4"],
     "mqtt": {
         "broker": None,
@@ -73,10 +73,10 @@ DEFAULTS = {
     "low_spool_threshold": 100,
     "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
     "klipper_var_path": None,
-    "ams_led_macro": "_SET_LANE_LED",
+    "afc_led_macro": "_SET_LANE_LED",
 }
 
-VALID_MODES = ("single", "toolchanger", "ams")
+VALID_MODES = ("single", "toolchanger", "afc")
 
 # NOTE: AFC likes to take control of LEDs. We define which states we are allowed 
 # to overwrite with our custom filament colors, and which ones mean "danger/busy" 
@@ -251,7 +251,7 @@ def update_klipper_led(lane, color_hex, is_low=False, force=False):
     NOTE: This includes "debounce" logic so we don't spam Klipper with the exact 
     same LED command 10 times a second.
     """
-    if cfg["toolhead_mode"] != "ams":
+    if cfg["toolhead_mode"] != "afc":
         return
 
     # Don't overwrite AFC if it's currently showing an error or loading animation
@@ -268,7 +268,7 @@ def update_klipper_led(lane, color_hex, is_low=False, force=False):
     r, g, b = hex_to_rgb(color_hex)
     breath = 1 if is_low else 0
 
-    script = f"{cfg['ams_led_macro']} LANE={lane} R={r:.3f} G={g:.3f} B={b:.3f} BREATH={breath}"
+    script = f"{cfg['afc_led_macro']} LANE={lane} R={r:.3f} G={g:.3f} B={b:.3f} BREATH={breath}"
     try:
         requests.post(
             f"{cfg['moonraker_url']}/printer/gcode/script",
@@ -308,12 +308,12 @@ def activate_spool(spool_id, toolhead):
                           timeout=5).raise_for_status()
             logging.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
 
-        elif mode == "ams":
+        elif mode == "afc":
             # Let AFC handle the actual assignment logic
             requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
                           json={"script": f"SET_SPOOL_ID LANE={toolhead} SPOOL_ID={spool_id}"},
                           timeout=5).raise_for_status()
-            logging.info(f"[ams] Set spool {spool_id} on {toolhead} via AFC")
+            logging.info(f"[afc] Set spool {spool_id} on {toolhead} via AFC")
 
         return True
     except Exception as e:
@@ -347,7 +347,7 @@ def on_connect(client, userdata, flags, rc):
         refresh_spool_cache()
 
         # Kick off the initial state sync based on our mode
-        if cfg["toolhead_mode"] == "ams":
+        if cfg["toolhead_mode"] == "afc":
             sync_from_afc_file()
         else:
             cfg["klipper_var_path"] = discover_klipper_var_path()
@@ -386,20 +386,20 @@ def on_message(client, userdata, msg):
             if activate_spool(spool_id, toolhead):
                 active_spools[toolhead] = spool_id
 
-                if cfg["toolhead_mode"] == "ams":
+                if cfg["toolhead_mode"] == "afc":
                     publish_lock(toolhead, "lock")
                     # Force the LED color right now
                     remaining = spool.get("remaining_weight")
                     is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
                     update_klipper_led(toolhead, color_hex, is_low)
                 else:
-                    # For non-AMS, just tell the ESP32 to light up its own LED
+                    # For non-AFC, just tell the ESP32 to light up its own LED
                     client.publish(f"nfc/toolhead/{toolhead}/color",
                                    color_hex.lstrip("#").upper(), qos=1, retain=True)
 
                 # Handle low spool warnings
                 remaining = spool.get("remaining_weight")
-                if cfg["toolhead_mode"] == "ams":
+                if cfg["toolhead_mode"] == "afc":
                     if remaining is not None and remaining <= cfg["low_spool_threshold"]:
                         logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
                 else:
@@ -412,7 +412,7 @@ def on_message(client, userdata, msg):
         else:
             # Tag scanned, but not found in Spoolman
             logging.warning(f"No spool found for UID: {uid}")
-            if cfg["toolhead_mode"] != "ams":
+            if cfg["toolhead_mode"] != "afc":
                 client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
                 client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
 
@@ -547,7 +547,7 @@ def start_watcher():
     observer = Observer()
     handler = VarFileHandler()
 
-    if cfg["toolhead_mode"] == "ams":
+    if cfg["toolhead_mode"] == "afc":
         afc_dir = os.path.dirname(cfg["afc_var_path"])
         if os.path.exists(afc_dir):
             observer.schedule(handler, afc_dir, recursive=False)
@@ -572,7 +572,7 @@ def on_shutdown(signum, frame):
     logging.info("Shutting down...")
     if mqtt_client:
         mqtt_client.publish("nfc/middleware/online", "false", qos=1, retain=True)
-        if cfg["toolhead_mode"] == "ams":
+        if cfg["toolhead_mode"] == "afc":
             for lane in cfg["toolheads"]:
                 publish_lock(lane, "clear")
         mqtt_client.disconnect()
@@ -596,10 +596,10 @@ mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
 logging.info(f"Starting NFC Middleware (Mode: {cfg['toolhead_mode']})")
 logging.info(f"Spoolman: {cfg['spoolman_url']}")
 logging.info(f"Moonraker: {cfg['moonraker_url']}")
-if cfg["toolhead_mode"] == "ams":
+if cfg["toolhead_mode"] == "afc":
     logging.info(f"Lanes: {', '.join(cfg['toolheads'])}")
     logging.info(f"AFC var file: {cfg['afc_var_path']}")
-    logging.info(f"LED macro: {cfg['ams_led_macro']}")
+    logging.info(f"LED macro: {cfg['afc_led_macro']}")
 else:
     logging.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
     logging.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
