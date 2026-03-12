@@ -1,5 +1,7 @@
 # ESPHome Setup Guide
 
+> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for the AFC setup guide, and `integrations/afc/esphome/lane-pn532.yaml` for the ESPHome config. Note that the AFC integration is not yet fully functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+
 ## Prerequisites
 
 - Home Assistant with ESPHome addon installed
@@ -48,10 +50,10 @@ The first flash must be done via USB. After that, all updates are wireless (OTA)
 
 ## Push Full Config
 
-1. Click **Edit** on the device in ESPHome dashboard
+1. In the ESPHome dashboard, click **+ New Device** (or **Edit** if you adopted the device)
 2. Replace the config with the contents of the appropriate toolhead YAML (e.g. `toolhead-t0.yaml`)
-3. Update the static IP and gateway in the toolhead file for your network
-4. Make sure `base.yaml` is also present in your ESPHome config directory — the toolhead files include it via `packages: !include base.yaml`
+3. Update the static IP and gateway in the config for your network
+4. Upload `base.yaml` to your ESPHome config directory — the toolhead files pull it in via `packages: !include base.yaml`. In the ESPHome dashboard, click the three-dot menu → **Upload file**, then select `esphome/base.yaml` from the repo
 5. Update the **Secrets** file in ESPHome with:
    ```yaml
    wifi_ssid: "YourNetworkName"

@@ -1,5 +1,7 @@
 # Klipper Setup Guide
 
+> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for AFC-specific Klipper setup. Note that the AFC LED color integration is not yet functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+
 ## Add Spoolman Macros
 
 Add the following to your `printer.cfg` (or include `spoolman_macros.cfg`):

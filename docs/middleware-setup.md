@@ -1,5 +1,7 @@
 # Middleware Setup Guide
 
+> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: the middleware is the same (`spoolsense.py`) but configured with `toolhead_mode: "ams"` — see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for AFC-specific middleware setup. Note that the AFC integration is not yet fully functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+
 ## Prerequisites
 
 - Raspberry Pi running Klipper/Moonraker
@@ -8,19 +10,15 @@
 
 ## Installation
 
-1. Create the project directory:
+1. Clone the repo:
 ```bash
-mkdir -p ~/SpoolSense
+cd ~
+git clone https://github.com/sjordan0228/SpoolSense.git
 ```
 
-2. Copy `spoolsense.py` to the directory:
+2. Copy the config template and fill in your values:
 ```bash
-cp middleware/spoolsense.py ~/SpoolSense/
-```
-
-3. Copy the config template and fill in your values:
-```bash
-cp middleware/config.example.yaml ~/SpoolSense/config.yaml
+cp ~/SpoolSense/middleware/config.example.yaml ~/SpoolSense/config.yaml
 nano ~/SpoolSense/config.yaml
 ```
 
@@ -38,14 +36,14 @@ Optional settings have sensible defaults:
 
 See `config.example.yaml` for full documentation on every option.
 
-4. Install dependencies:
+3. Install dependencies:
 ```bash
 pip3 install paho-mqtt requests pyyaml --break-system-packages
 ```
 
-5. Test manually first:
+4. Test manually first:
 ```bash
-python3 ~/SpoolSense/spoolsense.py
+python3 ~/SpoolSense/middleware/spoolsense.py
 ```
 
 You should see:
@@ -63,7 +61,7 @@ If the config file is missing or has placeholder values, the middleware will exi
 
 1. Copy the service file:
 ```bash
-sudo cp middleware/spoolsense.service /etc/systemd/system/
+sudo cp ~/SpoolSense/middleware/spoolsense.service /etc/systemd/system/
 ```
 
 2. Edit the service file to replace `YOUR_USERNAME` with your actual username:
@@ -104,8 +102,6 @@ The config file is never touched by `git pull`, so your settings are safe across
 
 ## Optional: Automatic Updates via Moonraker
 
-If you cloned the repo to your home directory, you can add it to Moonraker's `update_manager` so updates appear in Fluidd/Mainsail alongside Klipper and Moonraker. When an update is available, click update and Moonraker will pull the latest code and restart the middleware service automatically.
-
 Add the following to your `moonraker.conf`:
 
 ```ini
@@ -117,25 +113,13 @@ primary_branch: master
 managed_services: spoolsense
 ```
 
-If you haven't already cloned the repo:
-
-```bash
-cd ~
-git clone https://github.com/sjordan0228/SpoolSense.git
-```
-
 Restart Moonraker to pick up the new config:
 
 ```bash
 sudo systemctl restart moonraker
 ```
 
-After an update pulls new code, you may still need to manually copy the updated `spoolsense.py` to `~/SpoolSense/`:
-
-```bash
-cp ~/SpoolSense/middleware/spoolsense.py ~/SpoolSense/
-sudo systemctl restart spoolsense
-```
+Since the service runs `middleware/spoolsense.py` directly from the repo, updates are seamless — Moonraker pulls the latest code and restarts the service automatically. No manual file copying needed.
 
 Your `~/SpoolSense/config.yaml` is never overwritten — it lives outside the repo.
 

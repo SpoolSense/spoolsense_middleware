@@ -1,5 +1,7 @@
 # Wiring Guide
 
+> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: see [integrations/afc/docs/wiring.md](../integrations/afc/docs/wiring.md) for AFC-specific wiring. Note that the AFC integration is not yet fully functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+
 ## PN532 DIP Switch Settings (I2C Mode)
 
 Set the DIP switches on the PN532 board as follows:
@@ -15,8 +17,7 @@ Set the DIP switches on the PN532 board as follows:
 | SDA       | GPIO1             |
 | SCL       | GPIO2             |
 
-> **Note:** The 3.3V pin on the Waveshare ESP32-S3-Zero is labeled **3V3** on the board.
-> Do NOT connect VCC to 5V — the PN532 runs fine on 3.3V.
+> **Note:** The 3.3V pin on the Waveshare ESP32-S3-Zero is labeled **3V3** on the board. Connect VCC to **3V3**, not 5V — the PN532 operates at 3.3V logic.
 
 ### Solder Points on the ESP32-S3-Zero
 

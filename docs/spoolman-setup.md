@@ -1,5 +1,7 @@
 # Spoolman Setup Guide
 
+> **This guide applies to all setups** (toolchanger, single toolhead, and AFC). The `nfc_id` extra field and NFC tag registration process is the same regardless of mode.
+
 ## Add Extra Fields
 
 Spoolman needs two custom extra fields on spools to work with this system.
@@ -32,8 +34,6 @@ For each spool:
 3. Note the UID
 4. Go to Spoolman → find or create your spool
 5. Edit the spool and enter the UID in the `nfc_id` field
-
-> **Note:** Spoolman stores the nfc_id with extra quotes internally. The middleware handles this automatically by stripping them during comparison.
 
 ## Low Spool Warning
 
