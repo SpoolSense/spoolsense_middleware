@@ -11,7 +11,7 @@ See ENHANCEMENTS.md (Installation section) for the original idea summary.
 ## The Problem
 
 Right now setting up this project requires:
-- Manually editing config values in `nfc_listener.py`
+- Manually editing config values in `spoolsense.py`
 - Copying files to the right directories on the Pi
 - Setting up the systemd service by hand
 - Generating ESPHome YAML files per toolhead
@@ -48,7 +48,7 @@ The script handles everything automatically based on the user's answers. No manu
 Once all questions are answered:
 
 **Middleware:**
-- Writes configured `nfc_listener.py` with all values substituted, including `TOOLHEAD_MODE`
+- Writes configured `spoolsense.py` with all values substituted, including `TOOLHEAD_MODE`
 - Installs Python dependencies (`paho-mqtt`, `requests`)
 - Copies systemd service file, replacing `YOUR_USERNAME` with the actual user
 - Enables and starts the service

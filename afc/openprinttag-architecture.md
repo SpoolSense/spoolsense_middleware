@@ -170,19 +170,19 @@ This lets the same spool data work for:
 Namespace:
 
 ```text
-nfc_spoolman
+spoolsense
 ```
 
 Keys:
 
 ```text
-nfc_spoolman/spools/<spool_uid>
-nfc_spoolman/assignments/<target_type>/<target_id>
-nfc_spoolman/index/spoolman_id/<spoolman_id>
-nfc_spoolman/index/tag_uid/<tag_uid>
-nfc_spoolman/settings/backend
-nfc_spoolman/settings/source_mode
-nfc_spoolman/cache/last_scan
+spoolsense/spools/<spool_uid>
+spoolsense/assignments/<target_type>/<target_id>
+spoolsense/index/spoolman_id/<spoolman_id>
+spoolsense/index/tag_uid/<tag_uid>
+spoolsense/settings/backend
+spoolsense/settings/source_mode
+spoolsense/cache/last_scan
 ```
 
 ## Example data shape

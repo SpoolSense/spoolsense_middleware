@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to nfc-toolchanger-spoolman are documented here.
+All notable changes to SpoolSense are documented here.
+
+---
+
+## [Unreleased] - 2026-03-11
+
+### Changed
+- **Project renamed to SpoolSense** — the repository, middleware script, and service have been renamed from `nfc-toolchanger-spoolman` / `nfc_listener.py` / `nfc-spoolman.service` to `SpoolSense` / `spoolsense.py` / `spoolsense.service`. The install directory is now `~/SpoolSense/`. No functional changes.
 
 ---
 
@@ -34,23 +41,23 @@ All notable changes to nfc-toolchanger-spoolman are documented here.
 ## [1.3.0] - 2026-03-05
 
 ### Added
-- **External config file** — all middleware settings now live in `~/nfc_spoolman/config.yaml` instead of being hardcoded in the Python source. This means `nfc_listener.py` is safe to overwrite on updates (`git pull`, Moonraker `update_manager`, etc.) without losing your configuration. The middleware validates the config on startup and exits with clear error messages if required fields are missing or still have placeholder values.
-- **`config.example.yaml`** — documented template with all available options and sensible defaults. Copy to `~/nfc_spoolman/config.yaml` and fill in your values.
+- **External config file** — all middleware settings now live in `~/SpoolSense/config.yaml` instead of being hardcoded in the Python source. This means `spoolsense.py` is safe to overwrite on updates (`git pull`, Moonraker `update_manager`, etc.) without losing your configuration. The middleware validates the config on startup and exits with clear error messages if required fields are missing or still have placeholder values.
+- **`config.example.yaml`** — documented template with all available options and sensible defaults. Copy to `~/SpoolSense/config.yaml` and fill in your values.
 - **PyYAML dependency** — `pyyaml` added to required Python packages for config file parsing.
 - **Startup config logging** — middleware now logs the loaded config summary (toolhead mode, toolheads, Spoolman/Moonraker URLs, threshold) at startup for easier debugging via `journalctl`.
 
 ### Changed
-- **Config no longer lives in `nfc_listener.py`** — the hardcoded configuration block at the top of the file has been replaced with a `load_config()` function that reads from the external YAML file. Existing users should copy their current values into a new `config.yaml` before updating.
+- **Config no longer lives in `spoolsense.py`** — the hardcoded configuration block at the top of the file has been replaced with a `load_config()` function that reads from the external YAML file. Existing users should copy their current values into a new `config.yaml` before updating.
 - **`.gitignore`** — `config.yaml` is now ignored so user config is never overwritten by `git pull`.
 - **`docs/middleware-setup.md`** — rewritten for the new config file workflow.
 - **`scripts/install-beta.sh`** (beta) — updated to write `config.yaml` instead of sed-patching the Python source, and added `pyyaml` to dependency checks.
 
 ### Migration from v1.2.x
-1. Create your config file: `cp middleware/config.example.yaml ~/nfc_spoolman/config.yaml`
+1. Create your config file: `cp middleware/config.example.yaml ~/SpoolSense/config.yaml`
 2. Copy your existing values (MQTT, Spoolman URL, Moonraker URL, etc.) into `config.yaml`
-3. Copy the new `nfc_listener.py`: `cp middleware/nfc_listener.py ~/nfc_spoolman/`
+3. Copy the new `spoolsense.py`: `cp middleware/spoolsense.py ~/SpoolSense/`
 4. Install pyyaml: `pip3 install pyyaml --break-system-packages`
-5. Restart the service: `sudo systemctl restart nfc-spoolman`
+5. Restart the service: `sudo systemctl restart spoolsense`
 
 ---
 
@@ -102,7 +109,7 @@ Optionally surface middleware status in Home Assistant — see [middleware-setup
 - NFC-based filament spool tracking for Voron multi-toolhead printers (T0–T3)
 - **Hardware**: Waveshare ESP32-S3-Zero + PN532 NFC module (I2C) per toolhead
 - **ESPHome firmware** for all 4 toolheads — reads NFC tag UID and publishes to MQTT
-- **Python middleware** (`nfc_listener.py`) running on Raspberry Pi — subscribes to MQTT, queries Spoolman by NFC UID, sets active spool in Moonraker, publishes filament colour back to ESP32
+- **Python middleware** (`spoolsense.py`) running on Raspberry Pi — subscribes to MQTT, queries Spoolman by NFC UID, sets active spool in Moonraker, publishes filament colour back to ESP32
 - **Klipper macros** for spool tracking and filament usage
 - **Spoolman integration** — uses `nfc_id` extra field to map NFC tags to spools
 - **LED feedback** — onboard WS2812 RGB LED flashes white 3x on successful scan, then holds the filament's colour from Spoolman

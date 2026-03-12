@@ -10,18 +10,18 @@
 
 1. Create the project directory:
 ```bash
-mkdir -p ~/nfc_spoolman
+mkdir -p ~/SpoolSense
 ```
 
-2. Copy `nfc_listener.py` to the directory:
+2. Copy `spoolsense.py` to the directory:
 ```bash
-cp middleware/nfc_listener.py ~/nfc_spoolman/
+cp middleware/spoolsense.py ~/SpoolSense/
 ```
 
 3. Copy the config template and fill in your values:
 ```bash
-cp middleware/config.example.yaml ~/nfc_spoolman/config.yaml
-nano ~/nfc_spoolman/config.yaml
+cp middleware/config.example.yaml ~/SpoolSense/config.yaml
+nano ~/SpoolSense/config.yaml
 ```
 
 At minimum you need to set:
@@ -45,13 +45,13 @@ pip3 install paho-mqtt requests pyyaml --break-system-packages
 
 5. Test manually first:
 ```bash
-python3 ~/nfc_spoolman/nfc_listener.py
+python3 ~/SpoolSense/spoolsense.py
 ```
 
 You should see:
 ```
 Starting NFC Spoolman Middleware (TOOLHEAD_MODE: toolchanger)
-Config loaded from /home/youruser/nfc_spoolman/config.yaml
+Config loaded from /home/youruser/SpoolSense/config.yaml
 Toolheads: T0, T1, T2, T3
 Connected to MQTT broker (TOOLHEAD_MODE: toolchanger)
 Subscribed to nfc/toolhead/ for T0, T1, T2, T3
@@ -63,26 +63,26 @@ If the config file is missing or has placeholder values, the middleware will exi
 
 1. Copy the service file:
 ```bash
-sudo cp middleware/nfc-spoolman.service /etc/systemd/system/
+sudo cp middleware/spoolsense.service /etc/systemd/system/
 ```
 
 2. Edit the service file to replace `YOUR_USERNAME` with your actual username:
 ```bash
-sudo nano /etc/systemd/system/nfc-spoolman.service
+sudo nano /etc/systemd/system/spoolsense.service
 ```
 
 3. Enable and start:
 ```bash
-sudo systemctl enable nfc-spoolman
-sudo systemctl start nfc-spoolman
-sudo systemctl status nfc-spoolman
+sudo systemctl enable spoolsense
+sudo systemctl start spoolsense
+sudo systemctl status spoolsense
 ```
 
 ## Verify
 
 Scan an NFC tag and check the logs:
 ```bash
-journalctl -u nfc-spoolman -f
+journalctl -u spoolsense -f
 ```
 
 You should see:
@@ -94,10 +94,10 @@ Set spool 1 as active on T0 via Moonraker
 
 ## Updating Configuration
 
-To change settings after install, edit `~/nfc_spoolman/config.yaml` and restart the service:
+To change settings after install, edit `~/SpoolSense/config.yaml` and restart the service:
 ```bash
-nano ~/nfc_spoolman/config.yaml
-sudo systemctl restart nfc-spoolman
+nano ~/SpoolSense/config.yaml
+sudo systemctl restart spoolsense
 ```
 
 The config file is never touched by `git pull`, so your settings are safe across updates.
@@ -109,19 +109,19 @@ If you cloned the repo to your home directory, you can add it to Moonraker's `up
 Add the following to your `moonraker.conf`:
 
 ```ini
-[update_manager nfc-spoolman]
+[update_manager spoolsense]
 type: git_repo
-path: ~/nfc-toolchanger-spoolman
-origin: https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+path: ~/SpoolSense
+origin: https://github.com/sjordan0228/SpoolSense.git
 primary_branch: master
-managed_services: nfc-spoolman
+managed_services: spoolsense
 ```
 
 If you haven't already cloned the repo:
 
 ```bash
 cd ~
-git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+git clone https://github.com/sjordan0228/SpoolSense.git
 ```
 
 Restart Moonraker to pick up the new config:
@@ -130,14 +130,14 @@ Restart Moonraker to pick up the new config:
 sudo systemctl restart moonraker
 ```
 
-After an update pulls new code, you may still need to manually copy the updated `nfc_listener.py` to `~/nfc_spoolman/`:
+After an update pulls new code, you may still need to manually copy the updated `spoolsense.py` to `~/SpoolSense/`:
 
 ```bash
-cp ~/nfc-toolchanger-spoolman/middleware/nfc_listener.py ~/nfc_spoolman/
-sudo systemctl restart nfc-spoolman
+cp ~/SpoolSense/middleware/spoolsense.py ~/SpoolSense/
+sudo systemctl restart spoolsense
 ```
 
-Your `~/nfc_spoolman/config.yaml` is never overwritten — it lives outside the repo.
+Your `~/SpoolSense/config.yaml` is never overwritten — it lives outside the repo.
 
 ## Optional: Home Assistant Monitoring
 

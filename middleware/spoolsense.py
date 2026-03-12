@@ -21,7 +21,7 @@ import time
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 # ============================================================
-CONFIG_PATH = os.path.expanduser("~/nfc_spoolman/config.yaml")
+CONFIG_PATH = os.path.expanduser("~/SpoolSense/config.yaml")
 
 # Required fields default to None and are validated after loading.
 DEFAULTS = {
@@ -44,7 +44,7 @@ last_cache_refresh = 0
 CACHE_TTL = 3600  # Refresh cache every hour
 
 def load_config():
-    """Load and validate configuration from ~/nfc_spoolman/config.yaml."""
+    """Load and validate configuration from ~/SpoolSense/config.yaml."""
     if not os.path.exists(CONFIG_PATH):
         logging.error(f"Config file not found: {CONFIG_PATH}")
         sys.exit(1)

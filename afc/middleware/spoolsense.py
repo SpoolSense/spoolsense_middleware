@@ -34,7 +34,7 @@ LED Override Strategy (AMS mode):
   resets LEDs to defaults on state transitions. Our gcode command runs after
   AFC's internal LED set, so we reliably "win" the race.
 
-Configuration is loaded from ~/nfc_spoolman/config.yaml — see config.example.yaml.
+Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.yaml.
 """
 
 import paho.mqtt.client as mqtt
@@ -57,7 +57,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 # Configuration
 # ============================================================
 
-CONFIG_PATH = os.path.expanduser("~/nfc_spoolman/config.yaml")
+CONFIG_PATH = os.path.expanduser("~/SpoolSense/config.yaml")
 
 DEFAULTS = {
     "toolhead_mode": "ams",
@@ -97,10 +97,10 @@ watcher = None
 
 
 def load_config():
-    """Load and validate configuration from ~/nfc_spoolman/config.yaml."""
+    """Load and validate configuration from ~/SpoolSense/config.yaml."""
     if not os.path.exists(CONFIG_PATH):
         logging.error(f"Config file not found: {CONFIG_PATH}")
-        logging.error("Copy the template:  cp config.example.yaml ~/nfc_spoolman/config.yaml")
+        logging.error("Copy the template:  cp config.example.yaml ~/SpoolSense/config.yaml")
         sys.exit(1)
 
     try:

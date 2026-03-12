@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# nfc-toolchanger-spoolman — Interactive Install Script (BETA)
+# SpoolSense — Interactive Install Script (BETA)
 # ==============================================================================
 # BETA: This script is under active testing. Please report issues on GitHub.
 #
@@ -119,11 +119,11 @@ normalize_moonraker_url() {
 # ------------------------------------------------------------------------------
 # Constants
 # ------------------------------------------------------------------------------
-INSTALL_DIR="$HOME/nfc_spoolman"
-LISTENER_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/middleware/nfc_listener.py"
-SERVICE_NAME="nfc-spoolman"
+INSTALL_DIR="$HOME/SpoolSense"
+LISTENER_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/middleware/spoolsense.py"
+SERVICE_NAME="spoolsense"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-INSTALLED_LISTENER="${INSTALL_DIR}/nfc_listener.py"
+INSTALLED_LISTENER="${INSTALL_DIR}/spoolsense.py"
 
 # ------------------------------------------------------------------------------
 # Detect existing install
@@ -137,9 +137,9 @@ already_installed() {
 # Uninstall
 # ------------------------------------------------------------------------------
 do_uninstall() {
-    header "Uninstall nfc-toolchanger-spoolman"
+    header "Uninstall SpoolSense"
     echo
-    warn "This will stop and remove the middleware service and nfc_listener.py."
+    warn "This will stop and remove the middleware service and spoolsense.py."
     warn "Your Spoolman data and ESPHome configs will NOT be affected."
     echo
     confirm "Are you sure you want to uninstall?" || { info "Uninstall cancelled."; exit 0; }
@@ -164,9 +164,9 @@ do_uninstall() {
     fi
 
     if [[ -f "$INSTALLED_LISTENER" ]]; then
-        info "Removing nfc_listener.py..."
+        info "Removing spoolsense.py..."
         rm -f "$INSTALLED_LISTENER"
-        success "nfc_listener.py removed"
+        success "spoolsense.py removed"
     fi
 
     echo
@@ -201,7 +201,7 @@ check_spoolman() {
 }
 
 # ------------------------------------------------------------------------------
-# Write configured nfc_listener.py
+# Write configured spoolsense.py
 # ------------------------------------------------------------------------------
 write_listener() {
     local broker="$1"
@@ -216,7 +216,7 @@ write_listener() {
 
     mkdir -p "$INSTALL_DIR"
 
-    # Copy nfc_listener.py as-is — no sed patching needed.
+    # Copy spoolsense.py as-is — no sed patching needed.
     # All user config lives in config.yaml, so the Python file is safe
     # to overwrite on future updates (git pull / Moonraker update_manager).
     cp "$LISTENER_SRC" "$INSTALLED_LISTENER"
@@ -348,7 +348,7 @@ build_toolheads_str() {
 # ------------------------------------------------------------------------------
 echo
 echo -e "${BOLD}=================================================${RESET}"
-echo -e "${BOLD}  nfc-toolchanger-spoolman — Install Script${RESET}"
+echo -e "${BOLD}  SpoolSense — Install Script${RESET}"
 echo -e "${YELLOW}${BOLD}  BETA — Please report issues on GitHub${RESET}"
 echo -e "${BOLD}=================================================${RESET}"
 echo
@@ -363,7 +363,7 @@ echo
 
 # Verify we're running from the repo root
 if [[ ! -f "$LISTENER_SRC" ]]; then
-    error "Cannot find middleware/nfc_listener.py"
+    error "Cannot find middleware/spoolsense.py"
     error "Please run this script from the repo root: bash scripts/install-beta.sh"
     exit 1
 fi
@@ -508,10 +508,10 @@ fi
 header "Step 4 of 4 — Installing"
 echo
 
-info "Copying nfc_listener.py to ${INSTALL_DIR}..."
+info "Copying spoolsense.py to ${INSTALL_DIR}..."
 write_listener "$MQTT_BROKER" "$MQTT_PORT" "$MQTT_USERNAME" "$MQTT_PASSWORD" \
     "$TOOLHEADS_STR" "$SPOOLMAN_URL" "$MOONRAKER_URL" "$LOW_SPOOL_THRESHOLD" "$TOOLHEAD_MODE"
-success "nfc_listener.py copied and config.yaml written"
+success "spoolsense.py copied and config.yaml written"
 
 info "Writing systemd service file..."
 write_service

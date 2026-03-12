@@ -23,9 +23,9 @@ afc/
 ├── klipper/
 │   └── nfc_led_macro.cfg     # Klipper macro for BoxTurtle LED color override
 ├── middleware/
-│   ├── nfc_listener.py       # Unified middleware (single, toolchanger, and AMS modes)
+│   ├── spoolsense.py       # Unified middleware (single, toolchanger, and AMS modes)
 │   ├── config.example.yaml   # Config template with all three modes documented
-│   └── nfc-spoolman.service  # Systemd service file
+│   └── spoolsense.service  # Systemd service file
 ├── stl/
 │   └── Tray_plain_pn532.stl  # Modified BoxTurtle tray with PN532 mount
 └── docs/

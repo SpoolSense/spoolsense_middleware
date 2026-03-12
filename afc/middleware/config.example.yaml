@@ -1,9 +1,9 @@
 # =============================================================
 # NFC Spoolman Middleware — Configuration
 # =============================================================
-# Copy this file to ~/nfc_spoolman/config.yaml and fill in your values.
+# Copy this file to ~/SpoolSense/config.yaml and fill in your values.
 #
-#   cp config.example.yaml ~/nfc_spoolman/config.yaml
+#   cp config.example.yaml ~/SpoolSense/config.yaml
 #
 # This middleware supports three modes. Set toolhead_mode below.
 # =============================================================

@@ -4,10 +4,10 @@
 
 ## install-beta.sh
 
-Interactive install script for nfc-toolchanger-spoolman. Handles:
+Interactive install script for SpoolSense. Handles:
 
 - Installing Python dependencies
-- Writing a configured `nfc_listener.py` to `~/nfc_spoolman/`
+- Writing a configured `spoolsense.py` to `~/SpoolSense/`
 - Installing and enabling the systemd service
 - Connectivity checks against MQTT and Spoolman
 - Reconfigure or uninstall on re-run

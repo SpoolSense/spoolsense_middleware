@@ -96,7 +96,7 @@ on_message:
 
 ## Proposed Module: `openprinttag.py`
 
-The OpenPrintTag encode/decode logic, CBOR key mapping, and data validation should live in a dedicated module, separate from the main middleware. This keeps `nfc_listener.py` focused on MQTT/Spoolman
+The OpenPrintTag encode/decode logic, CBOR key mapping, and data validation should live in a dedicated module, separate from the main middleware. This keeps `spoolsense.py` focused on MQTT/Spoolman
 
 Responsibilities:
 - **CBOR encode/decode** — wraps `cbor2` with OpenPrintTag's integer key mapping

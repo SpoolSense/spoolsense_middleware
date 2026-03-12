@@ -115,8 +115,8 @@ Modifications made:
 
 **Option A — Interactive install script (beta):**
 ```bash
-git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
-cd nfc-toolchanger-spoolman
+git clone https://github.com/sjordan0228/SpoolSense.git
+cd SpoolSense
 bash scripts/install-beta.sh
 ```
 The script walks you through configuration, installs dependencies, sets up the systemd service, and generates ESPHome YAML files for each scanner.
@@ -135,19 +135,19 @@ You can add this project to Moonraker's `update_manager` so it appears alongside
 Add the following to your `moonraker.conf`:
 
 ```ini
-[update_manager nfc-spoolman]
+[update_manager spoolsense]
 type: git_repo
-path: ~/nfc-toolchanger-spoolman
-origin: https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+path: ~/SpoolSense
+origin: https://github.com/sjordan0228/SpoolSense.git
 primary_branch: master
-managed_services: nfc-spoolman
+managed_services: spoolsense
 ```
 
 Then clone the repo to your home directory if you haven't already:
 
 ```bash
 cd ~
-git clone https://github.com/sjordan0228/nfc-toolchanger-spoolman.git
+git clone https://github.com/sjordan0228/SpoolSense.git
 ```
 
 Restart Moonraker to pick up the new config:
@@ -156,7 +156,7 @@ Restart Moonraker to pick up the new config:
 sudo systemctl restart moonraker
 ```
 
-The project should now appear in your update manager panel. Your configuration in `~/nfc_spoolman/config.yaml` is separate from the repo and will never be overwritten by updates.
+The project should now appear in your update manager panel. Your configuration in `~/SpoolSense/config.yaml` is separate from the repo and will never be overwritten by updates.
 
 ## License
 

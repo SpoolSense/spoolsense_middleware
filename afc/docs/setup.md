@@ -63,18 +63,18 @@ assignments and power distribution.
 
 1. Create the directory (if it doesn't exist):
    ```bash
-   mkdir -p ~/nfc_spoolman
+   mkdir -p ~/SpoolSense
    ```
 
 2. Copy the AFC middleware and config:
    ```bash
-   cp afc/middleware/nfc_listener.py ~/nfc_spoolman/
-   cp afc/middleware/config.example.yaml ~/nfc_spoolman/config.yaml
+   cp afc/middleware/spoolsense.py ~/SpoolSense/
+   cp afc/middleware/config.example.yaml ~/SpoolSense/config.yaml
    ```
 
 3. Edit the config:
    ```bash
-   nano ~/nfc_spoolman/config.yaml
+   nano ~/SpoolSense/config.yaml
    ```
    Set your MQTT, Spoolman, and Moonraker details. Make sure `toolhead_mode`
    is set to `"ams"` and the lane names match your AFC config.
@@ -86,22 +86,22 @@ assignments and power distribution.
 
 5. Test manually:
    ```bash
-   python3 ~/nfc_spoolman/nfc_listener.py
+   python3 ~/SpoolSense/spoolsense.py
    ```
    You should see:
    ```
    Starting NFC Spoolman Middleware — AFC Edition (TOOLHEAD_MODE: ams)
-   Config loaded from /home/youruser/nfc_spoolman/config.yaml
+   Config loaded from /home/youruser/SpoolSense/config.yaml
    Lanes: lane1, lane2, lane3, lane4
    Connected to MQTT broker (TOOLHEAD_MODE: ams)
    ```
 
 6. Install as a service:
    ```bash
-   sudo cp afc/middleware/nfc-spoolman.service /etc/systemd/system/
-   sudo nano /etc/systemd/system/nfc-spoolman.service  # replace YOUR_USERNAME
-   sudo systemctl enable nfc-spoolman
-   sudo systemctl start nfc-spoolman
+   sudo cp afc/middleware/spoolsense.service /etc/systemd/system/
+   sudo nano /etc/systemd/system/spoolsense.service  # replace YOUR_USERNAME
+   sudo systemctl enable spoolsense
+   sudo systemctl start spoolsense
    ```
 
 ## Step 5 — Install the LED Macro
@@ -117,7 +117,7 @@ requires a Klipper macro.
 
 1. Copy the macro to your AFC config directory:
    ```bash
-   cp ~/nfc-toolchanger-spoolman/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
+   cp ~/SpoolSense/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
    ```
 
 2. Add the include to your `printer.cfg` (or wherever you include AFC configs):
@@ -162,7 +162,7 @@ Each spool needs an NFC tag UID registered in Spoolman:
 1. Place a tagged spool on lane 1's respooler
 2. Watch the middleware logs:
    ```bash
-   journalctl -u nfc-spoolman -f
+   journalctl -u spoolsense -f
    ```
 3. You should see:
    ```

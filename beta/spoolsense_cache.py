@@ -2,7 +2,7 @@
 """
 NFC Spoolman Middleware — Beta (Spool Cache)
 ============================================
-Beta version of nfc_listener.py testing in-memory spool cache to avoid
+Beta version of spoolsense.py testing in-memory spool cache to avoid
 fetching all spools from Spoolman on every NFC scan.
 
 Changes from production:
@@ -11,7 +11,7 @@ Changes from production:
   - requests.Session() reuses TCP connections to both Spoolman and Moonraker
   - _normalize_uid() centralizes UID sanitization
 
-If this tests well, promote to middleware/nfc_listener.py.
+If this tests well, promote to middleware/spoolsense.py.
 
 Flow:
   ESP32-S3 scans NFC tag
