@@ -4,6 +4,14 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.4.0] - 2026-03-12
+
+### Added
+- **AFC per-lane ESPHome config** (`integrations/afc/esphome/lane-pn532.yaml`) — standalone ESP32-S3-Zero + PN532 config for BoxTurtle AFC users. Flash one copy per lane, changing `lane_id` and WiFi/IP settings each time. Includes the scan-lock mechanism with a corrected `if:` condition block — the previous config used `return` inside a lambda which did not actually prevent the MQTT publish from firing when a lane was locked.
+- **ESPHome directory README** (`esphome/README.md`) — documents which config file to use for each setup, what to edit before flashing, secrets file format, step-by-step first-flash instructions, and a hardware reference table.
+
+---
+
 ## [Unreleased] - 2026-03-12
 
 ### Changed
