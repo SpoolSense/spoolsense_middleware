@@ -6,6 +6,9 @@ All notable changes to SpoolSense are documented here.
 
 ## [Unreleased] - 2026-03-11
 
+### Added
+- **AFC-specific version (Box Turtle)** — a new `afc/` directory contains a variant of SpoolSense for Box Turtle users. This version is not yet functional as it depends on pending changes to [AFC-Klipper-Add-on](https://github.com/ArmoredTurtle/AFC-Klipper-Add-on) (currently open as a PR). Specifically, it requires the LED lane color changes from that PR to be merged before it will work. Feel free to explore the `afc/` directory in the meantime — a full update will be posted once those changes land.
+
 ### Changed
 - **Project renamed to SpoolSense** — the repository, middleware script, and service have been renamed from `nfc-toolchanger-spoolman` / `nfc_listener.py` / `nfc-spoolman.service` to `SpoolSense` / `spoolsense.py` / `spoolsense.service`. The install directory is now `~/SpoolSense/`. No functional changes.
 
