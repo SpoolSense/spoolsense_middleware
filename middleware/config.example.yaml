@@ -17,20 +17,20 @@
 #               Saves spool ID per toolhead and publishes LED color.
 #               klipper-toolchanger handles SET_ACTIVE_SPOOL at toolchange.
 #
-# ams         — For lane-based filament changers (BoxTurtle, NightOwl, etc.)
+# afc         — For lane-based filament changers (BoxTurtle, NightOwl, etc.)
 #               running the AFC-Klipper Add-On. Calls AFC's SET_SPOOL_ID
 #               to register the spool in the correct lane. AFC handles
 #               spool tracking, color, material, and weight automatically.
 #
-toolhead_mode: "ams"
+toolhead_mode: "afc"
 
 # ---- Toolheads / Lanes --------------------------------------
 #
 # For single mode:      ["T0"]
 # For toolchanger mode: ["T0", "T1", "T2", "T3"]
-# For ams mode:         ["lane1", "lane2", "lane3", "lane4"]
+# For afc mode:         ["lane1", "lane2", "lane3", "lane4"]
 #
-# These must match your MQTT topics and (for ams mode) your AFC
+# These must match your MQTT topics and (for afc mode) your AFC
 # lane config names from your AFC_stepper sections.
 #
 toolheads:
@@ -60,12 +60,12 @@ moonraker_url: "http://YOUR_KLIPPER_IP"
 #
 # single/toolchanger: publishes low_spool status to MQTT and
 #   triggers the ESP32 LED pulse effect.
-# ams: logged to journal only — AFC manages its own low spool
+# afc: logged to journal only — AFC manages its own low spool
 #   behavior via enable_assist_weight.
 #
 low_spool_threshold: 100
 
-# ---- AMS Mode Options (ignored in single/toolchanger) -------
+# ---- AFC Mode Options (ignored in single/toolchanger) -------
 
 # Path to AFC's variable file. The middleware watches this file for
 # lane changes (spool insert/eject) to auto-lock/clear scanners and
@@ -79,4 +79,4 @@ afc_var_path: "~/printer_data/config/AFC/AFC.var.unit"
 # Klipper macro name for setting BoxTurtle lane LED colors.
 # The middleware calls this with: LANE=<name> R=<0-1> G=<0-1> B=<0-1> BREATH=<0|1>
 # You must define this macro in your Klipper config — see afc/docs/setup.md.
-ams_led_macro: "_SET_LANE_LED"
+afc_led_macro: "_SET_LANE_LED"
