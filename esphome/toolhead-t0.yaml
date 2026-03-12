@@ -1,6 +1,6 @@
 # =============================================================
 # Toolhead T0 — edit this file for T0-specific settings
-# All shared logic lives in base.yaml — do not duplicate it here.
+# All shared logic lives in base-pn532.yaml — do not duplicate it here.
 # =============================================================
 
 substitutions:
@@ -14,7 +14,7 @@ esphome:
   name_add_mac_suffix: false
 
 packages:
-  base: !include base.yaml
+  base: !include base-pn532.yaml
 
 wifi:
   ssid: !secret wifi_ssid

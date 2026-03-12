@@ -24,10 +24,10 @@ Once Mosquitto is running and you have a username/password configured, come back
 
 The ESPHome configs use a shared base + thin wrapper approach:
 
-- **`base.yaml`** — all shared logic (LED, NFC, MQTT handlers, I2C). Never edit directly.
+- **`base-pn532.yaml`** — all shared logic (LED, NFC, MQTT handlers, I2C). Never edit directly.
 - **`toolhead-t0.yaml` through `toolhead-t3.yaml`** — one per toolhead. Only contains the device name, static IP, and substitution variables that identify the toolhead.
 
-Any changes to shared logic (LED effects, MQTT topics, scan behavior) only need to be made in `base.yaml` — all toolheads inherit the changes automatically.
+Any changes to shared logic (LED effects, MQTT topics, scan behavior) only need to be made in `base-pn532.yaml` — all toolheads inherit the changes automatically.
 
 ## First Flash (USB Required)
 
@@ -53,7 +53,7 @@ The first flash must be done via USB. After that, all updates are wireless (OTA)
 1. In the ESPHome dashboard, click **+ New Device** (or **Edit** if you adopted the device)
 2. Replace the config with the contents of the appropriate toolhead YAML (e.g. `toolhead-t0.yaml`)
 3. Update the static IP and gateway in the config for your network
-4. Upload `base.yaml` to your ESPHome config directory — the toolhead files pull it in via `packages: !include base.yaml`. In the ESPHome dashboard, click the three-dot menu → **Upload file**, then select `esphome/base.yaml` from the repo
+4. Upload `base-pn532.yaml` to your ESPHome config directory — the toolhead files pull it in via `packages: !include base-pn532.yaml`. In the ESPHome dashboard, click the three-dot menu → **Upload file**, then select `esphome/base-pn532.yaml` from the repo
 5. Update the **Secrets** file in ESPHome with:
    ```yaml
    wifi_ssid: "YourNetworkName"
@@ -67,7 +67,7 @@ The first flash must be done via USB. After that, all updates are wireless (OTA)
 
 ## Repeat for T1, T2, T3
 
-Repeat the entire process for each ESP32-S3, using the corresponding toolhead YAML config file. Each toolhead file only differs in its name, toolhead ID, and static IP — all shared logic comes from `base.yaml`.
+Repeat the entire process for each ESP32-S3, using the corresponding toolhead YAML config file. Each toolhead file only differs in its name, toolhead ID, and static IP — all shared logic comes from `base-pn532.yaml`.
 
 ## Verify
 

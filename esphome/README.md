@@ -10,7 +10,7 @@ This directory contains ESPHome firmware configs for SpoolSense NFC scanners.
 
 Use `toolhead-t0.yaml` through `toolhead-t3.yaml` — one per physical toolhead.
 
-Each file is a thin wrapper that sets the toolhead's ID and WiFi/IP config, then pulls all shared logic from `base.yaml`. You only need to edit the wrapper file before flashing.
+Each file is a thin wrapper that sets the toolhead's ID and WiFi/IP config, then pulls all shared logic from `base-pn532.yaml`. You only need to edit the wrapper file before flashing.
 
 | File | Toolhead ID |
 |------|-------------|
@@ -123,7 +123,7 @@ PN532 DIP switch settings for I2C mode: **Switch 1 ON, Switch 2 OFF**.
 
 ```
 esphome/
-├── base.yaml              # Shared logic for toolchanger/single (do not flash directly)
+├── base-pn532.yaml              # Shared logic for toolchanger/single (do not flash directly)
 ├── toolhead-t0.yaml       # Flash this for T0
 ├── toolhead-t1.yaml       # Flash this for T1
 ├── toolhead-t2.yaml       # Flash this for T2
