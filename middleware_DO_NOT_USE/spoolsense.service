@@ -1,5 +1,5 @@
 [Unit]
-Description=NFC Spoolman Listener — AFC Edition
+Description=NFC Spoolman Listener
 After=network.target
 
 [Service]
