@@ -8,7 +8,7 @@
 >
 > Feedback and testing from the community is very welcome in the meantime!
 
-NFC spool scanning for [BoxTurtle](https://github.com/ArmoredTurtle/BoxTurtle) and other AFC-based filament changers. One ESP32 drives 4 PN532 NFC readers (one per lane) and integrates with the [AFC-Klipper Add-On](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) via Spoolman.
+NFC spool scanning for [BoxTurtle](https://github.com/ArmoredTurtle/BoxTurtle) and other AFC-based filament changers. One ESP32-S3-Zero + PN532 per lane integrates with the [AFC-Klipper Add-On](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) via Spoolman.
 
 ## How It Works
 
@@ -17,15 +17,11 @@ Place a spool on a BoxTurtle lane → NFC tag rotates into the reader → middle
 ## What's Here
 
 ```
-afc/
+integrations/afc/
 ├── esphome/
-│   └── boxturtle-nfc.yaml    # ESPHome config: 1 ESP32, 4 PN532 readers
+│   └── lane-pn532.yaml       # ESPHome config: ESP32-S3-Zero + PN532 per lane
 ├── klipper/
 │   └── nfc_led_macro.cfg     # Klipper macro for BoxTurtle LED color override
-├── middleware/
-│   ├── spoolsense.py       # Unified middleware (single, toolchanger, and AMS modes)
-│   ├── config.example.yaml   # Config template with all three modes documented
-│   └── spoolsense.service  # Systemd service file
 ├── stl/
 │   └── Tray_plain_pn532.stl  # Modified BoxTurtle tray with PN532 mount
 └── docs/
@@ -33,7 +29,7 @@ afc/
     └── wiring.md             # Wiring guide with pin assignments
 ```
 
-> **Note:** The middleware in `afc/middleware/` is the unified version — it supports all three toolhead modes (`single`, `toolchanger`, `ams`) via the `toolhead_mode` setting in `config.yaml`. You don't need a separate middleware for each mode.
+> **Note:** The middleware (`middleware/spoolsense.py`) is shared across all modes — single, toolchanger, and AMS. Set `toolhead_mode: "ams"` in your `config.yaml` for AFC. No separate middleware copy needed.
 
 ## 3D Printed Tray
 
@@ -51,26 +47,28 @@ This project is in early development and we need your help:
 
 - **Testers** — If you have a BoxTurtle and some PN532 modules, we'd love for you to try this out and report back. Does the tray fit? Does the PN532 reliably read tags through the spool? What's the scan distance like? Open an issue with your findings.
 - **CAD help** — The current tray STL is a functional hack, not a polished design. If you have CAD skills (Fusion 360, SolidWorks, FreeCAD, etc.) and want to help improve the PN532 mount, cable routing, or overall fit, contributions are very welcome. The tray needs proper parametric source files, better PN532 retention, and cleaner cable management.
-- **ESP32 mount** — We need a mount or bracket for the ESP32 DevKit board inside (or on the side of) the BoxTurtle. Something that keeps it accessible for USB flashing but out of the way of the filament path. Even a simple zip-tie bracket or DIN rail clip would be great.
+- **ESP32 mount** — We need a mount or bracket for the ESP32-S3-Zero boards inside (or on the side of) the BoxTurtle. Something that keeps them accessible for USB flashing but out of the way of the filament path. Even a simple zip-tie bracket or clip would be great.
 
 If you're interested in contributing, open an issue or submit a PR — all skill levels welcome.
 
 ## Quick Start
 
-1. Wire 4 PN532 modules to an ESP32 DevKit ([wiring guide](docs/wiring.md))
+1. Wire one PN532 to each ESP32-S3-Zero ([wiring guide](docs/wiring.md))
 2. Print the modified tray from `stl/Tray_plain_pn532.stl`
-3. Flash ESPHome with `boxturtle-nfc.yaml`
+3. Flash each ESP32-S3-Zero with `lane-pn532.yaml` (one per lane)
 4. Deploy the middleware with AMS mode config
 5. Place tagged spools on the respoolers — they auto-identify
 
 See [docs/setup.md](docs/setup.md) for the full walkthrough.
 
+> Two hardware approaches are available. See [docs/hardware-approaches.md](docs/hardware-approaches.md) for a comparison.
+
 ## Hardware
 
-- 1x ESP32-WROOM DevKit (any esp32dev compatible board)
+- 4x [Waveshare ESP32-S3-Zero](https://www.waveshare.com/esp32-s3-zero.htm) (one per lane)
 - 4x PN532 NFC Module (I2C mode)
 - NFC tags on each spool
-- Power from AFC-Lite 5V rail
+- Power from AFC-Lite 5V rail or USB
 - 4x Modified BoxTurtle tray (print from `stl/Tray_plain_pn532.stl`)
 
 ## Requirements

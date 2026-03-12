@@ -365,7 +365,7 @@ Keep unsupported fields in SpoolSense own state, such as:
 ## Suggested module layout
 
 ```text
-nfc_toolchanger_spoolman/
+spoolsense/
 ├── openprinttag/
 │   ├── reader.py
 │   ├── decoder.py

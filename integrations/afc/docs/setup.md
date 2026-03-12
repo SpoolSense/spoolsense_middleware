@@ -2,15 +2,11 @@
 
 ## Overview
 
-This guide covers setting up NFC spool scanning for BoxTurtle AFC systems.
-One ESP32 drives 4 PN532 NFC readers (one per lane) and communicates with
-the AFC-Klipper Add-On via the middleware.
+This guide covers the per-lane setup: one ESP32-S3-Zero + PN532 per BoxTurtle lane. Each board is independent and communicates with the middleware via MQTT.
 
-When you place a spool on a respooler, the NFC tag is scanned automatically
-as it rotates into range. The middleware looks up the spool in Spoolman and
-calls AFC's `SET_SPOOL_ID` to register it in the correct lane. AFC
-automatically pulls color, material, and weight from Spoolman — one call
-does everything.
+When you place a spool on a respooler, the NFC tag is scanned automatically as it rotates into range. The middleware looks up the spool in Spoolman and calls AFC's `SET_SPOOL_ID` to register it in the correct lane. AFC automatically pulls color, material, and weight from Spoolman — one call does everything.
+
+> For an alternative single-ESP32 approach, see [hardware-approaches.md](hardware-approaches.md).
 
 ## Prerequisites
 
@@ -22,11 +18,10 @@ does everything.
 
 ## Hardware
 
-- 1x ESP32-WROOM DevKit (e.g. Freenove ESP32, or any esp32dev board)
+- 4x [Waveshare ESP32-S3-Zero](https://www.waveshare.com/esp32-s3-zero.htm) (one per lane)
 - 4x PN532 NFC Module (I2C mode)
 - NFC tags (one per spool)
-- Hookup wire for I2C and power connections
-- Power from AFC-Lite 5V rail
+- Power from AFC-Lite 5V rail or USB
 
 ## Step 1 — Wire the Hardware
 
@@ -35,20 +30,24 @@ assignments and power distribution.
 
 ## Step 2 — Flash ESPHome
 
+Repeat this for each ESP32-S3-Zero (one per lane).
+
 1. Go to **https://web.esphome.io** in Chrome or Edge
-2. Plug the ESP32 into your PC via USB
-3. Click **"Prepare for first use"** → **Connect** → select the serial port
+2. Plug the ESP32-S3-Zero into your PC via USB
+3. Click **"Prepare for first use"** → **Connect** → select **USB JTAG** from the popup
 4. Flash the base firmware
-5. Connect to the ESP32's fallback hotspot and enter your WiFi credentials
+5. Connect to the ESP32's fallback hotspot (e.g. `lane1-nfc`) and enter your WiFi credentials
 6. Adopt the device in Home Assistant's ESPHome dashboard
 
 ## Step 3 — Push the Full Config
 
+Repeat this for each device, updating `lane_id` and the static IP for each one.
+
 1. Click **Edit** on the device in ESPHome dashboard
-2. Replace the config with the contents of `afc/esphome/boxturtle-nfc.yaml`
+2. Replace the config with the contents of `integrations/afc/esphome/lane-pn532.yaml`
 3. Update:
+   - `lane_id` in `substitutions` to match this lane (e.g. `lane1`, `lane2`, etc.)
    - `static_ip` and `gateway` for your network
-   - Lane names in `substitutions` if yours differ from lane1–lane4
 4. Add to your ESPHome **Secrets** file:
    ```yaml
    wifi_ssid: "YourNetworkName"
@@ -61,32 +60,28 @@ assignments and power distribution.
 
 ## Step 4 — Deploy the Middleware
 
-1. Create the directory (if it doesn't exist):
+1. Clone the repo (if you haven't already):
    ```bash
-   mkdir -p ~/SpoolSense
+   cd ~
+   git clone https://github.com/sjordan0228/SpoolSense.git
    ```
 
-2. Copy the AFC middleware and config:
+2. Copy the config template and fill in your values:
    ```bash
-   cp afc/middleware/spoolsense.py ~/SpoolSense/
-   cp afc/middleware/config.example.yaml ~/SpoolSense/config.yaml
-   ```
-
-3. Edit the config:
-   ```bash
+   cp ~/SpoolSense/middleware/config.example.yaml ~/SpoolSense/config.yaml
    nano ~/SpoolSense/config.yaml
    ```
    Set your MQTT, Spoolman, and Moonraker details. Make sure `toolhead_mode`
    is set to `"ams"` and the lane names match your AFC config.
 
-4. Install dependencies:
+3. Install dependencies:
    ```bash
    pip3 install paho-mqtt requests pyyaml watchdog --break-system-packages
    ```
 
-5. Test manually:
+4. Test manually:
    ```bash
-   python3 ~/SpoolSense/spoolsense.py
+   python3 ~/SpoolSense/middleware/spoolsense.py
    ```
    You should see:
    ```
@@ -96,9 +91,9 @@ assignments and power distribution.
    Connected to MQTT broker (TOOLHEAD_MODE: ams)
    ```
 
-6. Install as a service:
+5. Install as a service:
    ```bash
-   sudo cp afc/middleware/spoolsense.service /etc/systemd/system/
+   sudo cp ~/SpoolSense/middleware/spoolsense.service /etc/systemd/system/
    sudo nano /etc/systemd/system/spoolsense.service  # replace YOUR_USERNAME
    sudo systemctl enable spoolsense
    sudo systemctl start spoolsense
@@ -117,7 +112,7 @@ requires a Klipper macro.
 
 1. Copy the macro to your AFC config directory:
    ```bash
-   cp ~/SpoolSense/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
+   cp ~/SpoolSense/integrations/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
    ```
 
 2. Add the include to your `printer.cfg` (or wherever you include AFC configs):
@@ -242,7 +237,7 @@ Moonraker's gcode script API. AFC then:
 | Feature | Toolchanger | AFC/AMS |
 |---------|-------------|---------|
 | Scanner location | Per toolhead | Per lane in BoxTurtle |
-| ESP32 count | One per toolhead | One for all 4 lanes |
+| ESP32 count | One per toolhead | One per lane (4 total) |
 | Spool registration | SET_ACTIVE_SPOOL / SET_GCODE_VARIABLE | SET_SPOOL_ID (AFC) |
 | LED feedback | ESP32 onboard WS2812 | BoxTurtle lane LEDs (via Klipper macro) |
 | Scan behavior | Always scanning | Scan-lock-clear lifecycle |

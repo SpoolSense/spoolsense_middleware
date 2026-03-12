@@ -3,13 +3,10 @@
 ## The Write Logic to OpenPrintTag
 Function to be triggered **60 seconds** after a filament unload is detected. This delay ensures that the final usage data is correctly recorded in Spoolman before being written back to the physical tag.
 
-=======
-
 > **Alternative to fixed delay:** Instead of a hard 60-second timer, consider
 > polling Spoolman a couple of times and writing once `remaining_length` has
 > stabilized (hasn't changed for ~10 seconds). This handles cases where a long
 > retract or purge takes longer than expected.
->>>>>>> 623b530 (Update from Mac)
 
 ```python
 def write_usage_to_tag(lane_id, spool_id):
@@ -103,7 +100,7 @@ Responsibilities:
 - **Key constants** — maps OpenPrintTag spec keys (remaining_length, material, color, etc.) to their integer IDs per `specs.openprinttag.org`
 - **Read tag data** — decode an OpenPrintTag NDEF payload into a Python dict with human-readable keys
 - **Build write payloads** — construct valid CBOR payloads for writing back to tags (e.g. updated remaining_length)
-- **Reconciliation helpers** — compare tag data vs Spoolman data and return a recommended action (see Reconciliation section below
+- **Reconciliation helpers** — compare tag data vs Spoolman data and return a recommended action (see Reconciliation section below)
 
 ---
 
@@ -136,7 +133,7 @@ This is something I actually have already been pondering for loading filament an
 If Tag Usage > Spoolman Usage: The spool was likely used elsewhere. We update Spoolman to match the tag
 
 If Tag Usage < Spoolman Usage: Same issue as above. Log a warning but stick with Spoolman's higher number
-=======
+
 #### Retry Queue
 If the tag isn't in the field at write time (spool was already removed), the middleware should queue the pending write. Next time that UID shows up on any reader, the queued write executes. This covers the common case where someone pulls a spool before the 60-second timer fires.
 
@@ -157,5 +154,3 @@ The tag could be on a completely different spool than what Spoolman thinks — s
 - **Block the write** — do not update either the tag or Spoolman
 - **Alert the user** — log an error and optionally flash the lane LED red
 - **Require manual resolution** — the user needs to either re-tag the spool or correct Spoolman
->>>>>>> 623b530 (Update from Mac)
-
