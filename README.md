@@ -1,10 +1,10 @@
+> 🚀 **Big things coming — AFC, OpenPrintTag, and OpenTag3D support**
+> SpoolSense is being restructured to support multiple ecosystems. [AFC/Box Turtle](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) support is actively being built out, with [OpenPrintTag](https://github.com/OpenPrintTag) and [OpenTag3D](https://github.com/OpenTag3D) integrations planned to follow. During this restructuring, some paths and links may temporarily break — if something looks off, check the [CHANGELOG](CHANGELOG.md) or open an issue.
+
 # Voron NFC Spoolman Integration
 
 Automatic filament spool tracking for Voron printers using NFC tags, ESP32-S3, and Spoolman. Built for multi-toolhead setups, works just as well with a single toolhead.
 ![IMG_2287](https://github.com/user-attachments/assets/66cfed3d-6f2a-4ca7-aada-d6a62300f70d)
-
-> 🚀 **Big things coming — AFC, OpenPrintTag, and OpenTag3D support**
-> SpoolSense is being restructured to support multiple ecosystems. [AFC/Box Turtle](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) support is actively being built out, with [OpenPrintTag](https://github.com/OpenPrintTag) and [OpenTag3D](https://github.com/OpenTag3D) integrations planned to follow. During this restructuring, some paths and links may temporarily break — if something looks off, check the [CHANGELOG](CHANGELOG.md) or open an issue.
 
 > 🚧 **Work in Progress**
 > This project is a work in progress — honestly more of a guide than a finished product. Yes, there's custom code here, but the main idea is to leverage as much open-source software and tooling as possible to build a working system. Check back often because there's a lot planned. Ideas and contributions are very welcome — open an issue or submit a PR!
