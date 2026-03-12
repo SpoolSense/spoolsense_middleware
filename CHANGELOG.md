@@ -4,6 +4,13 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [Unreleased] - 2026-03-12
+
+### Changed
+- **Repository restructured for multi-integration support** — the repo is being reorganized to support multiple hardware and firmware ecosystems under a single project. Integration-specific files (ESPHome configs, middleware variants, Klipper macros, docs) are moving into an `integrations/` directory. AFC/Box Turtle support is the first integration landing under this structure (`integrations/afc/`), with [OpenPrintTag](https://github.com/OpenPrintTag) and [OpenTag3D](https://github.com/OpenTag3D) support planned to follow. The core middleware and standard toolchanger/single toolhead setups are not affected. Some paths and doc links may shift during this reorganization — check the README if something looks broken.
+
+---
+
 ## [Unreleased] - 2026-03-11
 
 ### Added
