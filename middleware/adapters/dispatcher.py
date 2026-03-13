@@ -1,72 +1,68 @@
 import logging
-from state.models import SpoolInfo
+
+from state.models import ScanEvent
 from opentag3d.parser import parse_opentag3d
-from openprinttag.scanner_parser import parse_openprinttag_scanner
+from openprinttag.scanner_parser import scan_event_from_openprinttag_scanner
 
 # OpenPrintTag spec parser (openprinttag/parser.py) is implemented but not yet active.
 # Requires a custom ESPHome component to read full CBOR data from ISO 15693 tags
 # via the PN5180 — the available ESPHome PN5180 components only expose the UID.
-# Uncomment the import and routing below when that work is resumed.
 # from openprinttag.parser import parse_openprinttag
 
 
-def detect_format(raw_data: dict) -> str:
+def detect_format(payload: dict) -> str:
     """
-    Auto-detects the NFC tag format based on the unique keys present in the JSON payload.
+    Auto-detects the tag format from payload keys/values.
     """
-    # openprinttag_scanner payloads (ryanch/openprinttag_scanner) contain 'present'
-    # and 'tag_data_valid' — these keys don't appear in any other format
-    if "present" in raw_data and "tag_data_valid" in raw_data:
+    # openprinttag_scanner tag/attributes payload: type="OpenPrintTag" is the
+    # explicit marker. format_version + valid is the fallback for future firmware
+    # variants that may omit the type field.
+    if payload.get("type") == "OpenPrintTag" or (
+        "format_version" in payload and "valid" in payload
+    ):
         return "openprinttag_scanner"
 
-    # OpenTag3D uses 'opentag_version', 'manufacturer', or 'spool_weight_nominal'
-    if any(k in raw_data for k in ("opentag_version", "spool_weight_nominal")):
+    # OpenTag3D uses 'opentag_version' or 'spool_weight_nominal'
+    if any(k in payload for k in ("opentag_version", "spool_weight_nominal")):
         return "opentag3d"
 
-    # OpenPrintTag spec uses 'brand_name', 'primary_color', or 'actual_netto_full_weight'
-    # Detection is kept so users get a clear "not yet supported" message
-    if any(k in raw_data for k in ("brand_name", "primary_color", "actual_netto_full_weight")):
+    # OpenPrintTag spec (CBOR direct) — not yet supported but detected so users
+    # get a clear error instead of a confusing "unknown format" message
+    if any(k in payload for k in ("brand_name", "primary_color", "actual_netto_full_weight")):
         return "openprinttag"
 
     return "unknown"
 
 
-def detect_and_parse(uid: str, raw_data: dict) -> SpoolInfo:
+def detect_and_parse(payload: dict, target_id: str, topic: str = "") -> ScanEvent:
     """
-    The main entry point for raw MQTT payloads.
-    Detects the format and routes it to the correct parser.
+    Detects the tag format and routes to the correct parser.
 
-    The ESP32 firmware can explicitly declare the format by including a 'format'
-    key in the payload. If absent, format is auto-detected from the keys present.
+    Always returns a ScanEvent. Check event.tag_data_valid before acting on the
+    data — a False value means the tag was present but data could not be read.
 
-    Currently supported:
-      - opentag3d           (PN532 + OpenTag3D tags)
-      - openprinttag_scanner (ryanch/openprinttag_scanner via PN5180)
-
-    Not yet supported:
-      - openprinttag spec   (requires custom ESPHome PN5180 component for CBOR reading)
+    Args:
+        payload:   Raw MQTT payload dict (the full tag/attributes JSON).
+        target_id: Target identifier from config (e.g. "T0", "lane1", "default").
+        topic:     MQTT topic the message arrived on — used for logging only.
     """
-    fmt = raw_data.get("format") or detect_format(raw_data)
+    fmt = payload.get("format") or detect_format(payload)
 
-    logging.debug(f"Detected tag format: {fmt} for UID: {uid}")
+    logging.debug("Detected format: %s | target: %s | topic: %s", fmt, target_id, topic)
 
     if fmt == "opentag3d":
-        return parse_opentag3d(uid, raw_data)
+        return parse_opentag3d(payload, target_id)
 
     elif fmt == "openprinttag_scanner":
-        # Guard: scanner publishes present=False when no tag is on the reader
-        if not raw_data.get("present", False):
-            raise ValueError(f"Scanner reported no tag present for UID: {uid}")
-        # Guard: tag_data_valid=False means the tag was read but data is corrupt/incomplete
-        if not raw_data.get("tag_data_valid", False):
-            raise ValueError(f"Scanner reported invalid tag data for UID: {uid}")
-        return parse_openprinttag_scanner(raw_data)
+        return scan_event_from_openprinttag_scanner(payload, target_id)
 
     elif fmt == "openprinttag":
         raise NotImplementedError(
-            "OpenPrintTag spec format is not yet supported. Full CBOR tag reading requires "
-            "a custom ESPHome PN5180 component. Use the openprinttag_scanner instead."
+            "OpenPrintTag spec format (CBOR direct) is not yet supported. "
+            "Use ryanch/openprinttag_scanner instead."
         )
 
     else:
-        raise ValueError(f"Unknown or unsupported tag format. Payload keys: {list(raw_data.keys())}")
+        raise ValueError(
+            f"Unknown or unsupported tag format. Payload keys: {list(payload.keys())}"
+        )
