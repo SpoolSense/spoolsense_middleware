@@ -120,92 +120,97 @@ run(
 # ── Test 6: openprinttag_scanner — valid tag ──────────────────────────────────
 # Full tag/attributes payload from ryanch/openprinttag_scanner.
 # valid=True — should parse into a ScanEvent with tag_data_valid=True.
+# color_hex should be "1A2E" derived from "Galaxy Black" via KNOWN_COLORS (no # prefix).
 run(
     "Test 6: openprinttag_scanner (valid tag)",
     payload={
         "uid": "04A2B31C5F2280",
+        "uuid": "c1d3e8f0-1234-4bcd-9a12-abcdef123456",
         "type": "OpenPrintTag",
+        "format_version": 1,
+        "valid": True,
+        "manufacturer": "Prusament",
         "material": "PLA",
+        "material_detail": "Prusament PLA",
         "color": "Galaxy Black",
-        "brand": "Prusament",
-        "diameter": 1.75,
-        "weight_g": 1000,
+        "diameter_um": 1750,
+        "initial_weight_g": 1000,
         "remaining_g": 742,
         "remaining_m": 247,
         "density": 1.24,
-        "temp_min": 200,
-        "temp_max": 220,
-        "bed_temp": 60,
-        "fan_speed": 100,
-        "flow": 100,
-        "uuid": "c1d3e8f0-1234-4bcd-9a12-abcdef123456",
-        "timestamp": 1712345678,
-        "valid": True,
-        "format_version": 1,
+        "nozzle_min": 200,
+        "nozzle_max": 220,
+        "bed_min": 60,
+        "bed_max": 60,
+        "written_at": 1712345678,
     },
     target_id="default",
 )
 
 
 # ── Test 7: openprinttag_scanner — valid=False ────────────────────────────────
-# Tag was detected but data could not be read cleanly.
-# Should return a ScanEvent with tag_data_valid=False, not raise.
+# Tag detected but data could not be read cleanly.
+# Should return a ScanEvent with tag_data_valid=False and all filament fields None.
 run(
     "Test 7: openprinttag_scanner (valid=False — bad read)",
     payload={
         "uid": "04A2B31C5F2280",
         "type": "OpenPrintTag",
-        "valid": False,
         "format_version": 1,
+        "valid": False,
     },
     target_id="default",
 )
 
 
 # ── Test 8: color_hex derived from color name ─────────────────────────────────
-# "Urban Grey" contains "grey" → should produce color_hex="#808080".
+# "Urban Grey" is an exact match in KNOWN_COLORS → color_hex="6E6E6E" (no # prefix).
 run(
     "Test 8: openprinttag_scanner (color_hex derived from name)",
     payload={
         "uid": "04BBCCDD112233",
         "type": "OpenPrintTag",
+        "format_version": 1,
+        "valid": True,
+        "manufacturer": "Prusament",
         "material": "PETG",
         "color": "Urban Grey",
-        "brand": "Prusament",
-        "diameter": 1.75,
-        "weight_g": 1000,
+        "diameter_um": 1750,
+        "initial_weight_g": 1000,
         "remaining_g": 500,
         "remaining_m": 166,
         "density": 1.27,
-        "temp_min": 230,
-        "temp_max": 250,
-        "bed_temp": 85,
-        "valid": True,
-        "format_version": 1,
+        "nozzle_min": 230,
+        "nozzle_max": 250,
+        "bed_min": 85,
+        "bed_max": 85,
     },
     target_id="T1",
 )
 
 
-# ── Test 9: remaining_m → remaining_length_mm conversion ─────────────────────
-# remaining_m=247 should produce remaining_length_mm=247000.0
+# ── Test 9: remaining_m → remaining_length_mm + diameter_um → diameter_mm ────
+# remaining_m=247 → remaining_length_mm=247000.0
+# diameter_um=1750 → diameter_mm=1.75
 run(
-    "Test 9: openprinttag_scanner (remaining_m conversion)",
+    "Test 9: openprinttag_scanner (unit conversions)",
     payload={
         "uid": "04CCDDEEFF4455",
         "type": "OpenPrintTag",
+        "format_version": 1,
+        "valid": True,
+        "manufacturer": "eSun",
         "material": "ABS",
         "color": "White",
-        "brand": "eSun",
-        "weight_g": 1000,
+        "diameter_um": 1750,
+        "initial_weight_g": 1000,
         "remaining_g": 800,
         "remaining_m": 247,
         "density": 1.04,
-        "temp_min": 230,
-        "temp_max": 250,
-        "bed_temp": 100,
-        "valid": True,
-        "format_version": 1,
+        "nozzle_min": 230,
+        "nozzle_max": 250,
+        "bed_min": 100,
+        "bed_max": 100,
     },
     target_id="T0",
 )

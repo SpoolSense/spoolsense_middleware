@@ -63,6 +63,7 @@ def scan_event_from_openprinttag_scanner(payload: dict, target_id: str) -> ScanE
         target_id=target_id,
         scanned_at=datetime.now(timezone.utc).isoformat(),
         uid=payload.get("uid") or None,
+        tag_uuid=payload.get("uuid") or None,
         tag_type=payload.get("type") or None,
         tag_format_version=payload.get("format_version"),
         present=payload.get("present", True),
