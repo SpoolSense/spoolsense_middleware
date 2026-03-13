@@ -1,87 +1,64 @@
 from datetime import datetime, timezone
 
 from state.models import ScanEvent
-from openprinttag.color_map import color_name_to_hex
 
 
 def scan_event_from_openprinttag_scanner(payload: dict, target_id: str) -> ScanEvent:
     """
-    Converts a payload from the openprinttag_scanner (ryanch/openprinttag_scanner)
-    into a normalized ScanEvent.
+    Converts a payload from ryanch/openprinttag_scanner into a normalized ScanEvent.
 
-    The scanner publishes tag data as a flattened JSON payload over MQTT on the
-    topic: openprinttag/<deviceId>/tag/attributes
+    The scanner publishes to two topics — both carry an identical payload:
+        openprinttag/<deviceId>/tag/state
+        openprinttag/<deviceId>/tag/attributes
 
     Color handling:
-        OpenPrintTag stores color as a descriptive name (e.g. "Galaxy Black"),
-        not a hex value. We convert it using color_map.color_name_to_hex() so
-        LEDs and Spoolman get a usable hex color.
+        color is published as a hex string (e.g. "#1A1A2E"). We strip the leading
+        "#" to match the canonical no-prefix format used everywhere in SpoolSense
+        (ESPHome expects 6 bare chars; Spoolman stores without "#").
 
-    Field mapping from scanner payload to ScanEvent:
+    spoolman_id handling:
+        The scanner embeds the Spoolman spool ID if the tag was linked via the
+        openprinttag_scanner UI. -1 means unlinked. SpoolSense stores it as a hint
+        in scanner_spoolman_id but re-resolves via the NFC UID as the authority.
+
+    Field mapping:
         uid              → uid
-        type             → tag_type  (e.g. "OpenPrintTag")
-        format_version   → tag_format_version
-        valid            → tag_data_valid
+        present          → present
+        tag_data_valid   → tag_data_valid
         manufacturer     → brand_name
-        color            → color_name (raw), color_hex (converted to hex)
-        material         → material_type
-        material_detail  → material_name
+        material_type    → material_type
+        material_name    → material_name
+        color            → color_hex  ("#RRGGBB" stripped to "RRGGBB")
         remaining_g      → remaining_weight_g
-        remaining_m      → remaining_length_mm (× 1000)
         initial_weight_g → full_weight_g
-        nozzle_min       → nozzle_temp_min_c
-        nozzle_max       → nozzle_temp_max_c
-        bed_min          → bed_temp_min_c
-        bed_max          → bed_temp_max_c
-        diameter_um      → diameter_mm (÷ 1000)
-        density          → density
-        written_at       → tag_written_at
+        spoolman_id      → scanner_spoolman_id  (-1 → None)
+        blank            → blank
+
+    Fields NOT published by this firmware (exist in tag CBOR but not in MQTT payload):
+        diameter, density, remaining_m, temp_min, temp_max, bed_temp,
+        uuid, format_version, type
     """
-    # OpenPrintTag color is a name like "Galaxy Black", not a hex value
-    raw_color = payload.get("color", "")
-    color_hex = color_name_to_hex(raw_color) if raw_color else None
+    raw_color = payload.get("color")
+    color_hex = raw_color.lstrip("#").upper() if raw_color else None
 
-    # Diameter comes in micrometers from the scanner
-    diameter_um = payload.get("diameter_um")
-    diameter_mm = diameter_um / 1000.0 if diameter_um is not None else None
-
-    # Remaining length in meters → convert to mm
-    remaining_m = payload.get("remaining_m")
-    remaining_length_mm = remaining_m * 1000.0 if remaining_m is not None else None
-
-    # written_at may be a unix timestamp
-    written_at_raw = payload.get("written_at")
-    tag_written_at = None
-    if written_at_raw is not None:
-        try:
-            tag_written_at = datetime.fromtimestamp(written_at_raw, tz=timezone.utc).isoformat()
-        except (ValueError, TypeError, OSError):
-            tag_written_at = str(written_at_raw)
+    spoolman_id = payload.get("spoolman_id")
+    if spoolman_id == -1:
+        spoolman_id = None
 
     return ScanEvent(
         source="openprinttag_scanner",
         target_id=target_id,
         scanned_at=datetime.now(timezone.utc).isoformat(),
         uid=payload.get("uid") or None,
-        tag_uuid=payload.get("uuid") or None,
-        tag_type=payload.get("type") or None,
-        tag_format_version=payload.get("format_version"),
-        present=payload.get("present", True),
-        tag_data_valid=payload.get("valid", False),
+        present=bool(payload.get("present", True)),
+        tag_data_valid=bool(payload.get("tag_data_valid", False)),
+        scanner_spoolman_id=spoolman_id,
+        blank=bool(payload.get("blank", False)),
         brand_name=payload.get("manufacturer") or None,
-        material_type=payload.get("material") or None,
-        material_name=payload.get("material_detail") or None,
-        color_name=raw_color or None,
+        material_type=payload.get("material_type") or None,
+        material_name=payload.get("material_name") or None,
         color_hex=color_hex,
-        diameter_mm=diameter_mm,
-        density=payload.get("density"),
-        nozzle_temp_min_c=payload.get("nozzle_min"),
-        nozzle_temp_max_c=payload.get("nozzle_max"),
-        bed_temp_min_c=payload.get("bed_min"),
-        bed_temp_max_c=payload.get("bed_max"),
         full_weight_g=payload.get("initial_weight_g"),
         remaining_weight_g=payload.get("remaining_g"),
-        remaining_length_mm=remaining_length_mm,
-        tag_written_at=tag_written_at,
         raw=payload,
     )

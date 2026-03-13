@@ -114,10 +114,7 @@ last_led_state = {}    # Caches the last color we sent to Klipper so we don't sp
 mqtt_client = None
 watcher = None
 
-# SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
-spoolman_client = None
-if DISPATCHER_AVAILABLE:
-    spoolman_client = SpoolmanClient(cfg["spoolman_url"])
+# SpoolmanClient is initialized after cfg is loaded (see below load_config() call)
 
 
 def load_config():
@@ -162,6 +159,11 @@ def load_config():
 
 
 cfg = load_config()
+
+# SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
+spoolman_client = None
+if DISPATCHER_AVAILABLE:
+    spoolman_client = SpoolmanClient(cfg["spoolman_url"])
 
 # ============================================================
 # Discovery Helpers

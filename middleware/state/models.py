@@ -18,6 +18,8 @@ class ScanEvent:
 
     present: bool = True
     tag_data_valid: bool = False
+    scanner_spoolman_id: int | None = None  # spoolman_id from scanner payload — hint only, -1 stripped to None
+    blank: bool = False                     # tag is blank/uninitialized
 
     # Normalized filament fields
     brand_name: str | None = None

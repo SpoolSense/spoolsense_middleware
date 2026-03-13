@@ -118,99 +118,89 @@ run(
 
 
 # ── Test 6: openprinttag_scanner — valid tag ──────────────────────────────────
-# Full tag/attributes payload from ryanch/openprinttag_scanner.
-# valid=True — should parse into a ScanEvent with tag_data_valid=True.
-# color_hex should be "1A2E" derived from "Galaxy Black" via KNOWN_COLORS (no # prefix).
+# Full confirmed payload from ryanch/openprinttag_scanner.
+# tag_data_valid=True — should parse cleanly.
+# color_hex should be "1A1A2E" (# stripped, uppercased).
+# scanner_spoolman_id should be None (-1 stripped).
 run(
     "Test 6: openprinttag_scanner (valid tag)",
     payload={
         "uid": "04A2B31C5F2280",
-        "uuid": "c1d3e8f0-1234-4bcd-9a12-abcdef123456",
-        "type": "OpenPrintTag",
-        "format_version": 1,
-        "valid": True,
+        "present": True,
+        "tag_data_valid": True,
         "manufacturer": "Prusament",
-        "material": "PLA",
-        "material_detail": "Prusament PLA",
-        "color": "Galaxy Black",
-        "diameter_um": 1750,
-        "initial_weight_g": 1000,
-        "remaining_g": 742,
-        "remaining_m": 247,
-        "density": 1.24,
-        "nozzle_min": 200,
-        "nozzle_max": 220,
-        "bed_min": 60,
-        "bed_max": 60,
-        "written_at": 1712345678,
+        "material_type": "PLA",
+        "material_name": "Galaxy Black",
+        "color": "#1A1A2E",
+        "initial_weight_g": 1000.0,
+        "remaining_g": 742.0,
+        "spoolman_id": -1,
+        "blank": False,
     },
     target_id="default",
 )
 
 
-# ── Test 7: openprinttag_scanner — valid=False ────────────────────────────────
+# ── Test 7: openprinttag_scanner — tag_data_valid=False ───────────────────────
 # Tag detected but data could not be read cleanly.
-# Should return a ScanEvent with tag_data_valid=False and all filament fields None.
+# Should return a ScanEvent with tag_data_valid=False, not raise.
 run(
-    "Test 7: openprinttag_scanner (valid=False — bad read)",
+    "Test 7: openprinttag_scanner (tag_data_valid=False — bad read)",
     payload={
         "uid": "04A2B31C5F2280",
-        "type": "OpenPrintTag",
-        "format_version": 1,
-        "valid": False,
+        "present": True,
+        "tag_data_valid": False,
+        "manufacturer": "",
+        "material_type": "",
+        "material_name": "",
+        "color": "",
+        "initial_weight_g": 0.0,
+        "remaining_g": 0.0,
+        "spoolman_id": -1,
+        "blank": False,
     },
     target_id="default",
 )
 
 
-# ── Test 8: color_hex derived from color name ─────────────────────────────────
-# "Urban Grey" is an exact match in KNOWN_COLORS → color_hex="6E6E6E" (no # prefix).
+# ── Test 8: openprinttag_scanner — color hex strip ────────────────────────────
+# color "#FF6600" should produce color_hex="FF6600" (# stripped, uppercased).
 run(
-    "Test 8: openprinttag_scanner (color_hex derived from name)",
+    "Test 8: openprinttag_scanner (color hex # stripped)",
     payload={
         "uid": "04BBCCDD112233",
-        "type": "OpenPrintTag",
-        "format_version": 1,
-        "valid": True,
+        "present": True,
+        "tag_data_valid": True,
         "manufacturer": "Prusament",
-        "material": "PETG",
-        "color": "Urban Grey",
-        "diameter_um": 1750,
-        "initial_weight_g": 1000,
-        "remaining_g": 500,
-        "remaining_m": 166,
-        "density": 1.27,
-        "nozzle_min": 230,
-        "nozzle_max": 250,
-        "bed_min": 85,
-        "bed_max": 85,
+        "material_type": "PETG",
+        "material_name": "Urban Grey",
+        "color": "#6E6E6E",
+        "initial_weight_g": 1000.0,
+        "remaining_g": 500.0,
+        "spoolman_id": -1,
+        "blank": False,
     },
     target_id="T1",
 )
 
 
-# ── Test 9: remaining_m → remaining_length_mm + diameter_um → diameter_mm ────
-# remaining_m=247 → remaining_length_mm=247000.0
-# diameter_um=1750 → diameter_mm=1.75
+# ── Test 9: openprinttag_scanner — present=False ──────────────────────────────
+# No tag on reader. present=False, tag_data_valid=False, all data fields empty.
+# Should return ScanEvent with present=False, not raise.
 run(
-    "Test 9: openprinttag_scanner (unit conversions)",
+    "Test 9: openprinttag_scanner (present=False — no tag)",
     payload={
-        "uid": "04CCDDEEFF4455",
-        "type": "OpenPrintTag",
-        "format_version": 1,
-        "valid": True,
-        "manufacturer": "eSun",
-        "material": "ABS",
-        "color": "White",
-        "diameter_um": 1750,
-        "initial_weight_g": 1000,
-        "remaining_g": 800,
-        "remaining_m": 247,
-        "density": 1.04,
-        "nozzle_min": 230,
-        "nozzle_max": 250,
-        "bed_min": 100,
-        "bed_max": 100,
+        "uid": "",
+        "present": False,
+        "tag_data_valid": False,
+        "manufacturer": "",
+        "material_type": "",
+        "material_name": "",
+        "color": "",
+        "initial_weight_g": 0.0,
+        "remaining_g": 0.0,
+        "spoolman_id": -1,
+        "blank": False,
     },
-    target_id="T0",
+    target_id="default",
 )

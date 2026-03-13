@@ -14,12 +14,9 @@ def detect_format(payload: dict) -> str:
     """
     Auto-detects the tag format from payload keys/values.
     """
-    # openprinttag_scanner tag/attributes payload: type="OpenPrintTag" is the
-    # explicit marker. format_version + valid is the fallback for future firmware
-    # variants that may omit the type field.
-    if payload.get("type") == "OpenPrintTag" or (
-        "format_version" in payload and "valid" in payload
-    ):
+    # openprinttag_scanner payloads always contain both 'present' and
+    # 'tag_data_valid' — these keys don't appear in any other supported format.
+    if "present" in payload and "tag_data_valid" in payload:
         return "openprinttag_scanner"
 
     # OpenTag3D uses 'opentag_version' or 'spool_weight_nominal'
