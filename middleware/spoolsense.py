@@ -50,6 +50,14 @@ import configparser
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+# Dispatcher for rich-data NFC tag formats (OpenTag3D, openprinttag_scanner)
+try:
+    from adapters.dispatcher import detect_and_parse, detect_format
+    from spoolman.client import SpoolmanClient
+    DISPATCHER_AVAILABLE = True
+except ImportError:
+    DISPATCHER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -74,6 +82,13 @@ DEFAULTS = {
     "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
     "klipper_var_path": None,
     "afc_led_macro": "_SET_LANE_LED",
+    # openprinttag_scanner settings (optional — only needed for PN5180 setups)
+    # Maps scanner MQTT device IDs to lane/toolhead names.
+    # Each ESP32 running openprinttag_scanner publishes to:
+    #   openprinttag/<device_id>/tag/state
+    # This mapping tells the middleware which lane each scanner belongs to.
+    "scanner_topic_prefix": "openprinttag",
+    "scanner_lane_map": {},  # e.g. {"scanner-lane1": "lane1", "scanner-lane2": "lane2"}
 }
 
 VALID_MODES = ("single", "toolchanger", "afc")
@@ -97,6 +112,11 @@ lane_statuses = {}     # Caches the last known AFC status (e.g., 'led_ready')
 last_led_state = {}    # Caches the last color we sent to Klipper so we don't spam G-code
 mqtt_client = None
 watcher = None
+
+# SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
+spoolman_client = None
+if DISPATCHER_AVAILABLE:
+    spoolman_client = SpoolmanClient(cfg["spoolman_url"])
 
 
 def load_config():
@@ -339,10 +359,20 @@ def on_connect(client, userdata, flags, rc):
         logging.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
         client.publish("nfc/middleware/online", "true", qos=1, retain=True)
         
-        # Subscribe to all our configured lanes/toolheads
+        # Subscribe to all our configured lanes/toolheads (PN532/ESPHome path)
         for t in cfg["toolheads"]:
             client.subscribe(f"nfc/toolhead/{t}")
         logging.info(f"Subscribed to: {', '.join(cfg['toolheads'])}")
+
+        # Subscribe to openprinttag_scanner topics (PN5180 path)
+        # Each scanner publishes to: openprinttag/<device_id>/tag/state
+        scanner_map = cfg.get("scanner_lane_map", {})
+        if scanner_map:
+            prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+            for device_id in scanner_map:
+                topic = f"{prefix}/{device_id}/tag/state"
+                client.subscribe(topic)
+            logging.info(f"Subscribed to {len(scanner_map)} openprinttag_scanner(s): {', '.join(scanner_map.keys())}")
             
         refresh_spool_cache()
 
@@ -362,59 +392,181 @@ def on_connect(client, userdata, flags, rc):
     else:
         logging.error(f"MQTT connection failed: {rc}")
 
+def _resolve_lane_from_topic(topic):
+    """
+    Determines the lane/toolhead name from an MQTT topic.
+    
+    For PN532/ESPHome topics like 'nfc/toolhead/lane1', returns 'lane1'.
+    For openprinttag_scanner topics like 'openprinttag/scanner-lane1/tag/state',
+    looks up the device ID in scanner_lane_map to find the lane name.
+    Returns None if the topic can't be mapped to a lane.
+    """
+    prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+    scanner_map = cfg.get("scanner_lane_map", {})
+
+    # Check if it's a scanner topic: openprinttag/<device_id>/tag/state
+    if topic.startswith(f"{prefix}/") and topic.endswith("/tag/state"):
+        parts = topic.split("/")
+        if len(parts) >= 4:
+            device_id = parts[1]
+            lane = scanner_map.get(device_id)
+            if lane:
+                return lane
+            logging.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
+            return None
+
+    # Otherwise it's a PN532 topic: nfc/toolhead/<lane>
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0] == "nfc" and parts[1] == "toolhead":
+        return parts[2]
+
+    return None
+
+
+def _handle_rich_tag(client, toolhead, uid, payload):
+    """
+    Handles a rich-data NFC tag (OpenTag3D or openprinttag_scanner).
+    
+    Routes through the dispatcher to parse the tag data into a SpoolInfo,
+    syncs with Spoolman (creating the spool if needed), then activates it
+    in Klipper/AFC the same way as a plain UID scan.
+    """
+    try:
+        # Strip envelope keys that aren't part of the tag data
+        tag_data = {k: v for k, v in payload.items() if k not in ("uid", "toolhead")}
+        spool_info = detect_and_parse(uid, tag_data)
+        logging.info(f"Rich tag parsed: {spool_info.source} — {spool_info.brand} {spool_info.material_type} (UID: {uid})")
+
+        # Sync with Spoolman — creates the spool if it doesn't exist yet,
+        # or merges data if it does. Returns SpoolInfo with spoolman_id set.
+        spool_info = spoolman_client.sync_spool(spool_info, prefer_tag=True)
+
+        if spool_info.spoolman_id:
+            if activate_spool(spool_info.spoolman_id, toolhead):
+                active_spools[toolhead] = spool_info.spoolman_id
+
+                color_hex = spool_info.color_hex or "FFFFFF"
+                remaining = spool_info.remaining_weight_g
+                is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
+
+                if cfg["toolhead_mode"] == "afc":
+                    publish_lock(toolhead, "lock")
+                    update_klipper_led(toolhead, color_hex, is_low)
+                else:
+                    client.publish(f"nfc/toolhead/{toolhead}/color",
+                                   color_hex.lstrip("#").upper(), qos=1, retain=True)
+
+                # Low spool handling
+                if cfg["toolhead_mode"] == "afc":
+                    if is_low:
+                        logging.warning(f"Low spool: {spool_info.material_name or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                else:
+                    topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+                    if is_low:
+                        logging.warning(f"Low spool: {spool_info.material_name or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                        client.publish(topic_low, "true", qos=1, retain=True)
+                    else:
+                        client.publish(topic_low, "false", qos=1, retain=True)
+        else:
+            logging.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {uid}")
+
+    except NotImplementedError as e:
+        logging.warning(f"Tag format not yet supported: {e}")
+    except ValueError as e:
+        logging.debug(f"Dispatcher rejected payload: {e}")
+    except Exception as e:
+        logging.error(f"Rich tag processing error: {e}")
+
+
 def on_message(client, userdata, msg):
-    """Fires every time an ESP32 publishes an NFC scan."""
+    """
+    Fires every time an MQTT message arrives on a subscribed topic.
+    
+    Handles two payload types:
+    
+    1. Plain UID (PN532/ESPHome) — {"uid": "xx-xx", "toolhead": "T0"}
+       Looks up the UID in Spoolman's nfc_id field. This is the original flow.
+    
+    2. Rich data (openprinttag_scanner / OpenTag3D) — large JSON with tag data.
+       Routes through the dispatcher to parse, syncs with Spoolman, then activates.
+       The lane is resolved from the MQTT topic via scanner_lane_map.
+    """
     try:
         payload = json.loads(msg.payload.decode())
-        uid = payload.get("uid")
-        toolhead = payload.get("toolhead")
+        topic = msg.topic
+
+        # Resolve which lane/toolhead this message belongs to
+        toolhead = payload.get("toolhead") or _resolve_lane_from_topic(topic)
+        if not toolhead:
+            logging.warning(f"Could not resolve lane from topic: {topic}")
+            return
+
+        uid = payload.get("uid", "")
 
         # If the lane is locked (already has a spool), ignore the scan
         if lane_locks.get(toolhead):
             logging.info(f"Ignoring scan on {toolhead} (locked)")
             return
 
-        spool = find_spool_by_nfc(uid)
-        if spool:
-            spool_id = spool["id"]
-            filament = spool.get("filament", {})
-            name = filament.get("name", "Unknown")
-            color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
-            logging.info(f"Found spool: {name} (ID: {spool_id})")
-            
-            # Actually tell Klipper/AFC to use this spool
-            if activate_spool(spool_id, toolhead):
-                active_spools[toolhead] = spool_id
+        # Decide which processing path to use:
+        # - Rich data path: dispatcher available AND payload has rich-data keys
+        # - Plain UID path: just a UID, look it up in Spoolman
+        is_rich = False
+        if DISPATCHER_AVAILABLE and len(payload) > 3:
+            # More than just uid/toolhead/format — likely rich data
+            tag_data = {k: v for k, v in payload.items() if k not in ("uid", "toolhead")}
+            try:
+                fmt = detect_format(tag_data)
+                if fmt != "unknown":
+                    is_rich = True
+            except Exception:
+                pass
 
-                if cfg["toolhead_mode"] == "afc":
-                    publish_lock(toolhead, "lock")
-                    # Force the LED color right now
-                    remaining = spool.get("remaining_weight")
-                    is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
-                    update_klipper_led(toolhead, color_hex, is_low)
-                else:
-                    # For non-AFC, just tell the ESP32 to light up its own LED
-                    client.publish(f"nfc/toolhead/{toolhead}/color",
-                                   color_hex.lstrip("#").upper(), qos=1, retain=True)
-
-                # Handle low spool warnings
-                remaining = spool.get("remaining_weight")
-                if cfg["toolhead_mode"] == "afc":
-                    if remaining is not None and remaining <= cfg["low_spool_threshold"]:
-                        logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
-                else:
-                    topic_low = f"nfc/toolhead/{toolhead}/low_spool"
-                    if remaining is not None and remaining <= cfg["low_spool_threshold"]:
-                        logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
-                        client.publish(topic_low, "true", qos=1, retain=True)
-                    else:
-                        client.publish(topic_low, "false", qos=1, retain=True)
+        if is_rich:
+            _handle_rich_tag(client, toolhead, uid, payload)
         else:
-            # Tag scanned, but not found in Spoolman
-            logging.warning(f"No spool found for UID: {uid}")
-            if cfg["toolhead_mode"] != "afc":
-                client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
-                client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
+            # Original plain-UID path — look up in Spoolman by nfc_id
+            if not uid:
+                logging.warning(f"Empty UID in payload on {toolhead}")
+                return
+
+            spool = find_spool_by_nfc(uid)
+            if spool:
+                spool_id = spool["id"]
+                filament = spool.get("filament", {})
+                name = filament.get("name", "Unknown")
+                color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
+                logging.info(f"Found spool: {name} (ID: {spool_id})")
+                
+                if activate_spool(spool_id, toolhead):
+                    active_spools[toolhead] = spool_id
+
+                    if cfg["toolhead_mode"] == "afc":
+                        publish_lock(toolhead, "lock")
+                        remaining = spool.get("remaining_weight")
+                        is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
+                        update_klipper_led(toolhead, color_hex, is_low)
+                    else:
+                        client.publish(f"nfc/toolhead/{toolhead}/color",
+                                       color_hex.lstrip("#").upper(), qos=1, retain=True)
+
+                    # Low spool warnings
+                    remaining = spool.get("remaining_weight")
+                    if cfg["toolhead_mode"] == "afc":
+                        if remaining is not None and remaining <= cfg["low_spool_threshold"]:
+                            logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                    else:
+                        topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+                        if remaining is not None and remaining <= cfg["low_spool_threshold"]:
+                            logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                            client.publish(topic_low, "true", qos=1, retain=True)
+                        else:
+                            client.publish(topic_low, "false", qos=1, retain=True)
+            else:
+                logging.warning(f"No spool found for UID: {uid}")
+                if cfg["toolhead_mode"] != "afc":
+                    client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
+                    client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
 
     except Exception as e:
         logging.error(f"Message error: {e}")
@@ -593,9 +745,13 @@ mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
 
-logging.info(f"Starting NFC Middleware (Mode: {cfg['toolhead_mode']})")
+logging.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
 logging.info(f"Spoolman: {cfg['spoolman_url']}")
 logging.info(f"Moonraker: {cfg['moonraker_url']}")
+if DISPATCHER_AVAILABLE:
+    logging.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
+else:
+    logging.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
 if cfg["toolhead_mode"] == "afc":
     logging.info(f"Lanes: {', '.join(cfg['toolheads'])}")
     logging.info(f"AFC var file: {cfg['afc_var_path']}")
@@ -603,6 +759,9 @@ if cfg["toolhead_mode"] == "afc":
 else:
     logging.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
     logging.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
+scanner_map = cfg.get("scanner_lane_map", {})
+if scanner_map:
+    logging.info(f"Scanner lane map: {json.dumps(scanner_map)}")
 
 # Start the infinite loop
 try:
