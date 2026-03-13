@@ -4,6 +4,16 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [Unreleased] - 2026-03-13
+
+### Added
+- **OpenPrintTag support via third-party MQTT scanner** — after some research it became clear that the PN5180 is a dead end with ESPHome: the available community components only expose the tag UID, not the full CBOR payload that OpenPrintTag requires. The PN7160 could theoretically work but is not widely available. The solution is to use a third-party scanner ([ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner)) that reads the full tag data and publishes decoded JSON directly to MQTT — the same pattern SpoolSense already uses with ESPHome + PN532. SpoolSense just subscribes to the scanner's topic and picks up the payload with the middleware, no custom ESPHome component needed.
+  - `middleware/openprinttag/scanner_parser.py` — parses the scanner's flattened JSON schema into a normalized `SpoolInfo`. Maps `manufacturer`→`brand`, `color`→`color_hex`, `remaining_g`→`remaining_weight_g`, `initial_weight_g`→`full_weight_g`. Ignores `spoolman_id: -1` (unlinked).
+  - `middleware/adapters/dispatcher.py` updated — detects scanner payloads via `present` + `tag_data_valid` keys, guards against `present=False` and `tag_data_valid=False` before parsing, routes to `scanner_parser`. OpenTag3D detection tightened to `opentag_version`/`spool_weight_nominal` to avoid collision with the scanner's `manufacturer` field.
+  - `middleware/test_dispatcher.py` updated — three new test cases: valid scanner scan, `present=False`, and `tag_data_valid=False`.
+
+---
+
 ## [1.4.0] - 2026-03-12
 
 ### Added

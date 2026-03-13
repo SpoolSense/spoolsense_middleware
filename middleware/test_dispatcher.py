@@ -14,7 +14,10 @@ WHAT THIS TESTS:
     2. Explicit "format" key override — dispatcher trusts it without auto-detecting
     3. Partial tag — only one detection key present, should still route correctly
     4. Blank/unknown tag — no recognizable keys, should raise ValueError gracefully
-    5. OpenPrintTag payload — should raise NotImplementedError with a clear message
+    5. OpenPrintTag spec payload — should raise NotImplementedError with a clear message
+    6. openprinttag_scanner payload — present=True, tag_data_valid=True, should parse
+    7. openprinttag_scanner payload — present=False, should raise ValueError gracefully
+    8. openprinttag_scanner payload — tag_data_valid=False, should raise ValueError gracefully
 
 HOW TO FEED YOUR OWN DATA:
     Replace or add payloads below. The envelope keys "uid" and "toolhead" are
@@ -105,8 +108,8 @@ tag_data_4 = {k: v for k, v in mqtt_payload_4.items() if k not in ("uid", "toolh
 run("Test 4: Blank/unknown tag (expect ValueError)", uid4, tag_data_4)
 
 
-# ── Test 5: OpenPrintTag — should raise NotImplementedError ──────────────────
-# OpenPrintTag is detected but not yet supported. Users should get a clear
+# ── Test 5: OpenPrintTag spec — should raise NotImplementedError ──────────────
+# OpenPrintTag spec is detected but not yet supported. Users should get a clear
 # message explaining why, not a confusing "unknown format" error.
 mqtt_payload_5 = {
     "uid": "UID-5555",
@@ -117,4 +120,67 @@ mqtt_payload_5 = {
 }
 uid5 = mqtt_payload_5["uid"]
 tag_data_5 = {k: v for k, v in mqtt_payload_5.items() if k not in ("uid", "toolhead")}
-run("Test 5: OpenPrintTag (expect NotImplementedError)", uid5, tag_data_5)
+run("Test 5: OpenPrintTag spec (expect NotImplementedError)", uid5, tag_data_5)
+
+
+# ── Test 6: openprinttag_scanner — valid tag present ─────────────────────────
+# Real payload shape from ryanch/openprinttag_scanner publishCurrentTagState().
+# present=True and tag_data_valid=True — should parse cleanly into SpoolInfo.
+scanner_payload_6 = {
+    "uid": "UID-6666",
+    "present": True,
+    "tag_data_valid": True,
+    "material_type": "PETG",
+    "material_name": "Prusament PETG Urban Grey",
+    "color": "#1A1A2E",
+    "manufacturer": "Prusament",
+    "remaining_g": 750.0,
+    "initial_weight_g": 1000.0,
+    "spoolman_id": -1,
+    "blank": False,
+}
+uid6 = scanner_payload_6["uid"]
+tag_data_6 = {k: v for k, v in scanner_payload_6.items() if k not in ("uid", "toolhead")}
+run("Test 6: openprinttag_scanner (valid tag)", uid6, tag_data_6)
+
+
+# ── Test 7: openprinttag_scanner — no tag present ────────────────────────────
+# Scanner publishes present=False when the reader has nothing on it.
+# Dispatcher should raise ValueError — nothing to process.
+scanner_payload_7 = {
+    "uid": "",
+    "present": False,
+    "tag_data_valid": False,
+    "material_type": "",
+    "material_name": "",
+    "color": "",
+    "manufacturer": "",
+    "remaining_g": 0.0,
+    "initial_weight_g": 0.0,
+    "spoolman_id": -1,
+    "blank": False,
+}
+uid7 = scanner_payload_7.get("uid", "")
+tag_data_7 = {k: v for k, v in scanner_payload_7.items() if k not in ("uid", "toolhead")}
+run("Test 7: openprinttag_scanner present=False (expect ValueError)", uid7, tag_data_7)
+
+
+# ── Test 8: openprinttag_scanner — tag present but data invalid ───────────────
+# Tag was detected but data is corrupt or incomplete.
+# Dispatcher should raise ValueError — don't process bad data.
+scanner_payload_8 = {
+    "uid": "UID-8888",
+    "present": True,
+    "tag_data_valid": False,
+    "material_type": "",
+    "material_name": "",
+    "color": "",
+    "manufacturer": "",
+    "remaining_g": 0.0,
+    "initial_weight_g": 0.0,
+    "spoolman_id": -1,
+    "blank": False,
+}
+uid8 = scanner_payload_8["uid"]
+tag_data_8 = {k: v for k, v in scanner_payload_8.items() if k not in ("uid", "toolhead")}
+run("Test 8: openprinttag_scanner tag_data_valid=False (expect ValueError)", uid8, tag_data_8)

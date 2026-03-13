@@ -17,7 +17,7 @@ I am trying to implement tag-only operation, with this Spoolman will not be requ
 The clean approach is:
 
 ```text
-NFC tag -> OpenPrintTag parser -> normalized spool state -> backend adapter
+NFC scanner -> MQTT -> dispatcher -> parser -> normalized spool state -> backend adapter
 ```
 
 Backends can be:
@@ -25,6 +25,39 @@ Backends can be:
 - generic single-tool Klipper
 - multi-tool / toolchanger Klipper
 - AFC
+
+## Hardware path for OpenPrintTag
+
+OpenPrintTag uses ISO 15693 (NFC-V) tags, which the PN532 cannot read. The PN5180 can, but the available ESPHome community components for the PN5180 only expose the tag UID — not the full CBOR payload that OpenPrintTag requires. Writing a custom ESPHome component to read full tag memory is a significant undertaking.
+
+The chosen approach is to use **[ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner)** — a third-party ESP32-based scanner that reads the full OpenPrintTag CBOR data and publishes decoded JSON directly to MQTT. SpoolSense subscribes to the scanner's topic and picks up the payload in the middleware, the same pattern already used with ESPHome + PN532.
+
+Scanner MQTT topic: `openprinttag/<deviceId>/tag/state`
+
+Scanner payload shape:
+```json
+{
+  "uid": "04AABBCCDD11",
+  "present": true,
+  "tag_data_valid": true,
+  "manufacturer": "Prusament",
+  "material_type": "PETG",
+  "material_name": "Galaxy Black",
+  "color": "#1A1A1A",
+  "remaining_g": 640.0,
+  "initial_weight_g": 1000.0,
+  "spoolman_id": -1,
+  "blank": false
+}
+```
+
+## Supported tag formats
+
+| Format | Hardware | Status |
+|---|---|---|
+| OpenPrintTag (via scanner) | ryanch/openprinttag_scanner + PN5180 | Implemented — `scanner_parser.py` |
+| OpenTag3D | ESPHome + PN532 | Implemented — `opentag3d/parser.py` |
+| OpenPrintTag (spec/CBOR direct) | Custom ESPHome PN5180 component | Not yet supported |
 
 ## Core idea
 
@@ -103,7 +136,7 @@ from dataclasses import dataclass
 @dataclass
 class SpoolInfo:
     spool_uid: str | None
-    source: str                  # openprinttag / spoolman / merged / manual
+    source: str                  # openprinttag_scanner / opentag3d / spoolman / merged (tag preferred) / merged (spoolman preferred) / manual
 
     spoolman_id: int | None
     tag_version: str | None
@@ -362,47 +395,49 @@ Keep unsupported fields in SpoolSense own state, such as:
 - lot number
 - display metadata
 
-## Suggested module layout
+## Actual module layout
 
 ```text
-spoolsense/
+middleware/
 ├── openprinttag/
-│   ├── reader.py
-│   ├── decoder.py
-│   ├── normalizer.py
-│   └── schema.py
+│   ├── __init__.py
+│   ├── scanner_parser.py     # parses ryanch/openprinttag_scanner MQTT payloads → SpoolInfo (active)
+│   └── parser.py             # parses raw CBOR spec fields → SpoolInfo (not yet active — needs custom ESPHome component)
+├── opentag3d/
+│   ├── __init__.py
+│   └── parser.py             # parses OpenTag3D Web API JSON → SpoolInfo (active)
 ├── spoolman/
-│   ├── client.py
-│   ├── mapper.py
-│   └── merge.py
+│   ├── __init__.py
+│   └── client.py             # NFC UID lookup, TTL cache, tag/Spoolman merge, weight sync, UID write-back
 ├── state/
-│   ├── models.py
-│   ├── assignments.py
-│   ├── moonraker_db.py
-│   └── service.py
+│   ├── __init__.py
+│   ├── models.py             # SpoolInfo and SpoolAssignment dataclasses
+│   └── moonraker_db.py       # persists SpoolInfo and SpoolAssignment to Moonraker DB namespace
 ├── adapters/
-│   ├── single_tool.py
-│   ├── multitool.py
-│   └── afc.py
-├── klipper/
-│   ├── macros.cfg
-│   └── commands.md
-└── api/
-    ├── scan_handler.py
-    └── webhook_handler.py
+│   ├── __init__.py
+│   └── dispatcher.py         # detects format from payload keys, routes to correct parser
+│                             # future: single_tool.py, multitool.py, afc.py
+├── api/                      # placeholder — not yet implemented
+├── test_parsers.py           # isolated parser tests, no hardware required
+├── test_dispatcher.py        # isolated dispatcher tests, no hardware required
+├── test_db.py                # Moonraker DB write test (requires running Moonraker)
+└── spoolsense.py             # existing production middleware (PN532 + plain UID flow, unchanged)
 ```
 
 ### Scan flow
 
 ```text
-1. Scan NFC tag
-2. Decode OpenPrintTag payload
-3. Normalize to SpoolInfo
-4. Optionally merge with Spoolman
-5. Store/update spool record in Moonraker DB
-6. Create or update assignment
-7. Apply backend-specific mirror/update
-8. Let UI/macros read from canonical state
+1. Scanner reads NFC tag (openprinttag_scanner via PN5180, or ESPHome PN532 for OpenTag3D)
+2. Scanner publishes decoded JSON payload to MQTT
+3. Middleware receives MQTT message
+4. dispatcher.py detects format from payload keys
+5. Routes to correct parser (scanner_parser.py or opentag3d/parser.py)
+6. Parser returns normalized SpoolInfo
+7. Optionally merge with Spoolman (SpoolmanClient.sync_spool)
+8. Store/update spool record in Moonraker DB
+9. Create or update SpoolAssignment
+10. Apply backend-specific mirror/update (single-tool / multi-tool / AFC adapter)
+11. Let UI/macros read from canonical state
 ```
 
 ### Startup recovery flow
@@ -447,26 +482,29 @@ class SpoolStateService:
 
 ## Good implementation order
 
-### Phase 1
-- add `SpoolInfo`
-- add `SpoolAssignment`
-- add Moonraker DB persistence
-- add OpenPrintTag parser -> normalizer
-- support `tag_only` and `prefer_tag`
+### Phase 1 — Complete ✓
+- ✓ `SpoolInfo` and `SpoolAssignment` dataclasses (`state/models.py`)
+- ✓ Moonraker DB persistence (`state/moonraker_db.py`)
+- ✓ OpenTag3D parser (`opentag3d/parser.py`)
+- ✓ OpenPrintTag scanner parser (`openprinttag/scanner_parser.py`)
+- ✓ Format dispatcher with auto-detection (`adapters/dispatcher.py`)
+- ✓ Spoolman client with merge, weight sync, UID write-back (`spoolman/client.py`)
+- ✓ Isolated test suite (no hardware required)
 
-### Phase 2
+### Phase 2 — Next
+- wire dispatcher into MQTT subscription (fork of spoolsense.py or new entry point)
 - add single-tool adapter
 - add multi-tool adapter
 - add AFC adapter
-- add startup restore
+- add startup restore from Moonraker DB
 
 ### Phase 3
-- add Spoolman enrichment
-- add sync policies
+- add Spoolman enrichment and sync policies
 - add write-back behavior if needed
+- support `tag_only` and `prefer_tag` source modes end-to-end
 
 ### Phase 4
-- write remaining usage back to tag
+- write remaining weight back to tag after print
 - add UI views
 - add policy checks and validation
 
