@@ -1,4 +1,5 @@
-> 🚀 **Big things coming — AFC, OpenPrintTag, and OpenTag3D support**
+> 🚀 **Big things coming — AFC, OpenPrintTag (this will take a while), and OpenTag3D support**
+> 
 > SpoolSense is being restructured to support multiple ecosystems. [AFC/Box Turtle](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On) support is actively being built out, with [OpenPrintTag](https://github.com/OpenPrintTag) and [OpenTag3D](https://github.com/OpenTag3D) integrations planned to follow. During this restructuring, some paths and links may temporarily break — if something looks off, check the [CHANGELOG](CHANGELOG.md) or open an issue.
 
 # Voron NFC Spoolman Integration
