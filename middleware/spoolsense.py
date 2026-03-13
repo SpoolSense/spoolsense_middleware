@@ -53,6 +53,7 @@ from watchdog.events import FileSystemEventHandler
 # Dispatcher for rich-data NFC tag formats (OpenTag3D, openprinttag_scanner)
 try:
     from adapters.dispatcher import detect_and_parse, detect_format
+    from state.models import ScanEvent
     from spoolman.client import SpoolmanClient
     DISPATCHER_AVAILABLE = True
 except ImportError:
@@ -423,30 +424,36 @@ def _resolve_lane_from_topic(topic):
     return None
 
 
-def _handle_rich_tag(client, toolhead, uid, payload):
+def _handle_rich_tag(client, toolhead, payload, topic):
     """
     Handles a rich-data NFC tag (OpenTag3D or openprinttag_scanner).
     
-    Routes through the dispatcher to parse the tag data into a SpoolInfo,
+    Routes through the dispatcher to parse the tag data into a ScanEvent,
     syncs with Spoolman (creating the spool if needed), then activates it
     in Klipper/AFC the same way as a plain UID scan.
     """
     try:
-        # Strip envelope keys that aren't part of the tag data
-        tag_data = {k: v for k, v in payload.items() if k not in ("uid", "toolhead")}
-        spool_info = detect_and_parse(uid, tag_data)
-        logging.info(f"Rich tag parsed: {spool_info.source} — {spool_info.brand} {spool_info.material_type} (UID: {uid})")
+        scan = detect_and_parse(payload, toolhead, topic)
+        logging.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
+
+        # Guard: scanner may report present=False or invalid data
+        if not scan.present:
+            logging.debug(f"Scanner reported no tag present on {toolhead}")
+            return
+        if not scan.tag_data_valid:
+            logging.warning(f"Scanner reported invalid tag data on {toolhead}")
+            return
 
         # Sync with Spoolman — creates the spool if it doesn't exist yet,
         # or merges data if it does. Returns SpoolInfo with spoolman_id set.
-        spool_info = spoolman_client.sync_spool(spool_info, prefer_tag=True)
+        spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
 
-        if spool_info.spoolman_id:
+        if spool_info and spool_info.spoolman_id:
             if activate_spool(spool_info.spoolman_id, toolhead):
                 active_spools[toolhead] = spool_info.spoolman_id
 
-                color_hex = spool_info.color_hex or "FFFFFF"
-                remaining = spool_info.remaining_weight_g
+                color_hex = spool_info.color_hex or scan.color_hex or "FFFFFF"
+                remaining = spool_info.remaining_weight_g or scan.remaining_weight_g
                 is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
 
                 if cfg["toolhead_mode"] == "afc":
@@ -459,16 +466,16 @@ def _handle_rich_tag(client, toolhead, uid, payload):
                 # Low spool handling
                 if cfg["toolhead_mode"] == "afc":
                     if is_low:
-                        logging.warning(f"Low spool: {spool_info.material_name or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                        logging.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
                 else:
                     topic_low = f"nfc/toolhead/{toolhead}/low_spool"
                     if is_low:
-                        logging.warning(f"Low spool: {spool_info.material_name or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                        logging.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
                         client.publish(topic_low, "true", qos=1, retain=True)
                     else:
                         client.publish(topic_low, "false", qos=1, retain=True)
         else:
-            logging.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {uid}")
+            logging.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {scan.uid}")
             # For single/toolchanger, flash error on the ESP32 LED
             if cfg["toolhead_mode"] != "afc":
                 client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
@@ -479,7 +486,7 @@ def _handle_rich_tag(client, toolhead, uid, payload):
     except ValueError as e:
         logging.debug(f"Dispatcher rejected payload: {e}")
         # For single/toolchanger, flash error if it was a real scan attempt
-        if cfg["toolhead_mode"] != "afc" and uid:
+        if cfg["toolhead_mode"] != "afc":
             client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
             client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
     except Exception as e:
@@ -531,7 +538,7 @@ def on_message(client, userdata, msg):
                 pass
 
         if is_rich:
-            _handle_rich_tag(client, toolhead, uid, payload)
+            _handle_rich_tag(client, toolhead, payload, topic)
         else:
             # Original plain-UID path — look up in Spoolman by nfc_id
             if not uid:

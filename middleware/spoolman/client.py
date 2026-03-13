@@ -42,6 +42,44 @@ class SpoolmanClient:
 
         return self.cache.get(uid_lower)
 
+    def sync_spool_from_scan(self, scan, prefer_tag: bool = True) -> Optional[SpoolInfo]:
+        """
+        Bridge between the new ScanEvent model and Spoolman sync.
+
+        Takes a ScanEvent from the dispatcher, converts it to a SpoolInfo,
+        then runs the standard sync_spool merge logic.
+
+        Args:
+            scan: A ScanEvent from the dispatcher.
+            prefer_tag: If True, tag weight wins. Spoolman color always wins if set.
+
+        Returns:
+            SpoolInfo with spoolman_id populated, or None if sync failed.
+        """
+        tag_spool = SpoolInfo(
+            spool_uid=scan.uid,
+            source=scan.source,
+            brand=scan.brand_name,
+            material_type=scan.material_type,
+            material_name=scan.material_name,
+            color_name=scan.color_name,
+            color_hex=scan.color_hex,
+            diameter_mm=scan.diameter_mm,
+            nozzle_temp_min_c=scan.nozzle_temp_min_c,
+            nozzle_temp_max_c=scan.nozzle_temp_max_c,
+            bed_temp_min_c=scan.bed_temp_min_c,
+            bed_temp_max_c=scan.bed_temp_max_c,
+            full_weight_g=scan.full_weight_g,
+            remaining_weight_g=scan.remaining_weight_g,
+            remaining_length_mm=scan.remaining_length_mm,
+        )
+
+        if not tag_spool.spool_uid:
+            logging.warning("ScanEvent has no UID — cannot sync with Spoolman")
+            return None
+
+        return self.sync_spool(tag_spool, prefer_tag=prefer_tag)
+
     def sync_spool(self, tag_spool: SpoolInfo, prefer_tag: bool = True) -> SpoolInfo:
         """
         The Merger: Takes a parsed SpoolInfo from a tag, checks Spoolman, and syncs them.
