@@ -50,8 +50,11 @@ class SpoolmanClient:
         NFC UID back so future scans find it.
 
         If the spool already exists:
-          prefer_tag=True  — Tag data wins. Spoolman is updated to match the tag.
-          prefer_tag=False — Spoolman data wins. SpoolInfo is updated from Spoolman.
+          prefer_tag=True  — Tag data wins for weight/material. But Spoolman's
+                             color_hex always takes priority if set, since a human
+                             likely chose it deliberately (vs our best-guess
+                             conversion from a color name like "Galaxy Black").
+          prefer_tag=False — Spoolman data wins for everything.
 
         Always returns a SpoolInfo with spoolman_id populated.
         """
@@ -65,8 +68,15 @@ class SpoolmanClient:
         filament = existing.get("filament", {})
         tag_spool.spoolman_id = spoolman_id
 
+        # Spoolman's color always wins if it has one set — a human chose it
+        # deliberately, and it's likely more accurate than our color name → hex guess
+        spoolman_color = filament.get("color_hex")
+        if spoolman_color:
+            logging.info(f"Using Spoolman color #{spoolman_color} over tag color '{tag_spool.color_name or tag_spool.color_hex}'")
+            tag_spool.color_hex = spoolman_color
+
         if prefer_tag:
-            # Tag is the source of truth. Push tag weight to Spoolman.
+            # Tag is the source of truth for weight. Push tag weight to Spoolman.
             logging.info(f"Updating Spoolman ID {spoolman_id} with fresh tag data...")
             nominal_g = filament.get("weight")
             self._update_spoolman_weight(spoolman_id, tag_spool.remaining_weight_g, nominal_g)
@@ -75,7 +85,7 @@ class SpoolmanClient:
             # Spoolman is the source of truth. Pull its data into SpoolInfo.
             logging.info(f"Using existing Spoolman data for ID {spoolman_id}.")
             tag_spool.remaining_weight_g = existing.get("remaining_weight", tag_spool.remaining_weight_g)
-            tag_spool.color_hex         = filament.get("color_hex", tag_spool.color_hex)
+            tag_spool.color_hex         = spoolman_color or tag_spool.color_hex
             tag_spool.material_type     = filament.get("material", tag_spool.material_type)
             tag_spool.material_name     = filament.get("name", tag_spool.material_name)
             tag_spool.brand             = filament.get("vendor", {}).get("name", tag_spool.brand)
