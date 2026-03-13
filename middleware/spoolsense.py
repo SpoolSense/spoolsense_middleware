@@ -469,11 +469,19 @@ def _handle_rich_tag(client, toolhead, uid, payload):
                         client.publish(topic_low, "false", qos=1, retain=True)
         else:
             logging.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {uid}")
+            # For single/toolchanger, flash error on the ESP32 LED
+            if cfg["toolhead_mode"] != "afc":
+                client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
+                client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
 
     except NotImplementedError as e:
         logging.warning(f"Tag format not yet supported: {e}")
     except ValueError as e:
         logging.debug(f"Dispatcher rejected payload: {e}")
+        # For single/toolchanger, flash error if it was a real scan attempt
+        if cfg["toolhead_mode"] != "afc" and uid:
+            client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
+            client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
     except Exception as e:
         logging.error(f"Rich tag processing error: {e}")
 
