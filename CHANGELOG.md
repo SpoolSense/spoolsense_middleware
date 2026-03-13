@@ -14,6 +14,17 @@ All notable changes to SpoolSense are documented here.
 
 ## [Unreleased] - 2026-03-12
 
+### Added
+- **OpenPrintTag and OpenTag3D middleware support (early stages)** — groundwork laid for supporting NFC tags written in the [OpenPrintTag](https://specs.openprinttag.org/) and [OpenTag3D](https://opentag3d.info/spec.html) open standards. This is very early stages — no real scanner, MQTT, or Klipper is involved yet. Development is being done by feeding fake tag payloads directly into the parsers to verify the data pipeline end-to-end before any hardware is wired up.
+  - `middleware/state/models.py` — `SpoolInfo` dataclass that normalizes filament data from any tag source into a single common structure (brand, material, color, temps, weights, diameter, lot info, etc.). `SpoolAssignment` dataclass tracks what spool is loaded where (single tool, toolchanger, or AFC lane).
+  - `middleware/state/moonraker_db.py` — `MoonrakerDB` class that persists `SpoolInfo` and `SpoolAssignment` objects into Moonraker's key-value database under the `nfc_spoolman` namespace.
+  - `middleware/openprinttag/parser.py` — parses decoded OpenPrintTag CBOR payloads into `SpoolInfo`. Handles packed RGBA color conversion to hex and calculates `remaining_weight` from `actual_netto_full_weight - consumed_weight` (remaining weight is not stored directly on the tag).
+  - `middleware/opentag3d/parser.py` — parses OpenTag3D Web API JSON payloads into `SpoolInfo`. Field names differ significantly from OpenPrintTag (`manufacturer`, `extruder_temp_min/max`, `spool_weight_nominal`, etc.).
+  - `middleware/spoolman/client.py` — `SpoolmanClient` with NFC UID lookup, TTL-based cache (1hr, with forced refresh on miss), tag/Spoolman merge logic (`prefer_tag` flag), weight sync via Spoolman's `used_weight` API field (`used = nominal - remaining`), and NFC UID write-back to Spoolman's `extra.nfc_id` so future scans find the spool without a create attempt.
+  - `middleware/config.example.afc.yaml`, `middleware/config.example.single.yaml`, `middleware/config.example.toolchanger.yaml` — split the original `config.example.yaml` into three separate files, one per supported toolhead mode. The original file was renamed to reflect it is AFC-specific.
+  - `middleware/test_db.py` — isolated test that saves a fake `SpoolInfo` and `SpoolAssignment` to Moonraker DB to verify the write path (requires a running Moonraker instance).
+  - `middleware/test_parsers.py` — fully isolated parser test, no hardware required. Feeds fake tag payloads into both parsers and prints the resulting `SpoolInfo` JSON for inspection.
+
 ### Changed
 - **Repository restructured for multi-integration support** — the repo is being reorganized to support multiple hardware and firmware ecosystems under a single project. Integration-specific files (ESPHome configs, middleware variants, Klipper macros, docs) are moving into an `integrations/` directory. AFC/Box Turtle support is the first integration landing under this structure (`integrations/afc/`), with [OpenPrintTag](https://github.com/OpenPrintTag) and [OpenTag3D](https://github.com/OpenTag3D) support planned to follow. The core middleware and standard toolchanger/single toolhead setups are not affected. Some paths and doc links may shift during this reorganization — check the README if something looks broken.
 

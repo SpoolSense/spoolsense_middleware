@@ -1,0 +1,69 @@
+# =============================================================
+# NFC Spoolman Middleware — Configuration (Multi-Toolhead)
+# =============================================================
+# Copy this file to ~/SpoolSense/config.yaml and fill in your values.
+#
+#   cp config.example.toolchanger.yaml ~/SpoolSense/config.yaml
+#
+# This config is for multi-toolhead printers (e.g. MadMax,
+# Stealthchanger). Each toolhead has its own ESP32 and PN532
+# NFC reader. The middleware saves the spool ID per toolhead and
+# publishes LED color. klipper-toolchanger handles SET_ACTIVE_SPOOL
+# at toolchange time.
+# =============================================================
+
+# ---- Toolhead Mode ------------------------------------------
+#
+# single      — For single-toolhead printers. Calls SET_ACTIVE_SPOOL
+#               directly on every scan. One ESP32, one PN532.
+#
+# toolchanger — For multi-toolhead printers (e.g. MadMax, Stealthchanger).
+#               Saves spool ID per toolhead and publishes LED color.
+#               klipper-toolchanger handles SET_ACTIVE_SPOOL at toolchange.
+#
+# afc         — For lane-based filament changers (BoxTurtle, NightOwl, etc.)
+#               running the AFC-Klipper Add-On. Calls AFC's SET_SPOOL_ID
+#               to register the spool in the correct lane. AFC handles
+#               spool tracking, color, material, and weight automatically.
+#
+toolhead_mode: "toolchanger"
+
+# ---- Toolheads ----------------------------------------------
+#
+# List all toolhead IDs. These must match your MQTT topics.
+# Add or remove entries to match the number of toolheads on
+# your printer.
+#
+toolheads:
+  - "T0"
+  - "T1"
+  - "T2"
+  - "T3"
+
+# ---- MQTT Broker --------------------------------------------
+# Usually your Home Assistant server running Mosquitto.
+mqtt:
+  broker: "YOUR_HOME_ASSISTANT_IP"    # e.g. "192.168.1.100"
+  port: 1883
+  username: "your_mqtt_username"
+  password: "your_mqtt_password"
+
+# ---- Spoolman URL -------------------------------------------
+# Default port is 7912.
+spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
+
+# ---- Moonraker URL ------------------------------------------
+# Your Klipper/Moonraker instance.
+moonraker_url: "http://YOUR_KLIPPER_IP"
+
+# ---- Low Spool Threshold ------------------------------------
+# Remaining weight (grams) that triggers a low spool warning.
+# Publishes low_spool status to MQTT and triggers the ESP32
+# LED pulse effect on the affected toolhead.
+#
+low_spool_threshold: 100
+
+# ---- Klipper Variables File (optional) ----------------------
+# Path to Klipper's save_variables file.
+# If not set, the middleware auto-discovers it from Moonraker.
+# klipper_var_path: "~/printer_data/config/klipper-toolchanger/offset_save_file.cfg"
