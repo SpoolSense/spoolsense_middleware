@@ -1,4 +1,5 @@
 from state.models import SpoolInfo
+from openprinttag.color_map import color_name_to_hex
 
 
 def parse_openprinttag_scanner(raw_data: dict) -> SpoolInfo:
@@ -13,10 +14,15 @@ def parse_openprinttag_scanner(raw_data: dict) -> SpoolInfo:
     The dispatcher guards against present=False and tag_data_valid=False before
     calling this function, so by the time we get here the tag data is valid.
 
+    Color handling:
+        OpenPrintTag stores color as a descriptive name (e.g. "Galaxy Black"),
+        not a hex value. We convert it using color_map.color_name_to_hex() so
+        LEDs and Spoolman get a usable hex color.
+
     Field mapping from scanner schema to SpoolInfo:
         uid              → spool_uid
         manufacturer     → brand
-        color            → color_hex
+        color            → color_name (raw), color_hex (converted to hex)
         material_type    → material_type
         material_name    → material_name
         remaining_g      → remaining_weight_g
@@ -30,6 +36,10 @@ def parse_openprinttag_scanner(raw_data: dict) -> SpoolInfo:
     if spoolman_id == -1:
         spoolman_id = None
 
+    # OpenPrintTag color is a name like "Galaxy Black", not a hex value
+    raw_color = raw_data.get("color", "")
+    color_hex = color_name_to_hex(raw_color)
+
     return SpoolInfo(
         spool_uid=uid,
         source="openprinttag_scanner",
@@ -37,7 +47,8 @@ def parse_openprinttag_scanner(raw_data: dict) -> SpoolInfo:
         brand=raw_data.get("manufacturer"),
         material_type=raw_data.get("material_type"),
         material_name=raw_data.get("material_name"),
-        color_hex=raw_data.get("color"),
+        color_name=raw_color or None,
+        color_hex=color_hex,
         remaining_weight_g=raw_data.get("remaining_g"),
         full_weight_g=raw_data.get("initial_weight_g"),
     )
