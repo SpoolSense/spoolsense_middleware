@@ -471,7 +471,10 @@ def _activate_from_scan(client, toolhead, scan, spool_info=None):
     is_low = remaining is not None and remaining <= cfg["low_spool_threshold"]
     filament_label = scan.material_name or scan.material_type or "Unknown"
 
-    # --- Tag-state publication ---
+    # --- Mode-specific tag-state output ---
+    # Always driven from scan data. Transport differs by mode:
+    #   afc          — color via Klipper LED macro, lock via MQTT nfc/.../lock
+    #   single/toolchanger — color and low_spool via MQTT nfc/toolhead/... topics
     if mode == "afc":
         publish_lock(toolhead, "lock")
         update_klipper_led(toolhead, color_hex, is_low)
