@@ -35,6 +35,7 @@ def pytest_configure(config):
 
     # Minimal constants spoolsense uses
     mqtt_inner.MQTT_ERR_SUCCESS = 0
+    mqtt_inner.MQTT_ERR_NO_CONN = 4
     mqtt_inner.Client = MagicMock()
 
     sys.modules.setdefault("paho", mqtt_mock)
