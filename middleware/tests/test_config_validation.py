@@ -201,3 +201,66 @@ def test_dispatcher_warning_when_scanner_map_set_and_dispatcher_unavailable(
             )
 
     assert "scanner_lane_map is configured but the rich-tag dispatcher is not available" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Additional config validation tests
+# ---------------------------------------------------------------------------
+
+def test_missing_scanner_lane_map_defaults_cleanly(tmp_path, monkeypatch):
+    """scanner_lane_map is optional — omitting it should not raise."""
+    data = {k: v for k, v in MINIMAL_VALID.items() if k != "scanner_lane_map"}
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    cfg = spoolsense.load_config()
+    assert cfg is not None
+    assert not cfg.get("scanner_lane_map")
+
+
+def test_empty_scanner_lane_map_defaults_cleanly(tmp_path, monkeypatch):
+    """An explicitly empty scanner_lane_map should load without error."""
+    data = {**MINIMAL_VALID, "scanner_lane_map": {}}
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    cfg = spoolsense.load_config()
+    assert cfg["scanner_lane_map"] == {}
+
+
+def test_missing_toolheads_uses_default(tmp_path, monkeypatch):
+    """
+    toolheads has a built-in default of ["lane1", "lane2", "lane3", "lane4"].
+    Omitting it from config should not raise — the default applies.
+    """
+    data = {k: v for k, v in MINIMAL_VALID.items() if k != "toolheads"}
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    cfg = spoolsense.load_config()
+    assert cfg["toolheads"] == ["lane1", "lane2", "lane3", "lane4"]
+
+
+def test_empty_toolheads_raises(tmp_path, monkeypatch):
+    """toolheads must not be empty."""
+    data = {**MINIMAL_VALID, "toolheads": []}
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    with pytest.raises(SystemExit):
+        spoolsense.load_config()
+
+
+def test_missing_mqtt_broker_raises(tmp_path, monkeypatch):
+    """mqtt.broker is required for MQTT connectivity."""
+    data = {**MINIMAL_VALID}
+    data["mqtt"] = {}  # broker removed
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    with pytest.raises(SystemExit):
+        spoolsense.load_config()
+
+
+def test_scanner_topic_prefix_default(tmp_path, monkeypatch):
+    """scanner_topic_prefix should default to 'openprinttag' if not provided."""
+    data = {k: v for k, v in MINIMAL_VALID.items() if k != "scanner_topic_prefix"}
+    cfg_path = write_config(tmp_path, data)
+    monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
+    cfg = spoolsense.load_config()
+    assert cfg.get("scanner_topic_prefix", "openprinttag") == "openprinttag"

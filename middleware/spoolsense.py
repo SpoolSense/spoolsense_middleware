@@ -167,6 +167,12 @@ def load_config():
 
     config["moonraker_url"] = config["moonraker_url"].rstrip("/")
 
+    # Validate toolheads list
+    toolheads = config.get("toolheads")
+    if not toolheads:
+        logger.error("toolheads must be a non-empty list in %s", CONFIG_PATH)
+        sys.exit(1)
+
     # Validate scanner_lane_map entries against toolheads list
     scanner_map = config.get("scanner_lane_map", {})
     if scanner_map:
