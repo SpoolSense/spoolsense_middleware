@@ -51,7 +51,7 @@ def detect_and_parse(payload: dict, target_id: str, topic: str = "") -> ScanEven
         return parse_opentag3d(payload, target_id)
 
     elif fmt == "openprinttag_scanner":
-        return scan_event_from_openprinttag_scanner(payload, target_id)
+        return scan_event_from_openprinttag_scanner(payload, target_id, topic=topic)
 
     elif fmt == "openprinttag":
         raise NotImplementedError(

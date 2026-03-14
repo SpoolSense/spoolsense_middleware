@@ -1,9 +1,10 @@
+import logging
 from datetime import datetime, timezone
 
 from state.models import ScanEvent
 
 
-def scan_event_from_openprinttag_scanner(payload: dict, target_id: str) -> ScanEvent:
+def scan_event_from_openprinttag_scanner(payload: dict, target_id: str, topic: str = "") -> ScanEvent:
     """
     Converts a payload from ryanch/openprinttag_scanner into a normalized ScanEvent.
 
@@ -45,13 +46,32 @@ def scan_event_from_openprinttag_scanner(payload: dict, target_id: str) -> ScanE
     if spoolman_id == -1:
         spoolman_id = None
 
+    uid = payload.get("uid") or None
+    present = bool(payload.get("present", True))
+    tag_data_valid = bool(payload.get("tag_data_valid", False))
+
+    if present and tag_data_valid and not uid:
+        parts = topic.split("/") if topic else []
+        device_id = parts[1] if len(parts) > 1 else None
+        context = (
+            f" [topic: {topic}, deviceId: {device_id}]" if device_id
+            else f" [topic: {topic}]" if topic
+            else ""
+        )
+        logging.warning(
+            "OpenPrintTag scanner payload indicates a valid tag but no UID was provided. "
+            "Spoolman sync will be skipped. This likely indicates a firmware bug or "
+            "malformed MQTT payload.%s",
+            context,
+        )
+
     return ScanEvent(
         source="openprinttag_scanner",
         target_id=target_id,
         scanned_at=datetime.now(timezone.utc).isoformat(),
-        uid=payload.get("uid") or None,
-        present=bool(payload.get("present", True)),
-        tag_data_valid=bool(payload.get("tag_data_valid", False)),
+        uid=uid,
+        present=present,
+        tag_data_valid=tag_data_valid,
         scanner_spoolman_id=spoolman_id,
         blank=bool(payload.get("blank", False)),
         brand_name=payload.get("manufacturer") or None,
