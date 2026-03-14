@@ -447,15 +447,14 @@ def _resolve_lane_from_topic(topic):
     scanner_map = cfg.get("scanner_lane_map", {})
 
     # Check if it's a scanner topic: openprinttag/<device_id>/tag/state
-    if topic.startswith(f"{prefix}/") and topic.endswith("/tag/state"):
-        parts = topic.split("/")
-        if len(parts) >= 4:
-            device_id = parts[1]
-            lane = scanner_map.get(device_id)
-            if lane:
-                return lane
-            logger.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
-            return None
+    parts = topic.split("/") if topic else []
+    if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
+        device_id = parts[1]
+        lane = scanner_map.get(device_id)
+        if lane:
+            return lane
+        logger.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
+        return None
 
     # Otherwise it's a PN532 topic: nfc/toolhead/<lane>
     parts = topic.split("/")
