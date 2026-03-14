@@ -271,6 +271,12 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 
 > **⚠ Needs live validation:** `_create_filament` sends `vendor_id` as a top-level field in the POST body. The Spoolman API docs support this, but Spoolman historically returns nested vendor objects in responses (`filament["vendor"]["id"]`) while expecting flat `vendor_id` in writes. The two patterns are consistent with REST conventions but this specific field name has not been tested against a real Spoolman instance. Validate with one live `POST /api/v1/filament` before considering this path production-ready. If it fails, the likely fix is changing `"vendor_id"` to `"vendor": {"id": vendor_id}` in the payload.
 
+**Integration tests needed for `_create_spool_from_tag` flow (needs Spoolman running)**
+- [ ] First scan with new UID — confirm vendor/filament/spool are created, NFC UID written back, and spool is found on next scan
+- [ ] Repeat scan same UID — confirm `find_by_nfc` hits cache/Spoolman, `_create_spool_from_tag` is NOT called, no duplicate spool created
+- [ ] Spoolman offline — confirm `sync_spool_from_scan` raises, `_handle_rich_tag` catches it, tag-only activation still runs (color, LED, low-spool published)
+- [ ] NFC write failure (`_write_nfc_id` raises) — understand duplicate-spool risk: spool was already created in Spoolman but UID was never written back, so the next scan will create another spool. Consider whether `_create_spool_from_tag` should roll back or just log and accept the orphan.
+
 **`_handle_rich_tag` resilience** — activation and enrichment paths are now separated:
 - [x] Spoolman sync wrapped in `try/except` — failure logs full exception and continues
 - [x] `_activate_from_scan()` always runs regardless of Spoolman availability
