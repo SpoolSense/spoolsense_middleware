@@ -95,6 +95,8 @@ DEFAULTS = {
     # This mapping tells the middleware which lane each scanner belongs to.
     "scanner_topic_prefix": "openprinttag",
     "scanner_lane_map": {},  # e.g. {"scanner-lane1": "lane1", "scanner-lane2": "lane2"}
+    # Tag writeback — disabled by default. Enable only after verifying dry-run logs.
+    "tag_writeback_enabled": False,
 }
 
 VALID_MODES = ("single", "toolchanger", "afc")
@@ -593,7 +595,16 @@ def _handle_rich_tag(client, toolhead, payload, topic):
 
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:
-            scanner_writer.execute(write_plan, client)
+            if cfg.get("tag_writeback_enabled"):
+                scanner_writer.execute(write_plan, client)
+            else:
+                logger.info(
+                    "[tag writeback disabled] would write: tag=%s device=%s payload=%s reason=%s",
+                    write_plan.uid,
+                    write_plan.device_id,
+                    write_plan.payload,
+                    write_plan.reason,
+                )
 
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")
@@ -869,12 +880,37 @@ def main():
     imported safely for testing without triggering MQTT connections,
     config loading, or sys.exit() calls.
 
+    CLI flags:
+        --check-config   Validate config and print a summary, then exit.
+                         Useful for verifying settings without starting the service.
+
     TODO (Phase 2): reduce reliance on globals by introducing an AppContext
     dataclass and passing dependencies explicitly into handlers.
     """
+    import argparse
     global cfg, spoolman_client, watcher, mqtt_client
 
+    parser = argparse.ArgumentParser(description="SpoolSense NFC Middleware")
+    parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="Validate config and print a summary, then exit.",
+    )
+    args = parser.parse_args()
+
     cfg = load_config()
+
+    if args.check_config:
+        print(f"Config OK: {CONFIG_PATH}")
+        print(f"  toolhead_mode    : {cfg['toolhead_mode']}")
+        print(f"  toolheads        : {', '.join(cfg['toolheads'])}")
+        print(f"  spoolman_url     : {cfg['spoolman_url'] or 'not set (tag-only mode)'}")
+        print(f"  moonraker_url    : {cfg['moonraker_url']}")
+        print(f"  mqtt.broker      : {cfg['mqtt']['broker']}")
+        print(f"  scanner_lane_map : {cfg.get('scanner_lane_map') or 'not set'}")
+        print(f"  tag_writeback    : {'enabled' if cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
+        print(f"  dispatcher       : {'available' if DISPATCHER_AVAILABLE else 'unavailable (UID-only mode)'}")
+        sys.exit(0)
 
     # Warn if scanner_lane_map is configured but dispatcher is unavailable
     if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:

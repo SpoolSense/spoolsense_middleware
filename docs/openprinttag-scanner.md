@@ -154,6 +154,45 @@ openprinttag/<device_id>/cmd/update_remaining/<uid>
 
 The scanner firmware handles UID validation, write queueing, and the remaining → consumed weight conversion internally. Tag write failures are logged but never block spool activation.
 
+### Enabling writeback
+
+Writeback is **disabled by default**. When disabled, SpoolSense logs what it would write without publishing any MQTT command — useful for verifying decisions before going live.
+
+To enable, add to `config.yaml`:
+
+```yaml
+tag_writeback_enabled: true
+```
+
+**Recommended workflow:**
+1. Deploy with `tag_writeback_enabled` omitted or set to `false`
+2. Scan a few tags and check the logs for `[tag writeback disabled] would write:` lines
+3. Verify the `device`, `payload`, and `reason` look correct
+4. Set `tag_writeback_enabled: true` and restart the service
+
+### Verifying config without starting the service
+
+Use `--check-config` to validate your config and print a summary without connecting to MQTT or Spoolman:
+
+```bash
+python spoolsense.py --check-config
+```
+
+Example output:
+```
+Config OK: /home/pi/SpoolSense/config.yaml
+  toolhead_mode    : afc
+  toolheads        : lane1, lane2, lane3, lane4
+  spoolman_url     : http://192.168.1.100:7912
+  moonraker_url    : http://192.168.1.100
+  mqtt.broker      : 192.168.1.100
+  scanner_lane_map : {'ab12cd': 'lane1'}
+  tag_writeback    : disabled (dry-run)
+  dispatcher       : available
+```
+
+This is safe to run at any time — it exits immediately after printing the summary.
+
 ---
 
 ## Troubleshooting

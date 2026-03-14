@@ -103,3 +103,19 @@ low_spool_threshold: 100
 #   esp32-t1: "T1"
 #   esp32-t2: "T2"
 #   esp32-t3: "T3"
+
+# ---- Tag Writeback (optional) ------------------------------
+# Controls whether SpoolSense writes updated remaining weight back to
+# OpenPrintTag tags when the tag is stale (tag remaining > Spoolman remaining).
+#
+# false (default) — dry-run mode. Write decisions are logged but no MQTT
+#   command is published. Safe to leave disabled until you have verified
+#   the dry-run log output looks correct.
+#
+# true — live mode. Publishes update_remaining commands to the scanner.
+#   Only enable after confirming dry-run behavior in the logs.
+#
+# Only applies to openprinttag_scanner (PN5180) scanners. PN532 readers
+# do not support writeback.
+#
+# tag_writeback_enabled: false
