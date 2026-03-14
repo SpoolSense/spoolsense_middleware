@@ -427,13 +427,78 @@ def _resolve_lane_from_topic(topic):
     return None
 
 
+def _activate_from_scan(client, toolhead, scan, spool_info=None):
+    """
+    Activates a toolhead from scan data, with optional Spoolman enrichment.
+
+    Two separate concerns:
+      1. Spool-ID activation (Spoolman-backed only)
+           — only runs when spool_info.spoolman_id is available
+           — updates active_spools, calls activate_spool()
+      2. Tag-state publication (always runs from scan data)
+           — color, low-spool state, LED updates
+           — driven by scan object; spool_info enriches color if available
+
+    This means activation always succeeds even when Spoolman is unreachable.
+    """
+    mode = cfg["toolhead_mode"]
+
+    # --- Spool-ID activation (Spoolman-backed, optional) ---
+    if spool_info and spool_info.spoolman_id is not None:
+        if activate_spool(spool_info.spoolman_id, toolhead):
+            active_spools[toolhead] = spool_info.spoolman_id
+    else:
+        logger.warning(
+            "No Spoolman spool_id available for toolhead %s; "
+            "skipping spool-id activation and continuing with tag-only updates",
+            toolhead,
+        )
+
+    # --- Resolve color and low-spool state from best available source ---
+    # Spoolman color wins when available — a human set it deliberately.
+    # Fall back to scan color, then white.
+    color_hex = (
+        (spool_info.color_hex if spool_info else None)
+        or scan.color_hex
+        or "FFFFFF"
+    )
+    remaining = (
+        (spool_info.remaining_weight_g if spool_info else None)
+        or scan.remaining_weight_g
+    )
+    is_low = remaining is not None and remaining <= cfg["low_spool_threshold"]
+    filament_label = scan.material_name or scan.material_type or "Unknown"
+
+    # --- Tag-state publication ---
+    if mode == "afc":
+        publish_lock(toolhead, "lock")
+        update_klipper_led(toolhead, color_hex, is_low)
+        if is_low:
+            logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
+    else:
+        client.publish(
+            f"nfc/toolhead/{toolhead}/color",
+            color_hex.lstrip("#").upper(),
+            qos=1, retain=True,
+        )
+        topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+        if is_low:
+            logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
+            client.publish(topic_low, "true", qos=1, retain=True)
+        else:
+            client.publish(topic_low, "false", qos=1, retain=True)
+
+
 def _handle_rich_tag(client, toolhead, payload, topic):
     """
     Handles a rich-data NFC tag (OpenTag3D or openprinttag_scanner).
-    
-    Routes through the dispatcher to parse the tag data into a ScanEvent,
-    syncs with Spoolman (creating the spool if needed), then activates it
-    in Klipper/AFC the same way as a plain UID scan.
+
+    Routes through the dispatcher to parse the tag data into a ScanEvent.
+    Spoolman sync is best-effort — if it fails, activation continues from
+    tag data alone. The two concerns are kept separate:
+
+      - Activation path  : always runs from scan data
+      - Enrichment path  : Spoolman sync, weight update, spool ID tracking
     """
     try:
         scan = detect_and_parse(payload, toolhead, topic)
@@ -447,48 +512,25 @@ def _handle_rich_tag(client, toolhead, payload, topic):
             logger.warning(f"Scanner reported invalid tag data on {toolhead}")
             return
 
-        # Sync with Spoolman — creates the spool if it doesn't exist yet,
-        # or merges data if it does. Returns SpoolInfo with spoolman_id set.
-        spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
+        # --- Enrichment path (best-effort) ---
+        spool_info = None
+        try:
+            spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
+        except Exception:
+            logger.exception(
+                "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
+                "uid=%s topic=%s",
+                scan.uid,
+                topic,
+            )
 
-        if spool_info and spool_info.spoolman_id:
-            if activate_spool(spool_info.spoolman_id, toolhead):
-                active_spools[toolhead] = spool_info.spoolman_id
-
-                color_hex = spool_info.color_hex or scan.color_hex or "FFFFFF"
-                remaining = spool_info.remaining_weight_g or scan.remaining_weight_g
-                is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
-
-                if cfg["toolhead_mode"] == "afc":
-                    publish_lock(toolhead, "lock")
-                    update_klipper_led(toolhead, color_hex, is_low)
-                else:
-                    client.publish(f"nfc/toolhead/{toolhead}/color",
-                                   color_hex.lstrip("#").upper(), qos=1, retain=True)
-
-                # Low spool handling
-                if cfg["toolhead_mode"] == "afc":
-                    if is_low:
-                        logger.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
-                else:
-                    topic_low = f"nfc/toolhead/{toolhead}/low_spool"
-                    if is_low:
-                        logger.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
-                        client.publish(topic_low, "true", qos=1, retain=True)
-                    else:
-                        client.publish(topic_low, "false", qos=1, retain=True)
-        else:
-            logger.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {scan.uid}")
-            # For single/toolchanger, flash error on the ESP32 LED
-            if cfg["toolhead_mode"] != "afc":
-                client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
-                client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
+        # --- Activation path (always runs) ---
+        _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
 
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")
     except ValueError as e:
         logger.debug(f"Dispatcher rejected payload: {e}")
-        # For single/toolchanger, flash error if it was a real scan attempt
         if cfg["toolhead_mode"] != "afc":
             client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
             client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
