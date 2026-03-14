@@ -104,7 +104,7 @@ WS2812 data is typically 5V logic, while ESP32 GPIO is 3.3V. In many short-wire 
 
 ## Library Choice
 
-`Adafruit_NeoPixel` is the correct library for this project.
+`Adafruit_NeoPixel` integrates cleanly with this Arduino-based firmware and is recommended for the initial implementation.
 
 `openprinttag_scanner` uses:
 
@@ -114,7 +114,7 @@ board = esp32dev
 framework = arduino
 ```
 
-Since the firmware is already Arduino framework, `Adafruit_NeoPixel` integrates cleanly and has no additional framework dependencies. Add it to `platformio.ini`:
+Add it to `platformio.ini`:
 
 ```ini
 lib_deps =
@@ -129,8 +129,9 @@ Add a small `LEDManager` to the firmware.
 
 ### Responsibilities
 - initialize the RGB LED
-- manage simple states and temporary flashes
-- support setting a filament color from scanned tag data
+- set colors for known states
+- flash for transient events (tag detect, write success/failure)
+- support setting filament color from scanned tag data
 - allow the LED feature to be compiled out or disabled
 
 ### Why local LED control is better than MQTT-driven LED control
@@ -149,24 +150,19 @@ So the scanner can provide better immediate status than an external controller.
 
 ## Suggested Visual Behavior
 
-### Startup / connectivity
-- **booting** → dim white pulse
-- **Wi-Fi connecting** → slow blue pulse
-- **Wi-Fi failed** → blinking red
-- **ready / idle** → off or dim blue
+The first version should use simple instantaneous color changes and brief blocking flashes. No animation engine, no `tick()`, no FreeRTOS LED task.
 
-### Scanning
-- **tag detected** → yellow flash
-- **tag parse success** → solid filament color
-- **tag parse failure** → red flash
+| Event | LED behavior |
+|---|---|
+| booting | white |
+| Wi-Fi failed | red |
+| tag detected | yellow flash |
+| valid scan | solid filament color |
+| parse failed | red flash |
+| write success | green flash, return to filament color |
+| write failed | red flash |
 
-### Writing
-- **write queued / in progress** → cyan pulse
-- **write success** → green flash, then return to filament color
-- **write failure** → red flash, then return to previous state
-
-### Optional idle behavior
-- after a timeout, LED can dim or turn off to reduce distraction
+Animations (pulse, breathe, idle dimming) are intentionally deferred to a future version. Keeping the first PR to simple `setColor()` / `flash()` calls keeps the diff small and the review easy.
 
 ---
 
@@ -188,7 +184,6 @@ public:
     void showOff();
 
     void showBooting();
-    void showWifiConnecting();
     void showWifiFailed();
     void showReady();
 
@@ -200,31 +195,35 @@ public:
     void showFilamentColor(uint32_t rgb);
     void setFilamentColorFromHex(const char* hex);
 
-    void tick();  // called from a dedicated FreeRTOS task — see below
+private:
+    void setColor(uint8_t r, uint8_t g, uint8_t b);
+    Adafruit_NeoPixel pixel;
 };
 ```
 
-### FreeRTOS task for `tick()`
+No `tick()` and no FreeRTOS task in the first version. All state changes are direct calls.
 
-This firmware uses FreeRTOS tasks extensively. If `LEDManager` uses time-based animations (pulse, blink, timeout dimming), `tick()` should be driven from a periodic FreeRTOS task rather than depending on Arduino `loop()` timing.
-
-Suggested pattern:
+### Internal implementation example
 
 ```cpp
-#if USE_STATUS_LED
-void ledTask(void* pvParameters) {
-    while (true) {
-        ledManager.tick();
-        vTaskDelay(pdMS_TO_TICKS(20));  // ~50Hz update rate
-    }
+void LEDManager::setColor(uint8_t r, uint8_t g, uint8_t b) {
+    pixel.setPixelColor(0, pixel.Color(r, g, b));
+    pixel.show();
 }
 
-// In setup() or wherever tasks are started:
-xTaskCreate(ledTask, "LEDTask", 2048, nullptr, 1, nullptr);
-#endif
+void LEDManager::flashTagDetected() {
+    setColor(255, 200, 0);  // yellow
+    delay(100);
+    setColor(0, 0, 0);
+}
+
+void LEDManager::showFilamentColor(uint32_t rgb) {
+    pixel.setPixelColor(0, rgb);
+    pixel.show();
+}
 ```
 
-This keeps LED animations smooth and decoupled from other task timing.
+> **Note on `tick()` and animations:** If a future version adds time-based animations (pulse, blink, idle dimming), `tick()` should be driven from a dedicated FreeRTOS task rather than `loop()`, since this firmware uses FreeRTOS tasks extensively. That is out of scope for this PR.
 
 ---
 
@@ -252,31 +251,16 @@ This keeps existing builds completely unaffected.
 
 #### Option B: runtime config (future enhancement)
 
-A later version could add web UI config for:
-
-- `led_enabled`
-- `led_pin`
-
-Not required for the first PR.
+A later version could add web UI config for `led_enabled` and `led_pin`. Not required for the first PR.
 
 ---
 
 ### 3. Integrate in `main.cpp`
 
-Example pattern:
-
 ```cpp
 #if USE_STATUS_LED
   ledManager.begin(STATUS_LED_PIN);
   ledManager.showBooting();
-#endif
-```
-
-During Wi-Fi:
-
-```cpp
-#if USE_STATUS_LED
-  ledManager.showWifiConnecting();
 #endif
 ```
 
@@ -317,7 +301,7 @@ Potential files to integrate with:
 
 #### On valid spool detected
 
-When a tag is parsed successfully and contains color. Note: `HomeAssistantManager` publishes `color` as `#RRGGBB` — the hex parser must handle both `#RRGGBB` and `RRGGBB` formats:
+Note: `HomeAssistantManager` publishes `color` as `#RRGGBB` — the hex parser must handle both `#RRGGBB` and `RRGGBB` formats:
 
 ```cpp
 ledManager.setFilamentColorFromHex(spool.tag_data.color_hex);
@@ -329,23 +313,16 @@ ledManager.setFilamentColorFromHex(spool.tag_data.color_hex);
 ledManager.flashTagDetected();
 ```
 
-#### On write success
+#### On write success / failure
 
 ```cpp
 ledManager.flashWriteSuccess();
-```
-
-#### On write failure
-
-```cpp
 ledManager.flashWriteFailure();
 ```
 
 ---
 
 ### 5. Hex color conversion helper
-
-A helper in `LEDManager` can convert hex color strings into RGB values.
 
 The firmware's `HomeAssistantManager` publishes `color` as `#RRGGBB`. The parser must handle both formats:
 
@@ -360,9 +337,7 @@ Should support:
 - `"FF0000"`
 - `"#FF0000"`
 
-Fallback:
-
-- invalid or empty color → default white or off
+Fallback: invalid or empty color → white or off.
 
 ---
 
@@ -376,11 +351,7 @@ This feature would:
 - stay optional
 - require very little hardware
 
-It also fits well with the existing firmware design:
-
-- `ApplicationManager` already tolerates optional UI concepts
-- scanner logic already knows enough to drive visual feedback locally
-- the firmware already uses FreeRTOS tasks extensively — `tick()` fits naturally
+It also fits well with the existing firmware design — `ApplicationManager` already tolerates optional UI concepts and the scanner logic already knows enough to drive visual feedback locally.
 
 ---
 
@@ -388,6 +359,8 @@ It also fits well with the existing firmware design:
 
 These are intentionally **out of scope** for the initial PR:
 
+- `tick()` / animation engine / FreeRTOS LED task
+- pulse, blink, or idle dimming effects
 - MQTT-controlled LED color
 - multi-pixel animations
 - per-lane external LED strips
@@ -398,6 +371,7 @@ The first version should stay simple:
 
 - one LED
 - one scanner
+- direct color calls only
 - local status only
 
 ---
@@ -406,17 +380,11 @@ The first version should stay simple:
 
 Implement the smallest useful version:
 
-- optional `LEDManager`
-- compile-time enable flag (`USE_STATUS_LED`)
+- optional `LEDManager` with compile-time flag (`USE_STATUS_LED`)
 - recommended default pin: GPIO4
 - `Adafruit_NeoPixel` library
-- `tick()` driven from a FreeRTOS task
-- basic states:
-  - booting
-  - Wi-Fi failed
-  - tag detected
-  - valid scan → filament color
-  - write success/failure
+- direct `setColor()` / `flash()` calls — no animation engine
+- basic states: booting, Wi-Fi failed, tag detected, valid scan → filament color, write success/failure
 
 That would already make the scanner much friendlier to use in single-toolhead and multi-toolhead setups without requiring an LCD.
 
@@ -440,4 +408,4 @@ The LED is intended as a lightweight alternative to the LCD for PN5180-based bui
 - write success/failure
 - filament color display after a valid scan
 
-The feature is optional and controlled via a compile-time flag (`USE_STATUS_LED`) so existing builds are unaffected. LED animations are driven from a dedicated FreeRTOS task to stay consistent with the firmware's existing task-based architecture.
+The feature is optional and controlled via a compile-time flag (`USE_STATUS_LED`) so existing builds are unaffected. The first version uses simple direct color calls with no animation engine — animations can be added in a follow-up PR using a FreeRTOS task for `tick()`.
