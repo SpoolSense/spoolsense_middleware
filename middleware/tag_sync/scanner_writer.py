@@ -39,6 +39,13 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
         plan:        TagWritePlan from build_write_plan()
         mqtt_client: Active paho MQTT client instance
     """
+    if not plan.device_id or not plan.uid or not plan.command:
+        logger.warning(
+            "Tag write skipped — invalid plan: device_id=%r uid=%r command=%r",
+            plan.device_id, plan.uid, plan.command,
+        )
+        return
+
     topic = f"openprinttag/{plan.device_id}/cmd/{plan.command}/{plan.uid}"
     payload = json.dumps(plan.payload)
 
