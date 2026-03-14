@@ -3,7 +3,7 @@
 # =============================================================
 # Copy this file to ~/SpoolSense/config.yaml and fill in your values.
 #
-#   cp config.example.yaml ~/SpoolSense/config.yaml
+#   cp config.example.afc.yaml ~/SpoolSense/config.yaml
 #
 # This middleware supports three modes. Set toolhead_mode below.
 # =============================================================
@@ -47,8 +47,11 @@ mqtt:
   username: "your_mqtt_username"
   password: "your_mqtt_password"
 
-# ---- Spoolman URL -------------------------------------------
+# ---- Spoolman URL (optional) -------------------------------
 # Default port is 7912.
+# If omitted, SpoolSense runs in tag-only mode:
+# scans still activate lanes and publish color/lock state,
+# but Spoolman lookup, spool creation, and weight sync are disabled.
 spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
 
 # ---- Moonraker URL ------------------------------------------
@@ -85,19 +88,23 @@ afc_led_macro: "_SET_LANE_LED"
 # Only needed if you are using ESP32-WROOM-32 + PN5180 boards running
 # the ryanch/openprinttag_scanner firmware alongside your PN532 readers.
 #
-# Maps each scanner's MQTT device ID (derived from the last 3 octets
-# of its WiFi MAC) to the AFC lane it serves.
-#
-# Each scanner publishes to:
+# Maps each scanner's MQTT device ID to the AFC lane it serves.
+# The device ID appears in the scanner's MQTT topic:
 #   openprinttag/<device_id>/tag/state
+# Use the actual device ID published by your scanner — check your MQTT
+# broker or the scanner's web UI to find it.
 #
 # The mapped value must match an entry in your toolheads list above.
 # SpoolSense will error at startup if a mapped lane is not in toolheads.
 #
 # Leave empty or omit if you are not using openprinttag_scanner.
 #
+# MQTT topic prefix used by openprinttag_scanner devices.
+# Only change this if you have customized the scanner firmware.
+# scanner_topic_prefix: "openprinttag"
+#
 # scanner_lane_map:
-#   esp32-lane1: "lane1"
-#   esp32-lane2: "lane2"
-#   esp32-lane3: "lane3"
-#   esp32-lane4: "lane4"
+#   scanner_ab12cd: "lane1"
+#   scanner_ef34gh: "lane2"
+#   scanner_ij56kl: "lane3"
+#   scanner_mn78op: "lane4"
