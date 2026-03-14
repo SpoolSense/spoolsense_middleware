@@ -434,6 +434,23 @@ def on_connect(client, userdata, flags, rc):
     else:
         logger.error(f"MQTT connection failed: {rc}")
 
+def _extract_scanner_device_id(topic: str) -> str | None:
+    """
+    Extracts the scanner deviceId from an openprinttag_scanner MQTT topic.
+
+    Expected topic shape: openprinttag/<deviceId>/tag/state
+    Returns the deviceId string, or None if the topic does not match.
+
+    This is the single authoritative place that parses scanner topics.
+    Both _resolve_lane_from_topic() and _handle_rich_tag() use this.
+    """
+    prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+    parts = topic.split("/") if topic else []
+    if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
+        return parts[1]
+    return None
+
+
 def _resolve_lane_from_topic(topic):
     """
     Determines the lane/toolhead name from an MQTT topic.
@@ -443,13 +460,11 @@ def _resolve_lane_from_topic(topic):
     looks up the device ID in scanner_lane_map to find the lane name.
     Returns None if the topic can't be mapped to a lane.
     """
-    prefix = cfg.get("scanner_topic_prefix", "openprinttag")
     scanner_map = cfg.get("scanner_lane_map", {})
 
     # Check if it's a scanner topic: openprinttag/<device_id>/tag/state
-    parts = topic.split("/") if topic else []
-    if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
-        device_id = parts[1]
+    device_id = _extract_scanner_device_id(topic)
+    if device_id is not None:
         lane = scanner_map.get(device_id)
         if lane:
             return lane
@@ -457,7 +472,7 @@ def _resolve_lane_from_topic(topic):
         return None
 
     # Otherwise it's a PN532 topic: nfc/toolhead/<lane>
-    parts = topic.split("/")
+    parts = topic.split("/") if topic else []
     if len(parts) >= 3 and parts[0] == "nfc" and parts[1] == "toolhead":
         return parts[2]
 
@@ -573,13 +588,9 @@ def _handle_rich_tag(client, toolhead, payload, topic):
         _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
 
         # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
-        # Extract device_id from the MQTT topic — only present for openprinttag_scanner.
-        # PN532/ESPHome topics don't carry a device_id so writeback is skipped for those.
-        parts = topic.split("/") if topic else []
-        prefix = cfg.get("scanner_topic_prefix", "openprinttag")
-        device_id = None
-        if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
-            device_id = parts[1]
+        # device_id is only present for openprinttag_scanner topics.
+        # PN532/ESPHome topics return None so writeback is skipped for those.
+        device_id = _extract_scanner_device_id(topic)
 
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:
