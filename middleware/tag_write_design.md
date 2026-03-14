@@ -37,6 +37,8 @@ Tag writes should be **conditional**, not automatic.
 
 Only write when one of these conditions occurs.
 
+Not all conditions are implemented in Phase 1 — see Future Phases for the rollout plan.
+
 ---
 
 ## 1. After a Print Completes
@@ -120,14 +122,12 @@ parse ScanEvent
    ↓
 sync/resolve spool in Spoolman
    ↓
-activate spool
-   ↓
 compare tag vs Spoolman remaining
    ↓
-if stale
-    publish write command to scanner
-else
-    do nothing
+activate spool
+   ↓
+if stale → publish write command to scanner
+else     → do nothing
 ```
 
 Important rules:
@@ -224,15 +224,16 @@ if write_plan:
 
 ```python
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 @dataclass
 class TagWritePlan:
-    device_id: str        # Scanner deviceId (from MQTT topic, e.g. "esp32-t0")
-    uid: str              # NFC tag UID to target
-    command: str          # Command name to send to the scanner
-    payload: dict[str, Any]  # Command payload
-    reason: str | None = None  # Optional — logged when the write is dispatched
+    device_id: str                              # Scanner deviceId extracted from the MQTT scan topic
+                                                # (openprinttag/<deviceId>/...)
+    uid: str                                    # NFC tag UID to target
+    command: Literal["update_remaining", "write_tag"]  # Allowed write commands
+    payload: dict[str, Any]                     # Command payload
+    reason: str | None = None                   # Optional — logged when the write is dispatched
 ```
 
 For Phase 1, `command` will be whatever the scanner firmware expects for a
@@ -331,3 +332,16 @@ Design goals:
 - Tags act as portable metadata snapshots
 - Writes are conditional and safe
 - Tag writing failures do not impact spool activation
+
+---
+
+# Future Considerations
+
+## Write loop protection
+
+If the scanner republishes tag state after a successful write (e.g. a fresh
+`tag/state` MQTT message), SpoolSense must not treat that republish as a new
+stale-tag event and issue another write. Tag writes should not immediately
+trigger another write cycle. This can be addressed by tracking the last write
+per UID/device or by suppressing writeback for a short window after a write
+command is dispatched.
