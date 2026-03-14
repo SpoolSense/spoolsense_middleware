@@ -57,6 +57,51 @@ Subscribed to nfc/toolhead/ for T0, T1, T2, T3
 
 If the config file is missing or has placeholder values, the middleware will exit with a clear error telling you which fields need to be set.
 
+## Verify Config Before Starting
+
+Use `--check-config` to validate your config and print a summary without connecting to MQTT, Spoolman, or Moonraker:
+
+```bash
+python3 ~/SpoolSense/middleware/spoolsense.py --check-config
+```
+
+Example output:
+```
+Config OK: /home/pi/SpoolSense/config.yaml
+  toolhead_mode    : afc
+  toolheads        : lane1, lane2, lane3, lane4
+  spoolman_url     : http://192.168.1.100:7912
+  moonraker_url    : http://192.168.1.100
+  mqtt.broker      : 192.168.1.100
+  scanner_lane_map : {'ab12cd': 'lane1'}
+  tag_writeback    : disabled (dry-run)
+  dispatcher       : available
+```
+
+This is safe to run at any time — it exits immediately after printing the summary. Run it after any config change to catch mistakes before restarting the service.
+
+## Enabling Tag Writeback (OpenPrintTag scanners only)
+
+If you are using PN5180-based scanners running `openprinttag_scanner`, SpoolSense can write updated remaining weight back to tags when the tag is stale.
+
+Writeback is **disabled by default**. When disabled, SpoolSense logs what it _would_ write without publishing anything — this is the dry-run mode.
+
+**Recommended workflow:**
+1. Leave `tag_writeback_enabled` unset (or set to `false`) on first deploy
+2. Scan a few tags and watch the logs:
+   ```bash
+   journalctl -u spoolsense -f | grep "would write"
+   ```
+3. Verify the `device`, `payload`, and `reason` look correct for each scan
+4. Once satisfied, enable writeback in `config.yaml`:
+   ```yaml
+   tag_writeback_enabled: true
+   ```
+5. Restart the service:
+   ```bash
+   sudo systemctl restart spoolsense
+   ```
+
 ## Install as Systemd Service
 
 1. Copy the service file:
