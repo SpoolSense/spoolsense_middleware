@@ -148,29 +148,109 @@ The dispatcher returns a `ScanEvent` with the relevant flag set to `False` — i
 ### Testing — must do before further coding
 
 **Unit tests (no hardware needed)**
+
+Run from the `middleware/` directory on any machine with Python 3.10+. No broker, Klipper, or Spoolman needed.
+
+```bash
+cd ~/SpoolSense/middleware
+python test_dispatcher.py
+python test_parsers.py
+```
+
 - [x] Run `test_dispatcher.py` — all 9 test cases pass
 - [x] Run `test_parsers.py` — OpenTag3D parser output verified (fixed swapped args in test call)
 - [ ] Run `test_db.py` — verify MoonrakerDB save/load (needs Moonraker running)
+
+  ```bash
+  # Requires Moonraker to be running and moonraker_url set in config.yaml
+  python test_db.py
+  ```
+
 - [ ] Test `color_map.py` — scan through known Prusament color names and verify hex output. Test edge cases: empty string, already-hex, unknown name, mixed case
+
+  ```bash
+  python -c "
+  from openprinttag.color_map import color_name_to_hex
+  tests = ['Galaxy Black', 'urban grey', '', '#FF0000', 'NotAColor', 'GALAXY BLACK']
+  for t in tests:
+      print(repr(t), '->', color_name_to_hex(t))
+  "
+  ```
 
 **Integration tests (needs MQTT broker + Spoolman)**
 - [ ] Plain UID scan end-to-end — PN532 → MQTT → spoolsense.py → Spoolman lookup → activate_spool
 - [ ] Verify `DISPATCHER_AVAILABLE=False` graceful degradation — rename/remove `adapters/` and confirm plain UID path still works
+
+  ```bash
+  mv middleware/adapters middleware/adapters.bak
+  python spoolsense.py  # should start and log that dispatcher is disabled
+  mv middleware/adapters.bak middleware/adapters
+  ```
+
 - [ ] Verify `scanner_lane_map` subscription — configure a fake scanner mapping, start middleware, confirm it subscribes to correct topics
 - [ ] Publish a fake `openprinttag_scanner` payload to MQTT manually and verify dispatcher picks it up and routes correctly
 
+  ```bash
+  mosquitto_pub -h <broker_ip> -t "openprinttag/esp32-t0/tag/state" -m '{
+    "uid":"04A2B31C5F2280","present":true,"tag_data_valid":true,
+    "manufacturer":"Prusament","material_type":"PLA","material_name":"Galaxy Black",
+    "color":"#1A1A2E","initial_weight_g":1000.0,"remaining_g":742.0,
+    "spoolman_id":-1,"blank":false}'
+  ```
+
 **openprinttag_scanner end-to-end smoke test (needs MQTT broker + running middleware)**
+
+Start middleware in one terminal, then use `mosquitto_pub` in a second terminal to inject payloads.
+
+```bash
+# Terminal 1 — start middleware
+cd ~/SpoolSense/middleware
+python spoolsense.py
+
+# Terminal 2 — publish test payloads (adjust broker IP and deviceId as needed)
+BROKER=<broker_ip>
+DEVICE=esp32-t0
+TOPIC="openprinttag/$DEVICE/tag/state"
+```
+
 - [ ] Confirm `detect_and_parse` caller passes `topic=msg.topic`
 - [ ] Start middleware with scanner topics enabled
 - [ ] Verify `scanner_lane_map` has the expected deviceId
 - [ ] Publish valid payload with `uid`
+
+  ```bash
+  mosquitto_pub -h $BROKER -t "$TOPIC" -m '{
+    "uid":"04A2B31C5F2280","present":true,"tag_data_valid":true,
+    "manufacturer":"Prusament","material_type":"PLA","material_name":"Galaxy Black",
+    "color":"#1A1A2E","initial_weight_g":1000.0,"remaining_g":742.0,
+    "spoolman_id":-1,"blank":false}'
+  ```
+
 - [ ] Check dispatcher detects `openprinttag_scanner` format
 - [ ] Check `ScanEvent` shows `uid`, `present`, `tag_data_valid`
 - [ ] Check `_handle_rich_tag` is reached
 - [ ] Publish payload with `uid` removed
+
+  ```bash
+  mosquitto_pub -h $BROKER -t "$TOPIC" -m '{
+    "uid":"","present":true,"tag_data_valid":true,
+    "manufacturer":"Prusament","material_type":"PLA","material_name":"Galaxy Black",
+    "color":"#1A1A2E","initial_weight_g":1000.0,"remaining_g":742.0,
+    "spoolman_id":-1,"blank":false}'
+  ```
+
 - [ ] Check warning includes `topic`/`deviceId`
 - [ ] Confirm no crash and Spoolman sync skipped
 - [ ] Publish `present=false` payload
+
+  ```bash
+  mosquitto_pub -h $BROKER -t "$TOPIC" -m '{
+    "uid":"","present":false,"tag_data_valid":false,
+    "manufacturer":"","material_type":"","material_name":"",
+    "color":"","initial_weight_g":0.0,"remaining_g":0.0,
+    "spoolman_id":-1,"blank":false}'
+  ```
+
 - [ ] Confirm graceful no-op path
 
 **Hardware tests (needs ESP32-WROOM-32 + PN5180 + openprinttag_scanner)**
