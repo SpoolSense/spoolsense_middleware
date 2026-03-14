@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timezone
 
+logger = logging.getLogger(__name__)
+
 from state.models import ScanEvent
 
 
@@ -58,7 +60,7 @@ def scan_event_from_openprinttag_scanner(payload: dict, target_id: str, topic: s
             else f" [topic: {topic}]" if topic
             else ""
         )
-        logging.warning(
+        logger.warning(
             "OpenPrintTag scanner payload indicates a valid tag but no UID was provided. "
             "Spoolman sync will be skipped. This likely indicates a firmware bug or "
             "malformed MQTT payload.%s",
