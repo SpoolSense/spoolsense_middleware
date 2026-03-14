@@ -457,15 +457,17 @@ def _activate_from_scan(client, toolhead, scan, spool_info=None):
     # --- Resolve color and low-spool state from best available source ---
     # Spoolman color wins when available — a human set it deliberately.
     # Fall back to scan color, then white.
-    color_hex = (
-        (spool_info.color_hex if spool_info else None)
-        or scan.color_hex
-        or "FFFFFF"
-    )
-    remaining = (
-        (spool_info.remaining_weight_g if spool_info else None)
-        or scan.remaining_weight_g
-    )
+    # Use explicit is not None checks — 0.0 remaining and "" color are valid values
+    # and must not fall through to the scan fallback via truthiness short-circuit.
+    if spool_info and spool_info.color_hex is not None:
+        color_hex = spool_info.color_hex
+    else:
+        color_hex = scan.color_hex or "FFFFFF"
+
+    if spool_info and spool_info.remaining_weight_g is not None:
+        remaining = spool_info.remaining_weight_g
+    else:
+        remaining = scan.remaining_weight_g
     is_low = remaining is not None and remaining <= cfg["low_spool_threshold"]
     filament_label = scan.material_name or scan.material_type or "Unknown"
 
