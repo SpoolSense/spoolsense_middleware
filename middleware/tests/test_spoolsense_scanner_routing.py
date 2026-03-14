@@ -56,16 +56,16 @@ def test_extract_scanner_device_id_returns_none_for_wrong_suffix(monkeypatch):
     assert spoolsense._extract_scanner_device_id(topic) is None
 
 
-def test_extract_scanner_device_id_allows_extra_segments_current_behavior(monkeypatch):
+def test_extract_scanner_device_id_returns_none_for_extra_segments(monkeypatch):
     monkeypatch.setattr(
         spoolsense,
         "cfg",
         {"scanner_topic_prefix": "openprinttag"},
         raising=False,
     )
-    # Extra segments after /tag/state — parts[0-3] still match, documents current behavior
+    # Topics with extra segments after /tag/state are rejected — exact 4-part match required
     topic = "openprinttag/ab12cd/tag/state/extra"
-    assert spoolsense._extract_scanner_device_id(topic) == "ab12cd"
+    assert spoolsense._extract_scanner_device_id(topic) is None
 
 
 def test_extract_scanner_device_id_uses_configured_prefix(monkeypatch):

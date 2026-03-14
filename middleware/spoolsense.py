@@ -445,7 +445,7 @@ def _extract_scanner_device_id(topic: str) -> str | None:
     """
     prefix = cfg.get("scanner_topic_prefix", "openprinttag")
     parts = topic.split("/") if topic else []
-    if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
+    if len(parts) == 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
         return parts[1]
     return None
 
