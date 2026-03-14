@@ -1,32 +1,17 @@
 """
 conftest.py — pytest session setup for the middleware test suite.
 
-spoolsense.py runs startup code at import time (load_config, MQTT connect,
-SpoolmanClient init). The following is required for tests that import
-spoolsense directly:
+After the Phase 1 refactor, spoolsense.py no longer runs startup code at
+import time. All runtime logic lives in main(). This means tests can simply:
 
-  1. A minimal ~/SpoolSense/config.yaml must exist on the test machine.
-     The test suite expects this file to be present. If running in CI or
-     a fresh environment, create it first:
+    import spoolsense
 
-         mkdir -p ~/SpoolSense
-         cat > ~/SpoolSense/config.yaml << EOF
-         toolhead_mode: "afc"
-         toolheads:
-           - "lane1"
-           - "lane2"
-         moonraker_url: "http://localhost"
-         mqtt:
-           broker: "localhost"
-         EOF
+without triggering config loading, MQTT connections, or sys.exit() calls.
 
-  2. paho.mqtt and watchdog are stubbed at session start so the test
-     suite can run without those packages installed and without a live
-     broker or filesystem watcher.
-
-     Note: test_scanner_writer.py imports paho.mqtt.client directly for
-     MQTT_ERR_SUCCESS / MQTT_ERR_NO_CONN constants. Those are provided
-     by the stub below.
+paho.mqtt and watchdog are still stubbed here so the test suite can run
+without those packages installed. test_scanner_writer.py imports
+paho.mqtt.client directly for MQTT_ERR_SUCCESS / MQTT_ERR_NO_CONN constants,
+which are provided by the stub below.
 """
 
 import sys

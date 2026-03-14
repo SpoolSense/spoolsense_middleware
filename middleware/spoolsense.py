@@ -193,22 +193,11 @@ def load_config():
     return config
 
 
-cfg = load_config()
-
-# Warn if scanner_lane_map is configured but dispatcher is unavailable
-if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:
-    logger.warning(
-        "scanner_lane_map is configured but the rich-tag dispatcher is not available "
-        "(adapters/ directory not found). openprinttag_scanner topics will be subscribed "
-        "but payloads will not be parsed — scans will be silently ignored. "
-        "Ensure the adapters/ directory is present to enable scanner support."
-    )
-
-# SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
-# Only instantiated when both the dispatcher and a Spoolman URL are available.
+# cfg and spoolman_client are initialized in main() at runtime.
+# Defaults are set here so helper functions are safe to import and test
+# without main() having been called.
+cfg = DEFAULTS.copy()
 spoolman_client = None
-if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
-    spoolman_client = SpoolmanClient(cfg["spoolman_url"])
 
 # ============================================================
 # Discovery Helpers
@@ -871,42 +860,75 @@ def on_shutdown(signum, frame):
         watcher.stop()
     sys.exit(0)
 
-# Hook up the shutdown signals
-signal.signal(signal.SIGTERM, on_shutdown)
-signal.signal(signal.SIGINT, on_shutdown)
 
-# Setup MQTT
-mqtt_client = mqtt.Client()
-if cfg["mqtt"].get("username"):
-    mqtt_client.username_pw_set(cfg["mqtt"]["username"], cfg["mqtt"].get("password"))
+def main():
+    """
+    Application entry point. All runtime startup logic lives here.
 
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
-mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
+    Separating startup from module-level code means spoolsense can be
+    imported safely for testing without triggering MQTT connections,
+    config loading, or sys.exit() calls.
 
-logger.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
-logger.info(f"Spoolman: {cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
-logger.info(f"Moonraker: {cfg['moonraker_url']}")
-if DISPATCHER_AVAILABLE:
-    logger.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
-else:
-    logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
-if cfg["toolhead_mode"] == "afc":
-    logger.info(f"Lanes: {', '.join(cfg['toolheads'])}")
-    logger.info(f"AFC var file: {cfg['afc_var_path']}")
-    logger.info(f"LED macro: {cfg['afc_led_macro']}")
-else:
-    logger.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
-    logger.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
-scanner_map = cfg.get("scanner_lane_map", {})
-if scanner_map:
-    logger.info(f"Scanner lane map: {json.dumps(scanner_map)}")
+    TODO (Phase 2): reduce reliance on globals by introducing an AppContext
+    dataclass and passing dependencies explicitly into handlers.
+    """
+    global cfg, spoolman_client, watcher, mqtt_client
 
-# Start the infinite loop
-try:
-    mqtt_client.connect(cfg["mqtt"]["broker"], cfg["mqtt"]["port"], 60)
-    watcher = start_watcher()
-    mqtt_client.loop_forever()
-except Exception as e:
-    logger.error(f"Fatal error: {e}")
-    sys.exit(1)
+    cfg = load_config()
+
+    # Warn if scanner_lane_map is configured but dispatcher is unavailable
+    if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:
+        logger.warning(
+            "scanner_lane_map is configured but the rich-tag dispatcher is not available "
+            "(adapters/ directory not found). openprinttag_scanner topics will be subscribed "
+            "but payloads will not be parsed — scans will be silently ignored. "
+            "Ensure the adapters/ directory is present to enable scanner support."
+        )
+
+    # SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
+    if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
+        spoolman_client = SpoolmanClient(cfg["spoolman_url"])
+
+    # Hook up shutdown signals
+    signal.signal(signal.SIGTERM, on_shutdown)
+    signal.signal(signal.SIGINT, on_shutdown)
+
+    # Setup MQTT
+    mqtt_client = mqtt.Client()
+    if cfg["mqtt"].get("username"):
+        mqtt_client.username_pw_set(cfg["mqtt"]["username"], cfg["mqtt"].get("password"))
+
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
+    mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
+
+    logger.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
+    logger.info(f"Spoolman: {cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
+    logger.info(f"Moonraker: {cfg['moonraker_url']}")
+    if DISPATCHER_AVAILABLE:
+        logger.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
+    else:
+        logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
+    if cfg["toolhead_mode"] == "afc":
+        logger.info(f"Lanes: {', '.join(cfg['toolheads'])}")
+        logger.info(f"AFC var file: {cfg['afc_var_path']}")
+        logger.info(f"LED macro: {cfg['afc_led_macro']}")
+    else:
+        logger.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
+        logger.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
+    scanner_map = cfg.get("scanner_lane_map", {})
+    if scanner_map:
+        logger.info(f"Scanner lane map: {json.dumps(scanner_map)}")
+
+    # Start the infinite loop
+    try:
+        mqtt_client.connect(cfg["mqtt"]["broker"], cfg["mqtt"]["port"], 60)
+        watcher = start_watcher()
+        mqtt_client.loop_forever()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
