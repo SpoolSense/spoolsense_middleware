@@ -91,8 +91,16 @@ afc_led_macro: "_SET_LANE_LED"
 # Maps each scanner's MQTT device ID to the AFC lane it serves.
 # The device ID appears in the scanner's MQTT topic:
 #   openprinttag/<device_id>/tag/state
-# Use the actual device ID published by your scanner — check your MQTT
-# broker or the scanner's web UI to find it.
+#
+# To find your scanner's device_id:
+# 1. Power on the scanner and scan any tag.
+# 2. Watch your MQTT broker for topics like:
+#      openprinttag/<device_id>/tag/state
+# 3. Use that <device_id> as the key below.
+#
+# Example:
+#   openprinttag/ab12cd/tag/state
+# → device_id is "ab12cd"
 #
 # The mapped value must match an entry in your toolheads list above.
 # SpoolSense will error at startup if a mapped lane is not in toolheads.
