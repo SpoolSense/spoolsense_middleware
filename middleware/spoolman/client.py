@@ -138,23 +138,191 @@ class SpoolmanClient:
 
     def _create_spool_from_tag(self, tag_spool: SpoolInfo) -> SpoolInfo:
         """
-        Creates a new filament and spool in Spoolman based on tag data, then writes
-        the NFC UID back to Spoolman's extra fields so future scans find it.
+        Creates a vendor (if needed), filament (if needed), and spool in Spoolman
+        based on tag data, then writes the NFC UID back so future scans find it.
 
-        Note: Full vendor/filament deduplication (checking if the brand+material
-        already exists before creating) is not yet implemented. For now this always
-        creates a new filament entry.
+        Deduplication strategy:
+          - Vendor: matched case-insensitively by name. Created if not found.
+          - Filament: matched by vendor_id + material + color_hex + name (all four
+            must match). Created if not found.
+          - Spool: always created fresh — a new physical spool is a new Spoolman entry.
         """
-        logger.warning("Auto-creation of Spoolman entries from tags is not yet fully implemented.")
-        # TODO: Check if vendor already exists, create if not, then link filament.
-        # TODO: POST to /api/v1/filament, then POST to /api/v1/spool with filament_id.
-        # Placeholder: pretend Spoolman assigned ID 99.
-        tag_spool.spoolman_id = 99
-        tag_spool.source = "openprinttag"
+        # --- Vendor ---
+        vendor_name = tag_spool.brand or "Unknown"
+        vendor = self._get_vendor_by_name(vendor_name)
+        if vendor is None:
+            logger.info(f"Vendor '{vendor_name}' not found in Spoolman — creating.")
+            vendor = self._create_vendor(vendor_name)
+        vendor_id = vendor["id"]
 
-        # Write the NFC UID back to Spoolman so the cache can find it on the next scan
+        # --- Filament ---
+        filament = self._get_filament(
+            vendor_id=vendor_id,
+            material=tag_spool.material_type or "",
+            color_hex=tag_spool.color_hex or "",
+            name=tag_spool.material_name,
+        )
+        if filament is None:
+            logger.info(f"No matching filament found for vendor {vendor_id} / "
+                        f"{tag_spool.material_type} / {tag_spool.color_hex} — creating.")
+            filament = self._create_filament(
+                vendor_id=vendor_id,
+                material=tag_spool.material_type or "",
+                color_hex=tag_spool.color_hex or "",
+                name=tag_spool.material_name,
+                diameter=tag_spool.diameter_mm,
+                density=getattr(tag_spool, "density", None),
+            )
+        filament_id = filament["id"]
+
+        # --- Spool ---
+        spool = self._create_spool(
+            filament_id=filament_id,
+            weight=tag_spool.full_weight_g,
+        )
+        tag_spool.spoolman_id = spool["id"]
+        tag_spool.source = "created"
+
+        # Write NFC UID back so the cache finds it on the next scan
         self._write_nfc_id(tag_spool.spoolman_id, tag_spool.spool_uid)
+        logger.info(f"Created Spoolman spool {tag_spool.spoolman_id} for UID {tag_spool.spool_uid} "
+                    f"({vendor_name} {tag_spool.material_type} / filament {filament_id})")
         return tag_spool
+
+    def _get_vendor_by_name(self, name: str) -> Optional[dict]:
+        """
+        Returns the first Spoolman vendor whose name matches case-insensitively,
+        or None if not found.
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/v1/vendor", timeout=5)
+            response.raise_for_status()
+            name_lower = name.lower()
+            for vendor in response.json():
+                if vendor.get("name", "").lower() == name_lower:
+                    return vendor
+            return None
+        except Exception as e:
+            logger.error(f"Failed to fetch vendors from Spoolman: {e}")
+            raise
+
+    def _create_vendor(self, name: str) -> dict:
+        """
+        Creates a new vendor in Spoolman and returns the created object.
+        """
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/vendor",
+                json={"name": name},
+                timeout=5,
+            )
+            response.raise_for_status()
+            vendor = response.json()
+            logger.info(f"Created Spoolman vendor '{name}' (id={vendor['id']})")
+            return vendor
+        except Exception as e:
+            logger.error(f"Failed to create vendor '{name}' in Spoolman: {e}")
+            raise
+
+    def _get_filament(
+        self,
+        vendor_id: int,
+        material: str,
+        color_hex: str,
+        name: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        Returns the first Spoolman filament matching all four criteria:
+            vendor_id + material + color_hex + name
+        Returns None if no match is found.
+
+        All four fields must match exactly (color_hex and name are case-sensitive).
+        A filament with the same vendor/material/color but a different name is a miss
+        — treat as user error and create a new entry.
+        """
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/filament",
+                params={"vendor_id": vendor_id},
+                timeout=5,
+            )
+            response.raise_for_status()
+            for filament in response.json():
+                if (
+                    filament.get("vendor", {}).get("id") == vendor_id
+                    and filament.get("material") == material
+                    and filament.get("color_hex") == color_hex
+                    and filament.get("name") == name
+                ):
+                    return filament
+            return None
+        except Exception as e:
+            logger.error(f"Failed to fetch filaments from Spoolman: {e}")
+            raise
+
+    def _create_filament(
+        self,
+        vendor_id: int,
+        material: str,
+        color_hex: str,
+        name: Optional[str] = None,
+        diameter: Optional[float] = None,
+        density: Optional[float] = None,
+    ) -> dict:
+        """
+        Creates a new filament in Spoolman and returns the created object.
+        Only includes optional fields (name, diameter, density) when provided.
+        """
+        payload: dict = {
+            "vendor_id": vendor_id,
+            "material": material,
+            "color_hex": color_hex,
+        }
+        if name is not None:
+            payload["name"] = name
+        if diameter is not None:
+            payload["diameter"] = diameter
+        if density is not None:
+            payload["density"] = density
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/filament",
+                json=payload,
+                timeout=5,
+            )
+            response.raise_for_status()
+            filament = response.json()
+            logger.info(f"Created Spoolman filament '{name or material}' (id={filament['id']}, "
+                        f"vendor={vendor_id}, color={color_hex})")
+            return filament
+        except Exception as e:
+            logger.error(f"Failed to create filament in Spoolman: {e}")
+            raise
+
+    def _create_spool(self, filament_id: int, weight: Optional[float] = None) -> dict:
+        """
+        Creates a new spool in Spoolman linked to the given filament_id.
+        weight is the nominal full weight in grams — stored as Spoolman's
+        initial_weight. Omitted if not provided.
+        """
+        payload: dict = {"filament_id": filament_id}
+        if weight is not None:
+            payload["initial_weight"] = weight
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/spool",
+                json=payload,
+                timeout=5,
+            )
+            response.raise_for_status()
+            spool = response.json()
+            logger.info(f"Created Spoolman spool (id={spool['id']}, filament={filament_id})")
+            return spool
+        except Exception as e:
+            logger.error(f"Failed to create spool in Spoolman: {e}")
+            raise
 
     def _update_spoolman_weight(self, spoolman_id: int, remaining_g: Optional[float], nominal_g: Optional[float]):
         """
