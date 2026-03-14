@@ -53,7 +53,7 @@ fake_ot3d_payload = {
 }
 
 print("--- Parsing OpenTag3D ---")
-ot3d_spool = parse_opentag3d("UID-2222", fake_ot3d_payload)
+ot3d_spool = parse_opentag3d(fake_ot3d_payload, "T0")
 print(json.dumps(ot3d_spool.to_dict(), indent=2))
 
 
