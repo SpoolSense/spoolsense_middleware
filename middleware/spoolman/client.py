@@ -1,10 +1,12 @@
-import requests
 import logging
-
-logger = logging.getLogger(__name__)
 import time
 from typing import Optional
+
+import requests
+
 from state.models import SpoolInfo
+
+logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # Seconds before forcing a full Spoolman re-sync
 
@@ -125,7 +127,8 @@ class SpoolmanClient:
             # Spoolman is the source of truth. Pull its data into SpoolInfo.
             logger.info(f"Using existing Spoolman data for ID {spoolman_id}.")
             tag_spool.remaining_weight_g = existing.get("remaining_weight", tag_spool.remaining_weight_g)
-            tag_spool.color_hex         = spoolman_color or tag_spool.color_hex
+            if spoolman_color is not None:
+                tag_spool.color_hex = spoolman_color
             tag_spool.material_type     = filament.get("material", tag_spool.material_type)
             tag_spool.material_name     = filament.get("name", tag_spool.material_name)
             tag_spool.brand             = filament.get("vendor", {}).get("name", tag_spool.brand)
@@ -344,7 +347,7 @@ class SpoolmanClient:
             ).raise_for_status()
             logger.info(f"Spoolman spool {spoolman_id}: used_weight set to {used_weight:.1f}g")
         except Exception as e:
-            logger.error(f"Failed to update weight for spool {spoolman_id}: {e}")
+            logger.warning(f"Failed to update weight for spool {spoolman_id}: {e}")
 
     def _write_nfc_id(self, spoolman_id: int, nfc_uid: str):
         """
@@ -362,3 +365,4 @@ class SpoolmanClient:
             self.cache[nfc_uid.lower()] = {"id": spoolman_id}
         except Exception as e:
             logger.error(f"Failed to write NFC UID to Spoolman spool {spoolman_id}: {e}")
+            raise
