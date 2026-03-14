@@ -13,6 +13,7 @@ Response topic (not consumed in Phase 1, for future observability):
 
 import json
 import logging
+import paho.mqtt.client as mqtt
 from tag_sync.policy import TagWritePlan
 
 logger = logging.getLogger(__name__)
@@ -42,13 +43,19 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
     payload = json.dumps(plan.payload)
 
     try:
-        mqtt_client.publish(topic, payload, qos=1)
-        logger.info(
-            "Tag write published: topic=%s payload=%s reason=%s",
-            topic,
-            payload,
-            plan.reason,
-        )
+        result = mqtt_client.publish(topic, payload, qos=1)
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            logger.warning(
+                "Tag write publish failed (rc=%d): topic=%s payload=%s",
+                result.rc, topic, payload,
+            )
+        else:
+            logger.info(
+                "Tag write published: topic=%s payload=%s reason=%s",
+                topic,
+                payload,
+                plan.reason,
+            )
     except Exception:
         logger.exception(
             "Tag write failed (non-blocking): topic=%s payload=%s",
