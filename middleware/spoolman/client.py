@@ -239,9 +239,14 @@ class SpoolmanClient:
             vendor_id + material + color_hex + name
         Returns None if no match is found.
 
-        All four fields must match exactly (color_hex and name are case-sensitive).
-        A filament with the same vendor/material/color but a different name is a miss
-        — treat as user error and create a new entry.
+        Matching is normalized before comparison to avoid duplicates from formatting noise:
+          - vendor_id: exact integer match
+          - material:  strip() only — case is meaningful (PLA != pla)
+          - color_hex: strip(), lstrip("#"), lower() — 1A1A2E matches 1a1a2e
+          - name:      strip(), casefold(), empty string normalized to None
+
+        A filament with the same vendor/material/color but a different name is still a miss
+        — treat as user error and create a new entry rather than silently merging.
         """
         target_material = (material or "").strip()
         target_color = (color_hex or "").strip().lstrip("#").lower()
