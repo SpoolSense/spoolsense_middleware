@@ -259,15 +259,25 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 - [ ] Verify `present=False` payload — confirm the dispatcher returns a ScanEvent (not raise) and `_handle_rich_tag` skips activation cleanly
 - [ ] Cross-reader test — with two PN5180 readers close together, does one reader pick up a tag meant for the other? Measure actual read distance
 
-### Code — not yet implemented
+### Code — implemented
 
-**`SpoolmanClient._create_spool_from_tag()`** — currently a placeholder that hardcodes `spoolman_id = 99`. Needs:
-- [ ] Check if vendor already exists (`GET /api/v1/vendor`)
-- [ ] Create vendor if not found (`POST /api/v1/vendor`)
-- [ ] Check if filament already exists (filtered by vendor + material + color)
-- [ ] Create filament if not found (`POST /api/v1/filament`)
-- [ ] Create spool with `filament_id` (`POST /api/v1/spool`)
-- [ ] Write NFC UID back to new spool's extra fields (already implemented in `_write_nfc_id()`)
+**`SpoolmanClient._create_spool_from_tag()`** — placeholder replaced with full implementation:
+- [x] Check if vendor already exists (`GET /api/v1/vendor`) — case-insensitive match
+- [x] Create vendor if not found (`POST /api/v1/vendor`)
+- [x] Check if filament already exists (matched on vendor_id + material + color_hex + name — all four must match)
+- [x] Create filament if not found (`POST /api/v1/filament`)
+- [x] Create spool with `filament_id` (`POST /api/v1/spool`)
+- [x] Write NFC UID back to new spool's extra fields via `_write_nfc_id()`
+
+**`_handle_rich_tag` resilience** — activation and enrichment paths are now separated:
+- [x] Spoolman sync wrapped in `try/except` — failure logs full exception and continues
+- [x] `_activate_from_scan()` always runs regardless of Spoolman availability
+- [x] Spool-ID activation (Klipper macros) only runs when `spoolman_id` is available
+- [x] Color, LED, and low-spool state always published from `ScanEvent` data
+- [x] `active_spools[toolhead]` only updated when a real `spoolman_id` exists
+- [x] Spoolman is now best-effort — not a hard requirement for activation
+
+### Code — not yet implemented
 
 **Config**
 - [ ] Decide: should `spoolman_url` remain required, or become optional for tag-only operation? Currently `sys.exit` if missing — conflicts with optional-Spoolman design.
@@ -276,7 +286,7 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 - [ ] Add `scanner_lane_map` examples to all three config example files
 
 **Error handling**
-- [ ] If Spoolman is down when a rich tag is scanned, `sync_spool` will fail — fall back to tag-only data and still activate?
+- [x] If Spoolman is down when a rich tag is scanned — resolved: `_handle_rich_tag` catches the exception and falls back to tag-only activation via `_activate_from_scan()`
 - [ ] If Moonraker is down, `activate_spool` fails and spool data is lost — queue and retry?
 - [ ] MQTT reconnect — does paho-mqtt reconnect automatically on broker drop, or do we need `on_disconnect`?
 
