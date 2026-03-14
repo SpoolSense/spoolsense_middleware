@@ -193,6 +193,11 @@ Responsibilities:
 - listen for command responses
 - correlate responses to requests
 
+> **Note:** Response correlation is aspirational for Phase 1. The
+> `openprinttag_scanner` command response topic and schema are not yet
+> documented. Phase 1 may publish write commands fire-and-forget without
+> waiting for a response. Full response handling is a Phase 2 concern.
+
 ---
 
 ## spoolsense.py
@@ -210,6 +215,29 @@ write_plan = build_write_plan(scan, spool_info)
 if write_plan:
     scanner_writer.execute(write_plan)
 ```
+
+---
+
+# TagWritePlan
+
+`build_write_plan` returns a `TagWritePlan` dataclass or `None` if no write is needed.
+
+```python
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass
+class TagWritePlan:
+    device_id: str        # Scanner deviceId (from MQTT topic, e.g. "esp32-t0")
+    uid: str              # NFC tag UID to target
+    command: str          # Command name to send to the scanner
+    payload: dict[str, Any]  # Command payload
+    reason: str | None = None  # Optional — logged when the write is dispatched
+```
+
+For Phase 1, `command` will be whatever the scanner firmware expects for a
+remaining-weight update. This is currently undocumented in the scanner firmware
+and must be confirmed before Phase 1 can ship — see `openprinttag-notes.md`.
 
 ---
 
@@ -257,23 +285,41 @@ Result:
 
 No automatic write
 
-Prevents accidental overwrites.
+Prevents accidental overwrites from stale or incorrect Spoolman values (e.g. a
+filament profile with a wrong nominal weight). If a user has manually corrected
+the Spoolman value upward (e.g. after weighing a spool), the tag will not be
+updated automatically. Use the Phase 3 manual rewrite / provisioning tools to
+correct the tag in that case.
 
 ---
 
 # Future Phases
 
-## Phase 1
+## Phase 1 — Scan-time stale-tag reconciliation
 
-Implement **remaining weight writeback when tag is stale**.
+Triggered when a user scans a tag and SpoolSense detects the tag is out of date.
 
-## Phase 2
+- Compare tag remaining vs Spoolman remaining at scan time
+- If Spoolman is lower → write updated remaining to the tag (Case B)
+- If tag is missing remaining → write Spoolman value to the tag (Case C)
 
-Optional periodic tag synchronization.
+This is achievable because the scanner that saw the tag is already known, the tag
+is physically present, and the UID is fresh and confirmed.
 
-## Phase 3
+## Phase 2 — Post-print proactive writeback
 
-Full tag provisioning and repair tools.
+Triggered when a print completes and Spoolman remaining changes.
+
+- Push updated remaining to the tag immediately if it is present at a scanner
+- Defer the write until the next scan if the tag is not currently present
+
+This is harder than Phase 1: the spool may have been removed from the scanner,
+the target device must be determined, writes may need to be queued, and
+cmd/response correlation becomes more important.
+
+## Phase 3 — Tag provisioning and repair
+
+Full tooling for blank tags, corrupted tags, missing metadata, and manual rewrites.
 
 ---
 
