@@ -263,4 +263,4 @@ def test_scanner_topic_prefix_default(tmp_path, monkeypatch):
     cfg_path = write_config(tmp_path, data)
     monkeypatch.setattr(spoolsense, "CONFIG_PATH", str(cfg_path))
     cfg = spoolsense.load_config()
-    assert cfg.get("scanner_topic_prefix", "openprinttag") == "openprinttag"
+    assert cfg["scanner_topic_prefix"] == "openprinttag"
