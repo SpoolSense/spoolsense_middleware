@@ -543,14 +543,7 @@ def _handle_rich_tag(client, toolhead, payload, topic):
 
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:
-            logger.info(
-                "[would write] tag=%s device=%s command=%s payload=%s reason=%s",
-                write_plan.uid,
-                write_plan.device_id,
-                write_plan.command,
-                write_plan.payload,
-                write_plan.reason,
-            )
+            scanner_writer.execute(write_plan, client)
 
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")
