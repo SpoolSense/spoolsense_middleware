@@ -99,49 +99,20 @@ Repeat this for each device, updating `lane_id` and the static IP for each one.
    sudo systemctl start spoolsense
    ```
 
-## Step 5 — Install the LED Macro
+## Step 5 — Lane LED Colors
 
-The middleware overrides BoxTurtle's default lane LED colors (green for ready,
-blue for tool loaded) with the actual filament color from Spoolman, so you can
-see at a glance what color filament is in each lane. When a spool is running
-low, the LED dims to 20% brightness so low lanes are immediately obvious.
-This only affects the "ready" and "tool loaded" states — **AFC's critical LED
-states are never touched**: faults (red), loading animations (white), and
-not-ready indicators all continue to work exactly as AFC intended. This
-requires a Klipper macro.
+SpoolSense no longer manages BoxTurtle lane LEDs directly. LED color is handled
+natively by AFC-Klipper-Add-On using the filament color set in Spoolman via
+`SET_SPOOL_ID`. No custom macros or extra config are required.
 
-1. Copy the macro to your AFC config directory:
-   ```bash
-   cp ~/SpoolSense/integrations/afc/klipper/nfc_led_macro.cfg ~/printer_data/config/AFC/
-   ```
+> **Requires:** AFC-Klipper-Add-On with `_get_lane_color()` support
+> (see [sjordan0228/AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671)).
+> Without this, AFC will use its default configured LED colors (green for ready,
+> blue for tool loaded) rather than the Spoolman filament color.
 
-2. Add the include to your `printer.cfg` (or wherever you include AFC configs):
-   ```ini
-   [include AFC/nfc_led_macro.cfg]
-   ```
-
-3. Edit the macro file and change `bt_leds` to match your LED section name:
-   ```bash
-   nano ~/printer_data/config/AFC/nfc_led_macro.cfg
-   ```
-   Common LED names: `AFC_Indicator` (AFC default), or your `[neopixel]` name.
-   Also verify the lane-to-index mapping matches your `led_index` values in
-   your `AFC_stepper` sections.
-
-4. Restart Klipper to load the macro.
-
-5. Test it manually from the Klipper console:
-   ```
-   _SET_LANE_LED LANE=lane1 R=1.0 G=0.0 B=0.0 BREATH=0
-   ```
-   Lane 1's LED should turn red. Test low spool dimming with:
-   ```
-   _SET_LANE_LED LANE=lane1 R=1.0 G=0.0 B=0.0 BREATH=1
-   ```
-   Lane 1 should dim to 20% brightness. Run with `R=0 G=0 B=0` to turn it off.
-
-> **Low spool warning:** When a spool is running low, the LED dims to 20% of
-> the filament color so you can tell at a glance which lanes need attention.
+When PR #671 is merged into the AFC `multi_extruder` branch and you are running
+that version, lane LEDs will automatically reflect filament colors — no
+additional setup needed.
 
 ## Step 6 — Configure Spoolman
 
@@ -191,37 +162,24 @@ The middleware uses `watchdog` to monitor `AFC.var.unit` for changes. When
 the file is written (e.g. after a lane load, eject, or state change), the
 middleware reads the updated lane data and:
 - Locks scanners for lanes with spools, clears empty lanes
-- Re-asserts filament color on BoxTurtle LEDs (see below)
 - Caches lane statuses so NFC scan handlers can check AFC state instantly
 
 For single/toolchanger modes, the middleware similarly watches Klipper's
 `save_variables` file and syncs LED colors when spool assignments change
 outside the middleware (e.g. after a reboot).
 
-### LED Color Override (AMS Mode)
+### Lane LED Colors
 
-AFC sets lane LEDs to hardcoded colors (green = ready, blue = tool loaded).
-This middleware overrides those with the actual filament color from Spoolman,
-so your BoxTurtle LEDs show what color filament is in each lane.
+Lane LED color is owned entirely by AFC-Klipper-Add-On. When `SET_SPOOL_ID`
+is called, AFC stores the Spoolman filament color on the lane object. AFC's
+`_get_lane_color()` then uses that color when updating LEDs during load,
+unload, and state transitions.
 
-The override works via a Klipper macro (`_SET_LANE_LED`) that you define in
-your config. The middleware calls it with RGB values and a low spool flag.
-When a spool is running low, the macro dims the LED to 20% brightness so
-you can spot it at a glance. The macro maps these to your BoxTurtle's LED
-hardware.
+SpoolSense does not call any LED macros in AFC mode. No custom `_SET_LANE_LED`
+macro is needed.
 
-**Protected states** — the middleware never overrides these AFC LED states:
-- `led_fault` (red) — indicates a real problem
-- `led_loading` (white) — animation in progress
-- `led_not_ready` (red) — lane needs attention
-
-**Override states** — filament color replaces these defaults:
-- `led_ready` (green → filament color)
-- `led_tool_loaded` (blue → filament color)
-
-The override is re-asserted on every `AFC.var.unit` file change, since AFC
-resets LEDs to defaults on state transitions. The middleware's gcode command
-runs after AFC's internal LED set.
+> This requires AFC-Klipper-Add-On with `_get_lane_color()` support. Without
+> it, AFC uses its default configured colors.
 
 ### AFC Integration
 
@@ -239,7 +197,7 @@ Moonraker's gcode script API. AFC then:
 | Scanner location | Per toolhead | Per lane in BoxTurtle |
 | ESP32 count | One per toolhead | One per lane (4 total) |
 | Spool registration | SET_ACTIVE_SPOOL / SET_GCODE_VARIABLE | SET_SPOOL_ID (AFC) |
-| LED feedback | ESP32 onboard WS2812 | BoxTurtle lane LEDs (via Klipper macro) |
+| LED feedback | ESP32 onboard WS2812 | BoxTurtle lane LEDs (via AFC natively) |
 | Scan behavior | Always scanning | Scan-lock-clear lifecycle |
 | File watcher | Klipper save_variables | AFC.var.unit |
-| Klipper macros | spoolman_macros.cfg + toolhead macros | _SET_LANE_LED for LED color |
+| Klipper macros | spoolman_macros.cfg + toolhead macros | None required for LEDs |

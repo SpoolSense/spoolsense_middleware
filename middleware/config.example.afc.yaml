@@ -79,9 +79,6 @@ afc_var_path: "~/printer_data/config/AFC/AFC.var.unit"
 # If not set, the middleware auto-discovers it from Moonraker.
 # klipper_var_path: "~/printer_data/config/klipper-toolchanger/offset_save_file.cfg"
 
-# Klipper macro name for setting BoxTurtle lane LED colors.
-# The middleware calls this with: LANE=<name> R=<0-1> G=<0-1> B=<0-1> BREATH=<0|1>
-# You must define this macro in your Klipper config — see afc/docs/setup.md.
 afc_led_macro: "_SET_LANE_LED"
 
 # ---- OpenPrintTag Scanner (optional) ------------------------

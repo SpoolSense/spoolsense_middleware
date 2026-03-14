@@ -87,7 +87,6 @@ DEFAULTS = {
     "low_spool_threshold": 100,
     "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
     "klipper_var_path": None,
-    "afc_led_macro": "_SET_LANE_LED",
     # openprinttag_scanner settings (optional — only needed for PN5180 setups)
     # Maps scanner MQTT device IDs to lane/toolhead names.
     # Each ESP32 running openprinttag_scanner publishes to:
@@ -101,13 +100,6 @@ DEFAULTS = {
 
 VALID_MODES = ("single", "toolchanger", "afc")
 
-# NOTE: AFC likes to take control of LEDs. We define which states we are allowed 
-# to overwrite with our custom filament colors, and which ones mean "danger/busy" 
-# and should be left alone.
-AFC_PROTECTED_STATES = {"led_fault", "led_loading", "led_not_ready"}
-AFC_COLORABLE_STATES = {"led_ready", "led_tool_loaded", "led_buffer_advancing",
-                        "led_buffer_trailing"}
-
 # --- Global State Caches ---
 # We cache data in memory so we don't hammer the Spoolman or Moonraker APIs every second.
 spool_cache = {}
@@ -117,7 +109,6 @@ CACHE_TTL = 3600       # How long (in seconds) before we force a full Spoolman r
 lane_locks = {}        # Tracks if a lane's NFC reader is locked (prevents duplicate scans)
 active_spools = {}     # Maps toolhead/lane to the currently loaded spool_id
 lane_statuses = {}     # Caches the last known AFC status (e.g., 'led_ready')
-last_led_state = {}    # Caches the last color we sent to Klipper so we don't spam G-code
 mqtt_client = None
 watcher = None
 
@@ -300,48 +291,6 @@ def find_spool_by_nfc(uid):
 # ============================================================
 # Klipper/Moonraker Actions
 # ============================================================
-
-def hex_to_rgb(hex_str):
-    """Converts standard HTML hex colors (#FF0000) to Klipper's 0.0-1.0 RGB format."""
-    hex_str = hex_str.lstrip('#')
-    if len(hex_str) != 6:
-        return (1.0, 1.0, 1.0) # Default to white if invalid
-    return tuple(int(hex_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-
-def update_klipper_led(lane, color_hex, is_low=False, force=False):
-    """
-    Sends the G-code to change the physical LED color.
-    NOTE: This includes "debounce" logic so we don't spam Klipper with the exact 
-    same LED command 10 times a second.
-    """
-    if cfg["toolhead_mode"] != "afc":
-        return
-
-    # Don't overwrite AFC if it's currently showing an error or loading animation
-    status = lane_statuses.get(lane)
-    if status in AFC_PROTECTED_STATES:
-        logger.debug(f"LED: Skipping {lane} — AFC state is {status}")
-        return
-
-    # Debounce: If the LED is already this color, do nothing (unless forced)
-    current_state = (color_hex, is_low)
-    if not force and last_led_state.get(lane) == current_state:
-        return
-
-    r, g, b = hex_to_rgb(color_hex)
-    breath = 1 if is_low else 0
-
-    script = f"{cfg['afc_led_macro']} LANE={lane} R={r:.3f} G={g:.3f} B={b:.3f} BREATH={breath}"
-    try:
-        requests.post(
-            f"{cfg['moonraker_url']}/printer/gcode/script",
-            json={"script": script},
-            timeout=2
-        )
-        last_led_state[lane] = current_state
-        logger.info(f"LED: {lane} -> #{color_hex} (low={is_low})")
-    except Exception as e:
-        logger.error(f"Failed to update LED on {lane}: {e}")
 
 def activate_spool(spool_id, toolhead):
     """
@@ -526,11 +475,12 @@ def _activate_from_scan(client, toolhead, scan, spool_info=None):
 
     # --- Mode-specific tag-state output ---
     # Always driven from scan data. Transport differs by mode:
-    #   afc          — color via Klipper LED macro, lock via MQTT nfc/.../lock
+    #   afc          — lock via MQTT nfc/.../lock, LED owned by AFC
     #   single/toolchanger — color and low_spool via MQTT nfc/toolhead/... topics
     if mode == "afc":
         publish_lock(toolhead, "lock")
-        update_klipper_led(toolhead, color_hex, is_low)
+        # AFC owns LED color — driven by lane.color set via SET_SPOOL_ID
+        # (requires AFC-Klipper-Add-On with _get_lane_color() support)
         if is_low:
             logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
     else:
@@ -682,9 +632,7 @@ def on_message(client, userdata, msg):
 
                     if cfg["toolhead_mode"] == "afc":
                         publish_lock(toolhead, "lock")
-                        remaining = spool.get("remaining_weight")
-                        is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
-                        update_klipper_led(toolhead, color_hex, is_low)
+                        # AFC owns LED color
                     else:
                         client.publish(f"nfc/toolhead/{toolhead}/color",
                                        color_hex.lstrip("#").upper(), qos=1, retain=True)
@@ -787,40 +735,13 @@ def sync_from_afc_file():
                     if not is_locked:
                         logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
                         publish_lock(lane_name, "lock")
-
-                    if status in AFC_PROTECTED_STATES:
-                        continue
-
-                    # 3. LED Override Logic
-                    # AFC resets LEDs to default colors on every state change.
-                    # We use force=True to re-apply our filament color over top of AFC's default.
-                    
-                    # Optimization: If the spool hasn't changed, use our cached color 
-                    # instead of asking Spoolman for the color again.
-                    if active_spools.get(lane_name) == spool_id and not last_led_state.get(lane_name) is None:
-                        cached = last_led_state.get(lane_name)
-                        if cached:
-                            update_klipper_led(lane_name, cached[0], cached[1], force=True)
-                        continue
-
-                    # If it's a new spool, fetch the color from Spoolman and apply it
-                    spool = get_spool_by_id(spool_id)
-                    if spool:
-                        color = spool.get("filament", {}).get("color_hex", "FFFFFF") or "FFFFFF"
-                        remaining = spool.get("remaining_weight")
-                        is_low = (remaining is not None and remaining <= cfg["low_spool_threshold"])
-                        active_spools[lane_name] = spool_id
-                        update_klipper_led(lane_name, color, is_low, force=True)
+                    active_spools[lane_name] = spool_id
                 else:
-                    # 4. If AFC says the lane is empty, unlock the NFC reader so it can scan again
+                    # 3. If AFC says the lane is empty, unlock the NFC reader so it can scan again
                     if is_locked:
                         logger.info(f"AFC Sync: {lane_name} empty, clearing")
                         publish_lock(lane_name, "clear")
-                    
-                    # Turn off the LED
-                    if active_spools.get(lane_name):
-                        update_klipper_led(lane_name, "000000", False, force=True)
-                        active_spools[lane_name] = None
+                    active_spools[lane_name] = None
     except Exception as e:
         logger.error(f"AFC Sync failed: {e}")
 
@@ -948,7 +869,6 @@ def main():
     if cfg["toolhead_mode"] == "afc":
         logger.info(f"Lanes: {', '.join(cfg['toolheads'])}")
         logger.info(f"AFC var file: {cfg['afc_var_path']}")
-        logger.info(f"LED macro: {cfg['afc_led_macro']}")
     else:
         logger.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
         logger.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
