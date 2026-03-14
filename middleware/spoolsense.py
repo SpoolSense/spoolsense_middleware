@@ -55,11 +55,13 @@ try:
     from adapters.dispatcher import detect_and_parse, detect_format
     from state.models import ScanEvent
     from spoolman.client import SpoolmanClient
-    from tag_sync.policy import build_write_plan
-    from tag_sync import scanner_writer
     DISPATCHER_AVAILABLE = True
 except ImportError:
     DISPATCHER_AVAILABLE = False
+
+# Tag writeback — independent of dispatcher, always available
+from tag_sync.policy import build_write_plan
+from tag_sync import scanner_writer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
