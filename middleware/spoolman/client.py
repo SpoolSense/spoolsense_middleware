@@ -283,13 +283,17 @@ class SpoolmanClient:
         Creates a new filament in Spoolman and returns the created object.
         Only includes optional fields (name, diameter, density) when provided.
         """
+        normalized_material = (material or "").strip()
+        normalized_color_hex = (color_hex or "").strip().lstrip("#").lower()
+        normalized_name = (name or "").strip() or None
+
         payload: dict = {
             "vendor_id": vendor_id,
-            "material": material,
-            "color_hex": color_hex,
+            "material": normalized_material,
+            "color_hex": normalized_color_hex,
         }
-        if name is not None:
-            payload["name"] = name
+        if normalized_name is not None:
+            payload["name"] = normalized_name
         if diameter is not None:
             payload["diameter"] = diameter
         if density is not None:
