@@ -471,9 +471,9 @@ def _resolve_lane_from_topic(topic):
         logger.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
         return None
 
-    # Otherwise it's a PN532 topic: nfc/toolhead/<lane>
+    # Otherwise it's a PN532 topic: nfc/toolhead/<lane> (exactly 3 parts)
     parts = topic.split("/") if topic else []
-    if len(parts) >= 3 and parts[0] == "nfc" and parts[1] == "toolhead":
+    if len(parts) == 3 and parts[0] == "nfc" and parts[1] == "toolhead":
         return parts[2]
 
     return None
