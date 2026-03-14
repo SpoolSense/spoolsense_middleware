@@ -88,6 +88,13 @@ def build_write_plan(
         else f"tag missing remaining, spoolman remaining={spoolman_remaining}g"
     )
 
+    if spoolman_remaining < 0:
+        logger.warning(
+            "build_write_plan: spoolman remaining_g is negative (%.1f) for uid=%s — skipping write",
+            spoolman_remaining, scan.uid,
+        )
+        return None
+
     return TagWritePlan(
         device_id=device_id,
         uid=scan.uid,

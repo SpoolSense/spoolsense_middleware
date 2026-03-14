@@ -154,6 +154,15 @@ results.append(run_case(
     expect_plan=False,
 ))
 
+# Negative remaining_g from Spoolman — guard should reject
+results.append(run_case(
+    label="Bonus: Spoolman returns negative remaining → guard rejects, no write",
+    scan=make_scan(remaining_weight_g=742.0),
+    spool_info=make_spool_info(remaining_weight_g=-5.0),
+    device_id="esp32-t0",
+    expect_plan=False,
+))
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
