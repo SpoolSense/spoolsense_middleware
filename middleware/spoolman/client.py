@@ -243,6 +243,10 @@ class SpoolmanClient:
         A filament with the same vendor/material/color but a different name is a miss
         — treat as user error and create a new entry.
         """
+        target_material = (material or "").strip()
+        target_color = (color_hex or "").strip().lstrip("#").lower()
+        target_name = (name or "").strip().casefold() or None
+
         try:
             response = requests.get(
                 f"{self.base_url}/api/v1/filament",
@@ -251,11 +255,14 @@ class SpoolmanClient:
             )
             response.raise_for_status()
             for filament in response.json():
+                filament_material = (filament.get("material") or "").strip()
+                filament_color = (filament.get("color_hex") or "").strip().lstrip("#").lower()
+                filament_name = (filament.get("name") or "").strip().casefold() or None
                 if (
                     filament.get("vendor", {}).get("id") == vendor_id
-                    and filament.get("material") == material
-                    and filament.get("color_hex") == color_hex
-                    and filament.get("name") == name
+                    and filament_material == target_material
+                    and filament_color == target_color
+                    and filament_name == target_name
                 ):
                     return filament
             return None
