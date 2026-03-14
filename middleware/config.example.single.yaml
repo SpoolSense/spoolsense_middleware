@@ -67,7 +67,7 @@ low_spool_threshold: 100
 
 # ---- OpenPrintTag Scanner (optional) ------------------------
 # Only needed if you are using an ESP32-WROOM-32 + PN5180 running
-# the ryanch/openprinttag_scanner firmware alongside your PN532.
+# the ryanch/openprinttag_scanner firmware.
 #
 # Maps each scanner's MQTT device ID to the toolhead it serves.
 # The device ID appears in the scanner's MQTT topic:
