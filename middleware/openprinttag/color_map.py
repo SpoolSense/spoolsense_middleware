@@ -19,6 +19,8 @@ encountered. Contributions welcome — just add the name and hex value.
 import re
 import logging
 
+logger = logging.getLogger(__name__)
+
 # Known full color names from Prusament / OpenPrintTag ecosystem.
 # Add more as you encounter them.
 KNOWN_COLORS = {
@@ -107,14 +109,14 @@ def color_name_to_hex(color_value: str) -> str:
     words = lower.split()
     for word in reversed(words):
         if word in KNOWN_COLORS:
-            logging.info(f"Color '{color_value}' → base color '{word}' → #{KNOWN_COLORS[word]}")
+            logger.info(f"Color '{color_value}' → base color '{word}' → #{KNOWN_COLORS[word]}")
             return KNOWN_COLORS[word].upper()
 
     # 4. Try matching any word (not just last)
     for word in words:
         if word in KNOWN_COLORS:
-            logging.info(f"Color '{color_value}' → matched word '{word}' → #{KNOWN_COLORS[word]}")
+            logger.info(f"Color '{color_value}' → matched word '{word}' → #{KNOWN_COLORS[word]}")
             return KNOWN_COLORS[word].upper()
 
-    logging.warning(f"Unknown color name '{color_value}' — falling back to white (FFFFFF)")
+    logger.warning(f"Unknown color name '{color_value}' — falling back to white (FFFFFF)")
     return "FFFFFF"

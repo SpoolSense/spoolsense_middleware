@@ -61,6 +61,7 @@ except ImportError:
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Configuration & Global State
@@ -120,15 +121,15 @@ watcher = None
 def load_config():
     """Load and validate configuration from ~/SpoolSense/config.yaml."""
     if not os.path.exists(CONFIG_PATH):
-        logging.error(f"Config file not found: {CONFIG_PATH}")
-        logging.error("Copy the template:  cp config.example.yaml ~/SpoolSense/config.yaml")
+        logger.error(f"Config file not found: {CONFIG_PATH}")
+        logger.error("Copy the template:  cp config.example.yaml ~/SpoolSense/config.yaml")
         sys.exit(1)
 
     try:
         with open(CONFIG_PATH, "r") as f:
             user_config = yaml.safe_load(f) or {}
     except Exception as e:
-        logging.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
+        logger.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
         sys.exit(1)
 
     mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
@@ -145,11 +146,11 @@ def load_config():
     if not config["moonraker_url"]: missing.append("moonraker_url")
 
     if missing:
-        logging.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
+        logger.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
         sys.exit(1)
 
     if config["toolhead_mode"] not in VALID_MODES:
-        logging.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
+        logger.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
         sys.exit(1)
 
     config["spoolman_url"] = config["spoolman_url"].rstrip("/")
@@ -178,23 +179,23 @@ def discover_klipper_var_path():
         return cfg["klipper_var_path"]
 
     try:
-        logging.info("Discovering Klipper save_variables path...")
+        logger.info("Discovering Klipper save_variables path...")
         response = requests.get(f"{cfg['moonraker_url']}/printer/configfile/settings", timeout=5)
         response.raise_for_status()
         settings = response.json().get("result", {}).get("settings", {})
         filename = settings.get("save_variables", {}).get("filename")
 
         if not filename:
-            logging.warning("No [save_variables] in Klipper config. Klipper sync disabled.")
+            logger.warning("No [save_variables] in Klipper config. Klipper sync disabled.")
             return None
 
         if not filename.startswith("/"):
             filename = os.path.join(os.path.expanduser("~/printer_data/config"), filename)
 
-        logging.info(f"Discovered Klipper variables file: {filename}")
+        logger.info(f"Discovered Klipper variables file: {filename}")
         return filename
     except Exception as e:
-        logging.error(f"Failed to discover Klipper variables path: {e}")
+        logger.error(f"Failed to discover Klipper variables path: {e}")
         return None
 
 # ============================================================
@@ -208,7 +209,7 @@ def get_spool_by_id(spool_id):
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        logging.error(f"Failed to fetch spool {spool_id}: {e}")
+        logger.error(f"Failed to fetch spool {spool_id}: {e}")
         return None
 
 def refresh_spool_cache():
@@ -218,7 +219,7 @@ def refresh_spool_cache():
     """
     global spool_cache, last_cache_refresh
     try:
-        logging.info("Refreshing Spoolman cache...")
+        logger.info("Refreshing Spoolman cache...")
         response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool", timeout=5)
         response.raise_for_status()
         spools = response.json()
@@ -233,10 +234,10 @@ def refresh_spool_cache():
 
         spool_cache = new_cache
         last_cache_refresh = time.time()
-        logging.info(f"Cache updated: {len(spool_cache)} spools indexed.")
+        logger.info(f"Cache updated: {len(spool_cache)} spools indexed.")
         return True
     except Exception as e:
-        logging.error(f"Failed to refresh Spoolman cache: {e}")
+        logger.error(f"Failed to refresh Spoolman cache: {e}")
         return False
 
 def find_spool_by_nfc(uid):
@@ -252,7 +253,7 @@ def find_spool_by_nfc(uid):
         return spool_cache[uid_lower]
         
     # If we didn't find it, maybe it was just added to Spoolman 5 seconds ago. Force a refresh.
-    logging.info(f"UID {uid} not in cache, performing forced refresh...")
+    logger.info(f"UID {uid} not in cache, performing forced refresh...")
     if refresh_spool_cache():
         return spool_cache.get(uid_lower)
     return None
@@ -280,7 +281,7 @@ def update_klipper_led(lane, color_hex, is_low=False, force=False):
     # Don't overwrite AFC if it's currently showing an error or loading animation
     status = lane_statuses.get(lane)
     if status in AFC_PROTECTED_STATES:
-        logging.debug(f"LED: Skipping {lane} — AFC state is {status}")
+        logger.debug(f"LED: Skipping {lane} — AFC state is {status}")
         return
 
     # Debounce: If the LED is already this color, do nothing (unless forced)
@@ -299,9 +300,9 @@ def update_klipper_led(lane, color_hex, is_low=False, force=False):
             timeout=2
         )
         last_led_state[lane] = current_state
-        logging.info(f"LED: {lane} -> #{color_hex} (low={is_low})")
+        logger.info(f"LED: {lane} -> #{color_hex} (low={is_low})")
     except Exception as e:
-        logging.error(f"Failed to update LED on {lane}: {e}")
+        logger.error(f"Failed to update LED on {lane}: {e}")
 
 def activate_spool(spool_id, toolhead):
     """
@@ -317,7 +318,7 @@ def activate_spool(spool_id, toolhead):
             requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
                           json={"script": f"SAVE_VARIABLE VARIABLE=t0_spool_id VALUE={spool_id}"},
                           timeout=5).raise_for_status()
-            logging.info(f"[single] Activated spool {spool_id}")
+            logger.info(f"[single] Activated spool {spool_id}")
 
         elif mode == "toolchanger":
             macro = f"T{toolhead[-1]}"
@@ -329,18 +330,18 @@ def activate_spool(spool_id, toolhead):
             requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
                           json={"script": f"SAVE_VARIABLE VARIABLE=t{toolhead[-1]}_spool_id VALUE={spool_id}"},
                           timeout=5).raise_for_status()
-            logging.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
+            logger.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
 
         elif mode == "afc":
             # Let AFC handle the actual assignment logic
             requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
                           json={"script": f"SET_SPOOL_ID LANE={toolhead} SPOOL_ID={spool_id}"},
                           timeout=5).raise_for_status()
-            logging.info(f"[afc] Set spool {spool_id} on {toolhead} via AFC")
+            logger.info(f"[afc] Set spool {spool_id} on {toolhead} via AFC")
 
         return True
     except Exception as e:
-        logging.error(f"Activation failed: {e}")
+        logger.error(f"Activation failed: {e}")
         return False
 
 # ============================================================
@@ -354,18 +355,18 @@ def publish_lock(lane, state):
     topic = f"nfc/toolhead/{lane}/lock"
     mqtt_client.publish(topic, state, retain=True)
     lane_locks[lane] = (state == "lock")
-    logging.info(f"MQTT: {lane} -> {state}")
+    logger.info(f"MQTT: {lane} -> {state}")
 
 def on_connect(client, userdata, flags, rc):
     """Fires when we successfully connect to the MQTT broker."""
     if rc == 0:
-        logging.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
+        logger.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
         client.publish("nfc/middleware/online", "true", qos=1, retain=True)
         
         # Subscribe to all our configured lanes/toolheads (PN532/ESPHome path)
         for t in cfg["toolheads"]:
             client.subscribe(f"nfc/toolhead/{t}")
-        logging.info(f"Subscribed to: {', '.join(cfg['toolheads'])}")
+        logger.info(f"Subscribed to: {', '.join(cfg['toolheads'])}")
 
         # Subscribe to openprinttag_scanner topics (PN5180 path)
         # Each scanner publishes to: openprinttag/<device_id>/tag/state
@@ -375,7 +376,7 @@ def on_connect(client, userdata, flags, rc):
             for device_id in scanner_map:
                 topic = f"{prefix}/{device_id}/tag/state"
                 client.subscribe(topic)
-            logging.info(f"Subscribed to {len(scanner_map)} openprinttag_scanner(s): {', '.join(scanner_map.keys())}")
+            logger.info(f"Subscribed to {len(scanner_map)} openprinttag_scanner(s): {', '.join(scanner_map.keys())}")
             
         refresh_spool_cache()
 
@@ -393,7 +394,7 @@ def on_connect(client, userdata, flags, rc):
                 watcher.join(timeout=2)
             watcher = start_watcher()
     else:
-        logging.error(f"MQTT connection failed: {rc}")
+        logger.error(f"MQTT connection failed: {rc}")
 
 def _resolve_lane_from_topic(topic):
     """
@@ -415,7 +416,7 @@ def _resolve_lane_from_topic(topic):
             lane = scanner_map.get(device_id)
             if lane:
                 return lane
-            logging.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
+            logger.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
             return None
 
     # Otherwise it's a PN532 topic: nfc/toolhead/<lane>
@@ -436,14 +437,14 @@ def _handle_rich_tag(client, toolhead, payload, topic):
     """
     try:
         scan = detect_and_parse(payload, toolhead, topic)
-        logging.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
+        logger.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
 
         # Guard: scanner may report present=False or invalid data
         if not scan.present:
-            logging.debug(f"Scanner reported no tag present on {toolhead}")
+            logger.debug(f"Scanner reported no tag present on {toolhead}")
             return
         if not scan.tag_data_valid:
-            logging.warning(f"Scanner reported invalid tag data on {toolhead}")
+            logger.warning(f"Scanner reported invalid tag data on {toolhead}")
             return
 
         # Sync with Spoolman — creates the spool if it doesn't exist yet,
@@ -468,31 +469,31 @@ def _handle_rich_tag(client, toolhead, payload, topic):
                 # Low spool handling
                 if cfg["toolhead_mode"] == "afc":
                     if is_low:
-                        logging.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                        logger.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
                 else:
                     topic_low = f"nfc/toolhead/{toolhead}/low_spool"
                     if is_low:
-                        logging.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
+                        logger.warning(f"Low spool: {scan.material_name or scan.material_type or 'Unknown'} ({remaining:.1f}g) on {toolhead}")
                         client.publish(topic_low, "true", qos=1, retain=True)
                     else:
                         client.publish(topic_low, "false", qos=1, retain=True)
         else:
-            logging.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {scan.uid}")
+            logger.warning(f"Rich tag parsed but no Spoolman ID assigned for UID: {scan.uid}")
             # For single/toolchanger, flash error on the ESP32 LED
             if cfg["toolhead_mode"] != "afc":
                 client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
                 client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
 
     except NotImplementedError as e:
-        logging.warning(f"Tag format not yet supported: {e}")
+        logger.warning(f"Tag format not yet supported: {e}")
     except ValueError as e:
-        logging.debug(f"Dispatcher rejected payload: {e}")
+        logger.debug(f"Dispatcher rejected payload: {e}")
         # For single/toolchanger, flash error if it was a real scan attempt
         if cfg["toolhead_mode"] != "afc":
             client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
             client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
     except Exception as e:
-        logging.error(f"Rich tag processing error: {e}")
+        logger.error(f"Rich tag processing error: {e}")
 
 
 def on_message(client, userdata, msg):
@@ -515,14 +516,14 @@ def on_message(client, userdata, msg):
         # Resolve which lane/toolhead this message belongs to
         toolhead = payload.get("toolhead") or _resolve_lane_from_topic(topic)
         if not toolhead:
-            logging.warning(f"Could not resolve lane from topic: {topic}")
+            logger.warning(f"Could not resolve lane from topic: {topic}")
             return
 
         uid = payload.get("uid", "")
 
         # If the lane is locked (already has a spool), ignore the scan
         if lane_locks.get(toolhead):
-            logging.info(f"Ignoring scan on {toolhead} (locked)")
+            logger.info(f"Ignoring scan on {toolhead} (locked)")
             return
 
         # Decide which processing path to use:
@@ -544,7 +545,7 @@ def on_message(client, userdata, msg):
         else:
             # Original plain-UID path — look up in Spoolman by nfc_id
             if not uid:
-                logging.warning(f"Empty UID in payload on {toolhead}")
+                logger.warning(f"Empty UID in payload on {toolhead}")
                 return
 
             spool = find_spool_by_nfc(uid)
@@ -553,7 +554,7 @@ def on_message(client, userdata, msg):
                 filament = spool.get("filament", {})
                 name = filament.get("name", "Unknown")
                 color_hex = filament.get("color_hex", "FFFFFF") or "FFFFFF"
-                logging.info(f"Found spool: {name} (ID: {spool_id})")
+                logger.info(f"Found spool: {name} (ID: {spool_id})")
                 
                 if activate_spool(spool_id, toolhead):
                     active_spools[toolhead] = spool_id
@@ -571,22 +572,22 @@ def on_message(client, userdata, msg):
                     remaining = spool.get("remaining_weight")
                     if cfg["toolhead_mode"] == "afc":
                         if remaining is not None and remaining <= cfg["low_spool_threshold"]:
-                            logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                            logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
                     else:
                         topic_low = f"nfc/toolhead/{toolhead}/low_spool"
                         if remaining is not None and remaining <= cfg["low_spool_threshold"]:
-                            logging.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                            logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
                             client.publish(topic_low, "true", qos=1, retain=True)
                         else:
                             client.publish(topic_low, "false", qos=1, retain=True)
             else:
-                logging.warning(f"No spool found for UID: {uid}")
+                logger.warning(f"No spool found for UID: {uid}")
                 if cfg["toolhead_mode"] != "afc":
                     client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
                     client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
 
     except Exception as e:
-        logging.error(f"Message error: {e}")
+        logger.error(f"Message error: {e}")
 
 # ============================================================
 # Variable File Watchers (AFC & Klipper)
@@ -616,7 +617,7 @@ def sync_from_klipper_vars():
                     spool_id = int(spool_id_str)
                     # Only update if it actually changed
                     if active_spools.get(t) != spool_id:
-                        logging.info(f"Klipper Sync: {t} -> spool {spool_id}")
+                        logger.info(f"Klipper Sync: {t} -> spool {spool_id}")
                         spool = get_spool_by_id(spool_id)
                         if spool:
                             color = spool.get("filament", {}).get("color_hex", "FFFFFF") or "FFFFFF"
@@ -627,11 +628,11 @@ def sync_from_klipper_vars():
                     pass
             elif active_spools.get(t):
                 # Spool was removed in Klipper UI
-                logging.info(f"Klipper Sync: {t} cleared")
+                logger.info(f"Klipper Sync: {t} cleared")
                 mqtt_client.publish(f"nfc/toolhead/{t}/color", "000000", qos=1, retain=True)
                 active_spools[t] = None
     except Exception as e:
-        logging.error(f"Klipper Sync failed: {e}")
+        logger.error(f"Klipper Sync failed: {e}")
 
 def sync_from_afc_file():
     """
@@ -641,7 +642,7 @@ def sync_from_afc_file():
     """
     path = cfg["afc_var_path"]
     if not os.path.exists(path):
-        logging.warning(f"AFC var file not found: {path}")
+        logger.warning(f"AFC var file not found: {path}")
         return
 
     try:
@@ -663,7 +664,7 @@ def sync_from_afc_file():
                 if spool_id:
                     # 2. If AFC has a spool, lock our NFC reader so it ignores new scans
                     if not is_locked:
-                        logging.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
+                        logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
                         publish_lock(lane_name, "lock")
 
                     if status in AFC_PROTECTED_STATES:
@@ -692,7 +693,7 @@ def sync_from_afc_file():
                 else:
                     # 4. If AFC says the lane is empty, unlock the NFC reader so it can scan again
                     if is_locked:
-                        logging.info(f"AFC Sync: {lane_name} empty, clearing")
+                        logger.info(f"AFC Sync: {lane_name} empty, clearing")
                         publish_lock(lane_name, "clear")
                     
                     # Turn off the LED
@@ -700,7 +701,7 @@ def sync_from_afc_file():
                         update_klipper_led(lane_name, "000000", False, force=True)
                         active_spools[lane_name] = None
     except Exception as e:
-        logging.error(f"AFC Sync failed: {e}")
+        logger.error(f"AFC Sync failed: {e}")
 
 class VarFileHandler(FileSystemEventHandler):
     """Watches the file system. When Klipper or AFC modifies their save file, it triggers our sync functions."""
@@ -720,14 +721,14 @@ def start_watcher():
         afc_dir = os.path.dirname(cfg["afc_var_path"])
         if os.path.exists(afc_dir):
             observer.schedule(handler, afc_dir, recursive=False)
-            logging.info(f"Watching AFC var file in {afc_dir}")
+            logger.info(f"Watching AFC var file in {afc_dir}")
     else:
         klipper_path = cfg.get("klipper_var_path")
         if klipper_path:
             klipper_dir = os.path.dirname(klipper_path)
             if os.path.exists(klipper_dir):
                 observer.schedule(handler, klipper_dir, recursive=False)
-                logging.info(f"Watching Klipper var file in {klipper_dir}")
+                logger.info(f"Watching Klipper var file in {klipper_dir}")
 
     observer.start()
     return observer
@@ -738,7 +739,7 @@ def start_watcher():
 
 def on_shutdown(signum, frame):
     """Runs when you hit Ctrl+C or stop the service. Cleans up locks and disconnects."""
-    logging.info("Shutting down...")
+    logger.info("Shutting down...")
     if mqtt_client:
         mqtt_client.publish("nfc/middleware/online", "false", qos=1, retain=True)
         if cfg["toolhead_mode"] == "afc":
@@ -762,23 +763,23 @@ mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
 
-logging.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
-logging.info(f"Spoolman: {cfg['spoolman_url']}")
-logging.info(f"Moonraker: {cfg['moonraker_url']}")
+logger.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
+logger.info(f"Spoolman: {cfg['spoolman_url']}")
+logger.info(f"Moonraker: {cfg['moonraker_url']}")
 if DISPATCHER_AVAILABLE:
-    logging.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
+    logger.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
 else:
-    logging.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
+    logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
 if cfg["toolhead_mode"] == "afc":
-    logging.info(f"Lanes: {', '.join(cfg['toolheads'])}")
-    logging.info(f"AFC var file: {cfg['afc_var_path']}")
-    logging.info(f"LED macro: {cfg['afc_led_macro']}")
+    logger.info(f"Lanes: {', '.join(cfg['toolheads'])}")
+    logger.info(f"AFC var file: {cfg['afc_var_path']}")
+    logger.info(f"LED macro: {cfg['afc_led_macro']}")
 else:
-    logging.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
-    logging.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
+    logger.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
+    logger.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
 scanner_map = cfg.get("scanner_lane_map", {})
 if scanner_map:
-    logging.info(f"Scanner lane map: {json.dumps(scanner_map)}")
+    logger.info(f"Scanner lane map: {json.dumps(scanner_map)}")
 
 # Start the infinite loop
 try:
@@ -786,5 +787,5 @@ try:
     watcher = start_watcher()
     mqtt_client.loop_forever()
 except Exception as e:
-    logging.error(f"Fatal error: {e}")
+    logger.error(f"Fatal error: {e}")
     sys.exit(1)

@@ -1,5 +1,7 @@
 import requests
 import logging
+
+logger = logging.getLogger(__name__)
 import time
 from typing import Optional
 from state.models import SpoolInfo
@@ -24,9 +26,9 @@ class SpoolmanClient:
                 if nfc_id:
                     self.cache[nfc_id] = spool
             self._last_refresh = time.time()
-            logging.info(f"Spoolman cache refreshed: {len(self.cache)} spools indexed.")
+            logger.info(f"Spoolman cache refreshed: {len(self.cache)} spools indexed.")
         except Exception as e:
-            logging.error(f"Failed to fetch Spoolman cache: {e}")
+            logger.error(f"Failed to fetch Spoolman cache: {e}")
 
     def find_by_nfc(self, nfc_uid: str) -> Optional[dict]:
         """Looks up a spool by NFC UID, with TTL-based cache and single forced refresh on miss."""
@@ -37,7 +39,7 @@ class SpoolmanClient:
 
         if uid_lower not in self.cache:
             # Could be a newly registered spool — force one refresh before giving up
-            logging.info(f"UID {nfc_uid} not in cache, forcing refresh...")
+            logger.info(f"UID {nfc_uid} not in cache, forcing refresh...")
             self._fetch_all_spools()
 
         return self.cache.get(uid_lower)
@@ -75,7 +77,7 @@ class SpoolmanClient:
         )
 
         if not tag_spool.spool_uid:
-            logging.warning("ScanEvent has no UID — cannot sync with Spoolman")
+            logger.warning("ScanEvent has no UID — cannot sync with Spoolman")
             return None
 
         return self.sync_spool(tag_spool, prefer_tag=prefer_tag)
@@ -99,7 +101,7 @@ class SpoolmanClient:
         existing = self.find_by_nfc(tag_spool.spool_uid)
 
         if not existing:
-            logging.info(f"NFC {tag_spool.spool_uid} not in Spoolman. Creating new spool...")
+            logger.info(f"NFC {tag_spool.spool_uid} not in Spoolman. Creating new spool...")
             return self._create_spool_from_tag(tag_spool)
 
         spoolman_id = existing["id"]
@@ -110,18 +112,18 @@ class SpoolmanClient:
         # deliberately, and it's likely more accurate than our color name → hex guess
         spoolman_color = filament.get("color_hex")
         if spoolman_color:
-            logging.info(f"Using Spoolman color #{spoolman_color} over tag color '{tag_spool.color_name or tag_spool.color_hex}'")
+            logger.info(f"Using Spoolman color #{spoolman_color} over tag color '{tag_spool.color_name or tag_spool.color_hex}'")
             tag_spool.color_hex = spoolman_color
 
         if prefer_tag:
             # Tag is the source of truth for weight. Push tag weight to Spoolman.
-            logging.info(f"Updating Spoolman ID {spoolman_id} with fresh tag data...")
+            logger.info(f"Updating Spoolman ID {spoolman_id} with fresh tag data...")
             nominal_g = filament.get("weight")
             self._update_spoolman_weight(spoolman_id, tag_spool.remaining_weight_g, nominal_g)
             tag_spool.source = "merged (tag preferred)"
         else:
             # Spoolman is the source of truth. Pull its data into SpoolInfo.
-            logging.info(f"Using existing Spoolman data for ID {spoolman_id}.")
+            logger.info(f"Using existing Spoolman data for ID {spoolman_id}.")
             tag_spool.remaining_weight_g = existing.get("remaining_weight", tag_spool.remaining_weight_g)
             tag_spool.color_hex         = spoolman_color or tag_spool.color_hex
             tag_spool.material_type     = filament.get("material", tag_spool.material_type)
@@ -143,7 +145,7 @@ class SpoolmanClient:
         already exists before creating) is not yet implemented. For now this always
         creates a new filament entry.
         """
-        logging.warning("Auto-creation of Spoolman entries from tags is not yet fully implemented.")
+        logger.warning("Auto-creation of Spoolman entries from tags is not yet fully implemented.")
         # TODO: Check if vendor already exists, create if not, then link filament.
         # TODO: POST to /api/v1/filament, then POST to /api/v1/spool with filament_id.
         # Placeholder: pretend Spoolman assigned ID 99.
@@ -163,7 +165,7 @@ class SpoolmanClient:
         Both values are required — if either is missing we skip the update.
         """
         if remaining_g is None or nominal_g is None:
-            logging.debug(f"Skipping weight update for spool {spoolman_id}: missing remaining or nominal weight.")
+            logger.debug(f"Skipping weight update for spool {spoolman_id}: missing remaining or nominal weight.")
             return
         used_weight = max(0.0, nominal_g - remaining_g)
         try:
@@ -172,9 +174,9 @@ class SpoolmanClient:
                 json={"used_weight": used_weight},
                 timeout=5
             ).raise_for_status()
-            logging.info(f"Spoolman spool {spoolman_id}: used_weight set to {used_weight:.1f}g")
+            logger.info(f"Spoolman spool {spoolman_id}: used_weight set to {used_weight:.1f}g")
         except Exception as e:
-            logging.error(f"Failed to update weight for spool {spoolman_id}: {e}")
+            logger.error(f"Failed to update weight for spool {spoolman_id}: {e}")
 
     def _write_nfc_id(self, spoolman_id: int, nfc_uid: str):
         """
@@ -187,8 +189,8 @@ class SpoolmanClient:
                 json={"extra": {"nfc_id": nfc_uid.lower()}},
                 timeout=5
             ).raise_for_status()
-            logging.info(f"Wrote NFC UID {nfc_uid} to Spoolman spool {spoolman_id}.")
+            logger.info(f"Wrote NFC UID {nfc_uid} to Spoolman spool {spoolman_id}.")
             # Update the local cache so we don't need a full refresh
             self.cache[nfc_uid.lower()] = {"id": spoolman_id}
         except Exception as e:
-            logging.error(f"Failed to write NFC UID to Spoolman spool {spoolman_id}: {e}")
+            logger.error(f"Failed to write NFC UID to Spoolman spool {spoolman_id}: {e}")

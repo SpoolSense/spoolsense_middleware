@@ -1,5 +1,7 @@
 import logging
 
+logger = logging.getLogger(__name__)
+
 from state.models import ScanEvent
 from opentag3d.parser import parse_opentag3d
 from openprinttag.scanner_parser import scan_event_from_openprinttag_scanner
@@ -45,7 +47,7 @@ def detect_and_parse(payload: dict, target_id: str, topic: str = "") -> ScanEven
     """
     fmt = payload.get("format") or detect_format(payload)
 
-    logging.debug("Detected format: %s | target: %s | topic: %s", fmt, target_id, topic)
+    logger.debug("Detected format: %s | target: %s | topic: %s", fmt, target_id, topic)
 
     if fmt == "opentag3d":
         return parse_opentag3d(payload, target_id)
