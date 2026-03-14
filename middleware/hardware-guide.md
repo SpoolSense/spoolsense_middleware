@@ -14,16 +14,16 @@ Examples:
 
 ---
 
-# Reader Types
+## Reader Types
 
 | Reader Type | ESP32 Board | NFC Module | Supported Tags | Notes |
 |-------------|-------------|-----------|---------------|------|
-| PN532 reader | ESP32-S3-Zero | PN532 | Plain UID tags, OpenTag3D | Cheapest and simplest option |
+| PN532 reader | ESP32-S3-Zero (recommended) | PN532 | Plain UID tags, OpenTag3D | Cheapest and simplest option |
 | PN5180 reader | ESP32-WROOM-32 | PN5180 | Plain UID, OpenTag3D, OpenPrintTag | Required for ISO15693 / OpenPrintTag |
 
 ---
 
-# Tag Compatibility
+## Tag Compatibility
 
 | Tag Type | PN532 | PN5180 |
 |---------|------|-------|
@@ -31,7 +31,7 @@ Examples:
 | OpenTag3D | ✔ | ✔ |
 | OpenPrintTag (ISO 15693 / SLIX2) | ❌ | ✔ |
 
-If you want to use **OpenPrintTag tags**, you must use a **PN5180-based reader**.
+If you want to use **OpenPrintTag tags (ISO 15693 / SLIX2)**, you must use a **PN5180-based reader**.
 
 That means:
 - ESP32-WROOM-32
@@ -40,7 +40,7 @@ That means:
 
 ---
 
-# Scanner Placement
+## Scanner Placement
 
 Readers are normally placed at the **spool location**, not at the printer toolhead.
 Each spool position should have **one scanner**.
@@ -119,7 +119,7 @@ Even if the printer has multiple tools, scanners are usually sized by **AFC lane
 
 ---
 
-# How Many Readers Do I Need?
+## How Many Readers Do I Need?
 
 The number of scanners depends on **spool locations**, not how many tags you own.
 
@@ -134,7 +134,7 @@ The number of scanners depends on **spool locations**, not how many tags you own
 
 ---
 
-# Quick Rules
+## Quick Rules
 
 **Single toolhead**
 → usually **1 ESP32 + 1 reader**
@@ -150,7 +150,7 @@ The number of scanners depends on **spool locations**, not how many tags you own
 
 ---
 
-# Example Hardware Builds
+## Example Hardware Builds
 
 ## Single Toolhead (UID tags or OpenTag3D)
 - 1 × ESP32-S3-Zero
