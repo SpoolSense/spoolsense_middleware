@@ -163,10 +163,36 @@ def load_config():
 
     config["moonraker_url"] = config["moonraker_url"].rstrip("/")
 
+    # Validate scanner_lane_map entries against toolheads list
+    scanner_map = config.get("scanner_lane_map", {})
+    if scanner_map:
+        toolheads = set(config.get("toolheads", []))
+        bad_lanes = [
+            f"{device_id!r} → {lane!r}"
+            for device_id, lane in scanner_map.items()
+            if lane not in toolheads
+        ]
+        if bad_lanes:
+            logger.error(
+                "scanner_lane_map contains lanes not in toolheads list: %s. "
+                "Add them to toolheads or fix the mapping.",
+                ", ".join(bad_lanes),
+            )
+            sys.exit(1)
+
     return config
 
 
 cfg = load_config()
+
+# Warn if scanner_lane_map is configured but dispatcher is unavailable
+if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:
+    logger.warning(
+        "scanner_lane_map is configured but the rich-tag dispatcher is not available "
+        "(adapters/ directory not found). openprinttag_scanner topics will be subscribed "
+        "but payloads will not be parsed — scans will be silently ignored. "
+        "Ensure the adapters/ directory is present to enable scanner support."
+    )
 
 # SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
 # Only instantiated when both the dispatcher and a Spoolman URL are available.
