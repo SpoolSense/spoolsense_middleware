@@ -142,7 +142,6 @@ def load_config():
     # Validate required fields
     missing = []
     if not config["mqtt"]["broker"]: missing.append("mqtt.broker")
-    if not config["spoolman_url"]: missing.append("spoolman_url")
     if not config["moonraker_url"]: missing.append("moonraker_url")
 
     if missing:
@@ -153,7 +152,15 @@ def load_config():
         logger.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
         sys.exit(1)
 
-    config["spoolman_url"] = config["spoolman_url"].rstrip("/")
+    # spoolman_url is optional — missing means tag-only mode
+    if config["spoolman_url"]:
+        config["spoolman_url"] = config["spoolman_url"].rstrip("/")
+    else:
+        logger.warning(
+            "spoolman_url not set — running in tag-only mode. "
+            "Spoolman lookup, spool creation, and weight sync are disabled."
+        )
+
     config["moonraker_url"] = config["moonraker_url"].rstrip("/")
 
     return config
@@ -162,8 +169,9 @@ def load_config():
 cfg = load_config()
 
 # SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
+# Only instantiated when both the dispatcher and a Spoolman URL are available.
 spoolman_client = None
-if DISPATCHER_AVAILABLE:
+if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
     spoolman_client = SpoolmanClient(cfg["spoolman_url"])
 
 # ============================================================
@@ -204,6 +212,8 @@ def discover_klipper_var_path():
 
 def get_spool_by_id(spool_id):
     """Fetch a single spool directly from Spoolman."""
+    if not cfg["spoolman_url"]:
+        return None
     try:
         response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool/{spool_id}", timeout=5)
         response.raise_for_status()
@@ -218,6 +228,8 @@ def refresh_spool_cache():
     We do this so when a tag is scanned, the lookup is instant instead of waiting on a network request.
     """
     global spool_cache, last_cache_refresh
+    if not cfg["spoolman_url"]:
+        return False
     try:
         logger.info("Refreshing Spoolman cache...")
         response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool", timeout=5)
@@ -519,15 +531,18 @@ def _handle_rich_tag(client, toolhead, payload, topic):
 
         # --- Enrichment path (best-effort) ---
         spool_info = None
-        try:
-            spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
-        except Exception:
-            logger.exception(
-                "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
-                "uid=%s topic=%s",
-                scan.uid,
-                topic,
-            )
+        if spoolman_client is None:
+            logger.debug("Spoolman not configured — skipping enrichment, running tag-only activation")
+        else:
+            try:
+                spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
+            except Exception:
+                logger.exception(
+                    "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
+                    "uid=%s topic=%s",
+                    scan.uid,
+                    topic,
+                )
 
         # --- Activation path (always runs) ---
         _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
@@ -824,7 +839,7 @@ mqtt_client.on_message = on_message
 mqtt_client.will_set("nfc/middleware/online", "false", qos=1, retain=True)
 
 logger.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
-logger.info(f"Spoolman: {cfg['spoolman_url']}")
+logger.info(f"Spoolman: {cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
 logger.info(f"Moonraker: {cfg['moonraker_url']}")
 if DISPATCHER_AVAILABLE:
     logger.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
