@@ -80,3 +80,24 @@ afc_var_path: "~/printer_data/config/AFC/AFC.var.unit"
 # The middleware calls this with: LANE=<name> R=<0-1> G=<0-1> B=<0-1> BREATH=<0|1>
 # You must define this macro in your Klipper config — see afc/docs/setup.md.
 afc_led_macro: "_SET_LANE_LED"
+
+# ---- OpenPrintTag Scanner (optional) ------------------------
+# Only needed if you are using ESP32-WROOM-32 + PN5180 boards running
+# the ryanch/openprinttag_scanner firmware alongside your PN532 readers.
+#
+# Maps each scanner's MQTT device ID (derived from the last 3 octets
+# of its WiFi MAC) to the AFC lane it serves.
+#
+# Each scanner publishes to:
+#   openprinttag/<device_id>/tag/state
+#
+# The mapped value must match an entry in your toolheads list above.
+# SpoolSense will error at startup if a mapped lane is not in toolheads.
+#
+# Leave empty or omit if you are not using openprinttag_scanner.
+#
+# scanner_lane_map:
+#   esp32-lane1: "lane1"
+#   esp32-lane2: "lane2"
+#   esp32-lane3: "lane3"
+#   esp32-lane4: "lane4"
