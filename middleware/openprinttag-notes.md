@@ -148,8 +148,8 @@ The dispatcher returns a `ScanEvent` with the relevant flag set to `False` — i
 ### Testing — must do before further coding
 
 **Unit tests (no hardware needed)**
-- [ ] Run `test_dispatcher.py` — verify all 9 test cases pass
-- [ ] Run `test_parsers.py` — verify OpenTag3D and scanner parser output
+- [x] Run `test_dispatcher.py` — all 9 test cases pass
+- [x] Run `test_parsers.py` — OpenTag3D parser output verified (fixed swapped args in test call)
 - [ ] Run `test_db.py` — verify MoonrakerDB save/load (needs Moonraker running)
 - [ ] Test `color_map.py` — scan through known Prusament color names and verify hex output. Test edge cases: empty string, already-hex, unknown name, mixed case
 
@@ -158,6 +158,20 @@ The dispatcher returns a `ScanEvent` with the relevant flag set to `False` — i
 - [ ] Verify `DISPATCHER_AVAILABLE=False` graceful degradation — rename/remove `adapters/` and confirm plain UID path still works
 - [ ] Verify `scanner_lane_map` subscription — configure a fake scanner mapping, start middleware, confirm it subscribes to correct topics
 - [ ] Publish a fake `openprinttag_scanner` payload to MQTT manually and verify dispatcher picks it up and routes correctly
+
+**openprinttag_scanner end-to-end smoke test (needs MQTT broker + running middleware)**
+- [ ] Confirm `detect_and_parse` caller passes `topic=msg.topic`
+- [ ] Start middleware with scanner topics enabled
+- [ ] Verify `scanner_lane_map` has the expected deviceId
+- [ ] Publish valid payload with `uid`
+- [ ] Check dispatcher detects `openprinttag_scanner` format
+- [ ] Check `ScanEvent` shows `uid`, `present`, `tag_data_valid`
+- [ ] Check `_handle_rich_tag` is reached
+- [ ] Publish payload with `uid` removed
+- [ ] Check warning includes `topic`/`deviceId`
+- [ ] Confirm no crash and Spoolman sync skipped
+- [ ] Publish `present=false` payload
+- [ ] Confirm graceful no-op path
 
 **Hardware tests (needs ESP32-WROOM-32 + PN5180 + openprinttag_scanner)**
 - [ ] Flash firmware — does it boot? Does the "Home Assistant" MQTT config accept a plain broker?
