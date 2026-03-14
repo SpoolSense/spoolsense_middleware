@@ -47,8 +47,8 @@ def should_write_remaining(
 
 
 def build_write_plan(
-    scan,
-    spool_info,
+    scan: "ScanEvent",
+    spool_info: "SpoolInfo | None",
     device_id: str | None,
 ) -> TagWritePlan | None:
     """
@@ -83,9 +83,9 @@ def build_write_plan(
         return None
 
     reason = (
-        f"tag={tag_remaining}g spoolman={spoolman_remaining}g"
+        f"tag remaining={tag_remaining}g, spoolman remaining={spoolman_remaining}g"
         if tag_remaining is not None
-        else f"tag missing remaining, spoolman={spoolman_remaining}g"
+        else f"tag missing remaining, spoolman remaining={spoolman_remaining}g"
     )
 
     return TagWritePlan(

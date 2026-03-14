@@ -536,7 +536,10 @@ def _handle_rich_tag(client, toolhead, payload, topic):
         # Extract device_id from the MQTT topic — only present for openprinttag_scanner.
         # PN532/ESPHome topics don't carry a device_id so writeback is skipped for those.
         parts = topic.split("/") if topic else []
-        device_id = parts[1] if len(parts) >= 3 and parts[0] == cfg.get("scanner_topic_prefix", "openprinttag") else None
+        prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+        device_id = None
+        if len(parts) >= 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
+            device_id = parts[1]
 
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:
