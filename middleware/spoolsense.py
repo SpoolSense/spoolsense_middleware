@@ -532,6 +532,23 @@ def _handle_rich_tag(client, toolhead, payload, topic):
         # --- Activation path (always runs) ---
         _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
 
+        # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
+        # Extract device_id from the MQTT topic — only present for openprinttag_scanner.
+        # PN532/ESPHome topics don't carry a device_id so writeback is skipped for those.
+        parts = topic.split("/") if topic else []
+        device_id = parts[1] if len(parts) >= 3 and parts[0] == cfg.get("scanner_topic_prefix", "openprinttag") else None
+
+        write_plan = build_write_plan(scan, spool_info, device_id=device_id)
+        if write_plan:
+            logger.info(
+                "[would write] tag=%s device=%s command=%s payload=%s reason=%s",
+                write_plan.uid,
+                write_plan.device_id,
+                write_plan.command,
+                write_plan.payload,
+                write_plan.reason,
+            )
+
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")
     except ValueError as e:
