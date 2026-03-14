@@ -269,6 +269,8 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 - [x] Create spool with `filament_id` (`POST /api/v1/spool`)
 - [x] Write NFC UID back to new spool's extra fields via `_write_nfc_id()`
 
+> **⚠ Needs live validation:** `_create_filament` sends `vendor_id` as a top-level field in the POST body. The Spoolman API docs support this, but Spoolman historically returns nested vendor objects in responses (`filament["vendor"]["id"]`) while expecting flat `vendor_id` in writes. The two patterns are consistent with REST conventions but this specific field name has not been tested against a real Spoolman instance. Validate with one live `POST /api/v1/filament` before considering this path production-ready. If it fails, the likely fix is changing `"vendor_id"` to `"vendor": {"id": vendor_id}` in the payload.
+
 **`_handle_rich_tag` resilience** — activation and enrichment paths are now separated:
 - [x] Spoolman sync wrapped in `try/except` — failure logs full exception and continues
 - [x] `_activate_from_scan()` always runs regardless of Spoolman availability
