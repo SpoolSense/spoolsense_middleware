@@ -516,6 +516,39 @@ def _handle_rich_tag(client, toolhead, payload, topic):
         if not scan.present:
             logger.debug(f"Scanner reported no tag present on {toolhead}")
             return
+
+        # UID-only ISO14443A tag (e.g. NTAG215) — no embedded filament data,
+        # but we can still look the spool up in Spoolman via extra.nfc_id.
+        if not scan.tag_data_valid and not scan.blank and scan.uid:
+            uid = scan.uid.lower()
+            logger.info(f"UID-only tag on {toolhead}: {uid} — looking up in Spoolman")
+            spool = find_spool_by_nfc(uid)
+            if spool:
+                spool_id = spool["id"]
+                filament = spool.get("filament", {})
+                name = filament.get("name", "Unknown")
+                color_hex = (filament.get("color_hex") or "FFFFFF").lstrip("#").upper()
+                logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
+                if activate_spool(spool_id, toolhead):
+                    active_spools[toolhead] = spool_id
+                    if cfg["toolhead_mode"] == "afc":
+                        publish_lock(toolhead, "lock")
+                    else:
+                        client.publish(f"nfc/toolhead/{toolhead}/color", color_hex, qos=1, retain=True)
+                        remaining = spool.get("remaining_weight")
+                        topic_low = f"nfc/toolhead/{toolhead}/low_spool"
+                        if remaining is not None and remaining <= cfg["low_spool_threshold"]:
+                            logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
+                            client.publish(topic_low, "true", qos=1, retain=True)
+                        else:
+                            client.publish(topic_low, "false", qos=1, retain=True)
+            else:
+                logger.warning(f"No spool found in Spoolman for UID: {uid}")
+                if cfg["toolhead_mode"] != "afc":
+                    client.publish(f"nfc/toolhead/{toolhead}/color", "error", qos=1, retain=True)
+                    client.publish(f"nfc/toolhead/{toolhead}/low_spool", "false", qos=1, retain=True)
+            return
+
         if not scan.tag_data_valid:
             logger.warning(f"Scanner reported invalid tag data on {toolhead}")
             return
