@@ -81,38 +81,36 @@ afc_var_path: "~/printer_data/config/AFC/AFC.var.unit"
 
 afc_led_macro: "_SET_LANE_LED"
 
-# ---- OpenPrintTag Scanner (optional) ------------------------
+# ---- SpoolSense Scanner (optional) --------------------------
 # Only needed if you are using ESP32-WROOM-32 + PN5180 boards running
-# the ryanch/openprinttag_scanner firmware.
+# the spoolsense_scanner firmware.
 #
 # Maps each scanner's MQTT device ID to the AFC lane it serves.
 # The device ID appears in the scanner's MQTT topic:
-#   openprinttag/<device_id>/tag/state
+#   spoolsense/<device_id>/tag/state
 #
 # To find your scanner's device_id:
 # 1. Power on the scanner and scan any tag.
 # 2. Watch your MQTT broker for topics like:
-#      openprinttag/<device_id>/tag/state
+#      spoolsense/<device_id>/tag/state
 # 3. Use that <device_id> as the key below.
 #
 # Example:
-#   openprinttag/ab12cd/tag/state
-# → device_id is "ab12cd"
+#   spoolsense/ecb338/tag/state
+# → device_id is "ecb338"
 #
 # The mapped value must match an entry in your toolheads list above.
 # SpoolSense will error at startup if a mapped lane is not in toolheads.
 #
-# Leave empty or omit if you are not using openprinttag_scanner.
+# Leave empty or omit if you are not using spoolsense_scanner.
 #
-# MQTT topic prefix used by openprinttag_scanner devices.
-# Only change this if you have customized the scanner firmware.
-# scanner_topic_prefix: "openprinttag"
+scanner_topic_prefix: "spoolsense"
 #
 # scanner_lane_map:
-#   scanner_ab12cd: "lane1"
-#   scanner_ef34gh: "lane2"
-#   scanner_ij56kl: "lane3"
-#   scanner_mn78op: "lane4"
+#   ecb338: "lane1"
+#   abcd12: "lane2"
+#   ef3456: "lane3"
+#   gh7890: "lane4"
 
 # ---- Tag Writeback (optional) ------------------------------
 # Controls whether SpoolSense writes updated remaining weight back to
