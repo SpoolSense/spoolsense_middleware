@@ -82,7 +82,7 @@ This is safe to run at any time — it exits immediately after printing the summ
 
 ## Enabling Tag Writeback (OpenPrintTag scanners only)
 
-If you are using PN5180-based scanners running `openprinttag_scanner`, SpoolSense can write updated remaining weight back to tags when the tag is stale.
+If you are using PN5180-based scanners running `spoolsense_scanner`, SpoolSense can write updated remaining weight back to tags when the tag is stale.
 
 Writeback is **disabled by default**. When disabled, SpoolSense logs what it _would_ write without publishing anything — this is the dry-run mode.
 

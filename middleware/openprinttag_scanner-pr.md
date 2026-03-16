@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add support for a **single RGB status LED** (for example, a WS2812B or SK6812) to `openprinttag_scanner` so PN5180-based scanners can provide the same kind of visual status feedback that PN532 + ESPHome setups already provide.
+Add support for a **single RGB status LED** (for example, a WS2812B or SK6812) to `spoolsense_scanner` so PN5180-based scanners can provide the same kind of visual status feedback that PN532 + ESPHome setups already provide.
 
 This is especially useful for:
 
@@ -23,7 +23,7 @@ The goal is to let the scanner visually show:
 
 ## Why This Is Useful
 
-Right now, PN5180 + ESP32-WROOM-32 scanners can read and write tags and publish over MQTT, but there is **no built-in LED status path** in `openprinttag_scanner`.
+Right now, PN5180 + ESP32-WROOM-32 scanners can read and write tags and publish over MQTT, but there is **no built-in LED status path** in `spoolsense_scanner`.
 
 From reviewing the firmware:
 
@@ -88,7 +88,7 @@ WS2812 data is typically 5V logic, while ESP32 GPIO is 3.3V. In many short-wire 
    - firmware should still run without an LED
 
 2. **Scanner-local control**
-   - LED behavior should be handled inside `openprinttag_scanner`
+   - LED behavior should be handled inside `spoolsense_scanner`
    - not controlled by SpoolSense over MQTT in the first version
 
 3. **Minimal wiring**
@@ -106,7 +106,7 @@ WS2812 data is typically 5V logic, while ESP32 GPIO is 3.3V. In many short-wire 
 
 `Adafruit_NeoPixel` integrates cleanly with this Arduino-based firmware and is recommended for the initial implementation.
 
-`openprinttag_scanner` uses:
+`spoolsense_scanner` uses:
 
 ```ini
 platform = espressif32
@@ -398,7 +398,7 @@ That would already make the scanner much friendlier to use in single-toolhead an
 
 ## Suggested PR Summary
 
-This PR adds optional support for a single addressable RGB status LED (WS2812B/SK6812) to `openprinttag_scanner`.
+This PR adds optional support for a single addressable RGB status LED (WS2812B/SK6812) to `spoolsense_scanner`.
 
 The LED is intended as a lightweight alternative to the LCD for PN5180-based builds and provides local visual feedback for:
 

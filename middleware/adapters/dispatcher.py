@@ -4,7 +4,7 @@ logger = logging.getLogger(__name__)
 
 from state.models import ScanEvent
 from opentag3d.parser import parse_opentag3d
-from openprinttag.scanner_parser import scan_event_from_openprinttag_scanner
+from openprinttag.scanner_parser import scan_event_from_spoolsense_scanner
 
 # OpenPrintTag spec parser (openprinttag/parser.py) is implemented but not yet active.
 # Requires a custom ESPHome component to read full CBOR data from ISO 15693 tags
@@ -16,10 +16,10 @@ def detect_format(payload: dict) -> str:
     """
     Auto-detects the tag format from payload keys/values.
     """
-    # openprinttag_scanner payloads always contain both 'present' and
+    # spoolsense_scanner payloads always contain both 'present' and
     # 'tag_data_valid' — these keys don't appear in any other supported format.
     if "present" in payload and "tag_data_valid" in payload:
-        return "openprinttag_scanner"
+        return "spoolsense_scanner"
 
     # OpenTag3D uses 'opentag_version' or 'spool_weight_nominal'
     if any(k in payload for k in ("opentag_version", "spool_weight_nominal")):
@@ -52,13 +52,13 @@ def detect_and_parse(payload: dict, target_id: str, topic: str = "") -> ScanEven
     if fmt == "opentag3d":
         return parse_opentag3d(payload, target_id)
 
-    elif fmt == "openprinttag_scanner":
-        return scan_event_from_openprinttag_scanner(payload, target_id, topic=topic)
+    elif fmt == "spoolsense_scanner":
+        return scan_event_from_spoolsense_scanner(payload, target_id, topic=topic)
 
     elif fmt == "openprinttag":
         raise NotImplementedError(
             "OpenPrintTag spec format (CBOR direct) is not yet supported. "
-            "Use ryanch/openprinttag_scanner instead."
+            "Use sjordan0228/spoolsense_scanner instead."
         )
 
     else:

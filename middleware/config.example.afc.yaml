@@ -123,7 +123,7 @@ scanner_topic_prefix: "spoolsense"
 # true — live mode. Publishes update_remaining commands to the scanner.
 #   Only enable after confirming dry-run behavior in the logs.
 #
-# Only applies to openprinttag_scanner (PN5180) scanners. PN532 readers
+# Only applies to spoolsense_scanner (PN5180) scanners. PN532 readers
 # do not support writeback.
 #
 # tag_writeback_enabled: false

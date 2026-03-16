@@ -50,7 +50,7 @@ import configparser
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# Dispatcher for rich-data NFC tag formats (OpenTag3D, openprinttag_scanner)
+# Dispatcher for rich-data NFC tag formats (OpenTag3D, spoolsense_scanner)
 try:
     from adapters.dispatcher import detect_and_parse, detect_format
     from state.models import ScanEvent
@@ -87,12 +87,12 @@ DEFAULTS = {
     "low_spool_threshold": 100,
     "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
     "klipper_var_path": None,
-    # openprinttag_scanner settings (optional — only needed for PN5180 setups)
+    # spoolsense_scanner settings (optional — only needed for PN5180 setups)
     # Maps scanner MQTT device IDs to lane/toolhead names.
-    # Each ESP32 running openprinttag_scanner publishes to:
-    #   openprinttag/<device_id>/tag/state
+    # Each ESP32 running spoolsense_scanner publishes to:
+    #   spoolsense/<device_id>/tag/state
     # This mapping tells the middleware which lane each scanner belongs to.
-    "scanner_topic_prefix": "openprinttag",
+    "scanner_topic_prefix": "spoolsense",
     "scanner_lane_map": {},  # e.g. {"scanner-lane1": "lane1", "scanner-lane2": "lane2"}
     # Tag writeback — disabled by default. Enable only after verifying dry-run logs.
     "tag_writeback_enabled": False,
@@ -356,15 +356,15 @@ def on_connect(client, userdata, flags, rc):
             client.subscribe(f"nfc/toolhead/{t}")
         logger.info(f"Subscribed to: {', '.join(cfg['toolheads'])}")
 
-        # Subscribe to openprinttag_scanner topics (PN5180 path)
-        # Each scanner publishes to: openprinttag/<device_id>/tag/state
+        # Subscribe to spoolsense_scanner topics (PN5180 path)
+        # Each scanner publishes to: spoolsense/<device_id>/tag/state
         scanner_map = cfg.get("scanner_lane_map", {})
         if scanner_map:
-            prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+            prefix = cfg.get("scanner_topic_prefix", "spoolsense")
             for device_id in scanner_map:
                 topic = f"{prefix}/{device_id}/tag/state"
                 client.subscribe(topic)
-            logger.info(f"Subscribed to {len(scanner_map)} openprinttag_scanner(s): {', '.join(scanner_map.keys())}")
+            logger.info(f"Subscribed to {len(scanner_map)} spoolsense_scanner(s): {', '.join(scanner_map.keys())}")
             
         refresh_spool_cache()
 
@@ -386,15 +386,15 @@ def on_connect(client, userdata, flags, rc):
 
 def _extract_scanner_device_id(topic: str) -> str | None:
     """
-    Extracts the scanner deviceId from an openprinttag_scanner MQTT topic.
+    Extracts the scanner deviceId from a spoolsense_scanner MQTT topic.
 
-    Expected topic shape: openprinttag/<deviceId>/tag/state
+    Expected topic shape: spoolsense/<deviceId>/tag/state
     Returns the deviceId string, or None if the topic does not match.
 
     This is the single authoritative place that parses scanner topics.
     Both _resolve_lane_from_topic() and _handle_rich_tag() use this.
     """
-    prefix = cfg.get("scanner_topic_prefix", "openprinttag")
+    prefix = cfg.get("scanner_topic_prefix", "spoolsense")
     parts = topic.split("/") if topic else []
     if len(parts) == 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
         return parts[1]
@@ -406,13 +406,13 @@ def _resolve_lane_from_topic(topic):
     Determines the lane/toolhead name from an MQTT topic.
     
     For PN532/ESPHome topics like 'nfc/toolhead/lane1', returns 'lane1'.
-    For openprinttag_scanner topics like 'openprinttag/scanner-lane1/tag/state',
+    For spoolsense_scanner topics like 'spoolsense/scanner-lane1/tag/state',
     looks up the device ID in scanner_lane_map to find the lane name.
     Returns None if the topic can't be mapped to a lane.
     """
     scanner_map = cfg.get("scanner_lane_map", {})
 
-    # Check if it's a scanner topic: openprinttag/<device_id>/tag/state
+    # Check if it's a scanner topic: spoolsense/<device_id>/tag/state
     device_id = _extract_scanner_device_id(topic)
     if device_id is not None:
         lane = scanner_map.get(device_id)
@@ -499,7 +499,7 @@ def _activate_from_scan(client, toolhead, scan, spool_info=None):
 
 def _handle_rich_tag(client, toolhead, payload, topic):
     """
-    Handles a rich-data NFC tag (OpenTag3D or openprinttag_scanner).
+    Handles a rich-data NFC tag (OpenTag3D or spoolsense_scanner).
 
     Routes through the dispatcher to parse the tag data into a ScanEvent.
     Spoolman sync is best-effort — if it fails, activation continues from
@@ -572,7 +572,7 @@ def _handle_rich_tag(client, toolhead, payload, topic):
         _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
 
         # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
-        # device_id is only present for openprinttag_scanner topics.
+        # device_id is only present for spoolsense_scanner topics.
         # PN532/ESPHome topics return None so writeback is skipped for those.
         device_id = _extract_scanner_device_id(topic)
 
@@ -609,7 +609,7 @@ def on_message(client, userdata, msg):
     1. Plain UID (PN532/ESPHome) — {"uid": "xx-xx", "toolhead": "T0"}
        Looks up the UID in Spoolman's nfc_id field. This is the original flow.
     
-    2. Rich data (openprinttag_scanner / OpenTag3D) — large JSON with tag data.
+    2. Rich data (spoolsense_scanner / OpenTag3D) — large JSON with tag data.
        Routes through the dispatcher to parse, syncs with Spoolman, then activates.
        The lane is resolved from the MQTT topic via scanner_lane_map.
     """
@@ -870,12 +870,12 @@ def main():
     if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:
         logger.warning(
             "scanner_lane_map is configured but the rich-tag dispatcher is not available "
-            "(adapters/ directory not found). openprinttag_scanner topics will be subscribed "
+            "(adapters/ directory not found). spoolsense_scanner topics will be subscribed "
             "but payloads will not be parsed — scans will be silently ignored. "
             "Ensure the adapters/ directory is present to enable scanner support."
         )
 
-    # SpoolmanClient for rich-data tag sync (OpenTag3D, openprinttag_scanner)
+    # SpoolmanClient for rich-data tag sync (OpenTag3D, spoolsense_scanner)
     if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
         spoolman_client = SpoolmanClient(cfg["spoolman_url"])
 
@@ -896,7 +896,7 @@ def main():
     logger.info(f"Spoolman: {cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
     logger.info(f"Moonraker: {cfg['moonraker_url']}")
     if DISPATCHER_AVAILABLE:
-        logger.info("Rich tag dispatcher: enabled (OpenTag3D, openprinttag_scanner)")
+        logger.info("Rich tag dispatcher: enabled (OpenTag3D, spoolsense_scanner)")
     else:
         logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
     if cfg["toolhead_mode"] == "afc":

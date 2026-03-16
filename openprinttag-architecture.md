@@ -30,9 +30,9 @@ Backends can be:
 
 OpenPrintTag uses ISO 15693 (NFC-V) tags, which the PN532 cannot read. The PN5180 can, but the available ESPHome community components for the PN5180 only expose the tag UID — not the full CBOR payload that OpenPrintTag requires. Writing a custom ESPHome component to read full tag memory is a significant undertaking.
 
-The chosen approach is to use **[ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner)** — a third-party ESP32-based scanner that reads the full OpenPrintTag CBOR data and publishes decoded JSON directly to MQTT. SpoolSense subscribes to the scanner's topic and picks up the payload in the middleware, the same pattern already used with ESPHome + PN532.
+The chosen approach is to use **[sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner)** — an ESP32-based scanner that reads the full OpenPrintTag CBOR data and publishes decoded JSON directly to MQTT. SpoolSense subscribes to the scanner's topic and picks up the payload in the middleware, the same pattern already used with ESPHome + PN532. It also supports plain UID-only tags (NTAG215) for simple Spoolman lookup workflows.
 
-Scanner MQTT topic: `openprinttag/<deviceId>/tag/state`
+Scanner MQTT topic: `spoolsense/<deviceId>/tag/state`
 
 Scanner payload shape:
 ```json
@@ -55,7 +55,7 @@ Scanner payload shape:
 
 | Format | Hardware | Status |
 |---|---|---|
-| OpenPrintTag (via scanner) | ryanch/openprinttag_scanner + PN5180 | Implemented — `scanner_parser.py` |
+| OpenPrintTag (via scanner) | sjordan0228/spoolsense_scanner + PN5180 | Implemented — `scanner_parser.py` |
 | OpenTag3D | ESPHome + PN532 | Implemented — `opentag3d/parser.py` |
 | OpenPrintTag (spec/CBOR direct) | Custom ESPHome PN5180 component | Not yet supported |
 
@@ -136,7 +136,7 @@ from dataclasses import dataclass
 @dataclass
 class SpoolInfo:
     spool_uid: str | None
-    source: str                  # openprinttag_scanner / opentag3d / spoolman / merged (tag preferred) / merged (spoolman preferred) / manual
+    source: str                  # spoolsense_scanner / opentag3d / spoolman / merged (tag preferred) / merged (spoolman preferred) / manual
 
     spoolman_id: int | None
     tag_version: str | None
@@ -401,7 +401,7 @@ Keep unsupported fields in SpoolSense own state, such as:
 middleware/
 ├── openprinttag/
 │   ├── __init__.py
-│   ├── scanner_parser.py     # parses ryanch/openprinttag_scanner MQTT payloads → SpoolInfo (active)
+│   ├── scanner_parser.py     # parses sjordan0228/spoolsense_scanner MQTT payloads → SpoolInfo (active)
 │   └── parser.py             # parses raw CBOR spec fields → SpoolInfo (not yet active — needs custom ESPHome component)
 ├── opentag3d/
 │   ├── __init__.py
@@ -427,7 +427,7 @@ middleware/
 ### Scan flow
 
 ```text
-1. Scanner reads NFC tag (openprinttag_scanner via PN5180, or ESPHome PN532 for OpenTag3D)
+1. Scanner reads NFC tag (spoolsense_scanner via PN5180, or ESPHome PN532 for OpenTag3D)
 2. Scanner publishes decoded JSON payload to MQTT
 3. Middleware receives MQTT message
 4. dispatcher.py detects format from payload keys

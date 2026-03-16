@@ -1,6 +1,6 @@
-# OpenPrintTag Scanner Support
+# SpoolSense Scanner Support
 
-SpoolSense supports NFC scanners running the [ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner) firmware alongside the standard PN532/ESPHome path.
+SpoolSense supports NFC scanners running the [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner) firmware alongside the standard PN532/ESPHome path.
 
 This enables reading **OpenPrintTag** (ISO 15693 / ICODE SLIX2) tags, which carry rich filament metadata — brand, material, color, and remaining weight — directly on the tag. The PN532 cannot read these tags; a PN5180 is required.
 
@@ -12,9 +12,9 @@ This enables reading **OpenPrintTag** (ISO 15693 / ICODE SLIX2) tags, which carr
 OpenPrintTag NFC tag
        ↓
 ESP32-WROOM-32 + PN5180
-(ryanch/openprinttag_scanner firmware)
+(sjordan0228/spoolsense_scanner firmware)
        ↓
-MQTT broker  (openprinttag/<device_id>/tag/state)
+MQTT broker  (spoolsense/<device_id>/tag/state)
        ↓
 SpoolSense middleware
        ↓
@@ -43,14 +43,14 @@ The PN532 readers used for the standard SpoolSense path continue to work alongsi
 
 ## Firmware Setup
 
-1. Flash [ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner) onto an ESP32-WROOM-32 + PN5180.
+1. Flash [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner) onto an ESP32-WROOM-32 + PN5180.
 2. Connect to the scanner's web UI after first boot.
 3. Enable the **Home Assistant** integration (despite the name, actual Home Assistant is not required — this just enables MQTT).
 4. Enter your MQTT broker IP, port, and credentials — use the same Mosquitto broker as the rest of SpoolSense.
 
 The scanner will begin publishing tag data to:
 ```
-openprinttag/<device_id>/tag/state
+spoolsense/<device_id>/tag/state
 ```
 
 ---
@@ -65,21 +65,21 @@ The `device_id` is automatically assigned by the firmware and appears in the MQT
 2. Scan any tag (or just power on — the scanner publishes presence events).
 3. Watch your MQTT broker for topics matching:
    ```
-   openprinttag/+/tag/state
+   spoolsense/+/tag/state
    ```
 4. The middle segment is your `device_id`.
 
 **Example:**
 ```
-openprinttag/ab12cd/tag/state
-                ↑
-           device_id = "ab12cd"
+spoolsense/ab12cd/tag/state
+               ↑
+          device_id = "ab12cd"
 ```
 
 You can use any MQTT client to watch topics — MQTT Explorer, `mosquitto_sub`, or Home Assistant's MQTT listener:
 
 ```bash
-mosquitto_sub -h <broker_ip> -u <user> -P <password> -t "openprinttag/#" -v
+mosquitto_sub -h <broker_ip> -u <user> -P <password> -t "spoolsense/#" -v
 ```
 
 ---
@@ -112,11 +112,11 @@ scanner_lane_map:
 
 SpoolSense will error at startup if a mapped lane is not in the `toolheads` list.
 
-The `scanner_topic_prefix` defaults to `"openprinttag"` and does not need to be set unless you have customized the firmware:
+The `scanner_topic_prefix` defaults to `"spoolsense"` and does not need to be set unless you have customized the firmware:
 
 ```yaml
 # Only set this if you changed the prefix in the scanner firmware
-scanner_topic_prefix: "openprinttag"
+scanner_topic_prefix: "spoolsense"
 ```
 
 ---
@@ -148,7 +148,7 @@ SpoolSense can write updated remaining weight back to OpenPrintTag tags when the
 
 Writes are published to the scanner firmware via MQTT:
 ```
-openprinttag/<device_id>/cmd/update_remaining/<uid>
+spoolsense/<device_id>/cmd/update_remaining/<uid>
 {"remaining_g": <spoolman_remaining>}
 ```
 
@@ -163,7 +163,7 @@ The scanner firmware handles UID validation, write queueing, and the remaining �
 - Check that `scanner_lane_map` contains the correct `device_id` for your scanner.
 - Watch MQTT topics to confirm the scanner is publishing:
   ```bash
-  mosquitto_sub -h <broker_ip> -u <user> -P <password> -t "openprinttag/#" -v
+  mosquitto_sub -h <broker_ip> -u <user> -P <password> -t "spoolsense/#" -v
   ```
 - Confirm the mapped lane name matches an entry in your `toolheads` list exactly.
 - Check the middleware log for startup warnings:
@@ -198,4 +198,4 @@ The `adapters/` directory is missing from the middleware installation. The scann
 |--------|--------|-------|
 | Plain UID (any NFC tag) | PN532 via ESPHome | Lookup by UID in Spoolman `extra.nfc_id` |
 | OpenTag3D | PN532 via ESPHome | Rich metadata read via OpenTag3D Web API |
-| OpenPrintTag (ISO 15693) | PN5180 via openprinttag_scanner | Rich metadata + writeback support |
+| OpenPrintTag (ISO 15693) | PN5180 via spoolsense_scanner | Rich metadata + writeback support |

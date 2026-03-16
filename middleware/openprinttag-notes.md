@@ -1,20 +1,20 @@
-# OpenPrintTag Scanner — Integration Notes & TODO
+# SpoolSense Scanner — Integration Notes & TODO
 
-Reference: [ryanch/openprinttag_scanner](https://github.com/ryanch/openprinttag_scanner)
+Reference: [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner)
 
 ---
 
 ## Hardware requirement
 
-The `openprinttag_scanner` firmware requires an **ESP32-WROOM-32 DevKit-style** board with a PN5180 NFC module attached. This is different from the rest of SpoolSense which uses an ESP32-S3-Zero + PN532.
+The `spoolsense_scanner` firmware requires an **ESP32-WROOM-32 DevKit-style** (or ESP32-S3) board with a PN5180 NFC module attached. This is different from the rest of SpoolSense which uses an ESP32-S3-Zero + PN532.
 
 The PN5180 is required because OpenPrintTag uses ISO 15693 (NFC-V) tags, which the PN532 cannot read.
 
 ---
 
-## Why openprinttag_scanner instead of ESPHome + PN5180
+## Why spoolsense_scanner instead of ESPHome + PN5180
 
-The ESPHome community components for the PN5180 only expose the tag UID — not the full CBOR payload that OpenPrintTag stores. Writing a custom ESPHome component to read full tag memory is a significant undertaking. The `openprinttag_scanner` firmware handles the full CBOR decode and publishes ready-to-consume JSON over MQTT, which is the same pattern SpoolSense already uses with ESPHome + PN532.
+The ESPHome community components for the PN5180 only expose the tag UID — not the full CBOR payload that OpenPrintTag stores. Writing a custom ESPHome component to read full tag memory is a significant undertaking. The `spoolsense_scanner` firmware handles the full CBOR decode and publishes ready-to-consume JSON over MQTT, which is the same pattern SpoolSense already uses with ESPHome + PN532. It also supports plain UID-only tags (NTAG215) for simple Spoolman UID lookup workflows.
 
 ---
 
@@ -23,7 +23,7 @@ The ESPHome community components for the PN5180 only expose the tag UID — not 
 The scanner's MQTT functionality is controlled by its "Home Assistant" integration toggle. Despite the naming, **actual Home Assistant is not required**. The config just asks for an MQTT broker host, port, and credentials — point it at the same Mosquitto broker SpoolSense already uses.
 
 When enabled, the scanner:
-- Publishes tag data to `openprinttag/<deviceId>/tag/state`
+- Publishes tag data to `spoolsense/<deviceId>/tag/state`
 - Also publishes Home Assistant discovery messages to `homeassistant/...` — SpoolSense ignores these
 
 Setup steps:
@@ -38,9 +38,9 @@ Setup steps:
 
 | Topic | Content |
 |---|---|
-| `openprinttag/<deviceId>/tag/state` | Full tag state JSON (see below) — **subscribe to this** |
-| `openprinttag/<deviceId>/tag/attributes` | Identical payload to tag/state |
-| `openprinttag/<deviceId>/availability` | `online` / `offline` |
+| `spoolsense/<deviceId>/tag/state` | Full tag state JSON (see below) — **subscribe to this** |
+| `spoolsense/<deviceId>/tag/attributes` | Identical payload to tag/state |
+| `spoolsense/<deviceId>/availability` | `online` / `offline` |
 
 SpoolSense subscribes to `tag/state`. Both topics publish the same payload.
 
@@ -118,7 +118,7 @@ Spoolman is **not required**. If no Spoolman entry is found, SpoolSense proceeds
 
 ## Internal event model
 
-Confirmed payload is normalized into `ScanEvent` (see `state/models.py`) by `scan_event_from_openprinttag_scanner()` in `openprinttag/scanner_parser.py`.
+Confirmed payload is normalized into `ScanEvent` (see `state/models.py`) by `scan_event_from_spoolsense_scanner()` in `openprinttag/scanner_parser.py`.
 
 SpoolSense is the final authority on activation. The scanner reports what tag is present — SpoolSense decides what to do with it.
 
@@ -139,7 +139,7 @@ The dispatcher returns a `ScanEvent` with the relevant flag set to `False` — i
 
 ### Known bugs (not yet tested against hardware)
 - `SpoolmanClient._create_spool_from_tag()` is a placeholder — hardcodes `spoolman_id = 99`. Needs real vendor/filament/spool creation logic (see TODO below).
-- None of the openprinttag_scanner path has been tested against a real scanner or live MQTT broker yet.
+- None of the spoolsense_scanner path has been tested against a real scanner or live MQTT broker yet.
 
 ---
 
@@ -188,17 +188,17 @@ python test_parsers.py
   ```
 
 - [ ] Verify `scanner_lane_map` subscription — configure a fake scanner mapping, start middleware, confirm it subscribes to correct topics
-- [ ] Publish a fake `openprinttag_scanner` payload to MQTT manually and verify dispatcher picks it up and routes correctly
+- [ ] Publish a fake `spoolsense_scanner` payload to MQTT manually and verify dispatcher picks it up and routes correctly
 
   ```bash
-  mosquitto_pub -h <broker_ip> -t "openprinttag/esp32-t0/tag/state" -m '{
+  mosquitto_pub -h <broker_ip> -t "spoolsense/esp32-t0/tag/state" -m '{
     "uid":"04A2B31C5F2280","present":true,"tag_data_valid":true,
     "manufacturer":"Prusament","material_type":"PLA","material_name":"Galaxy Black",
     "color":"#1A1A2E","initial_weight_g":1000.0,"remaining_g":742.0,
     "spoolman_id":-1,"blank":false}'
   ```
 
-**openprinttag_scanner end-to-end smoke test (needs MQTT broker + running middleware)**
+**spoolsense_scanner end-to-end smoke test (needs MQTT broker + running middleware)**
 
 Start middleware in one terminal, then use `mosquitto_pub` in a second terminal to inject payloads.
 
@@ -210,7 +210,7 @@ python spoolsense.py
 # Terminal 2 — publish test payloads (adjust broker IP and deviceId as needed)
 BROKER=<broker_ip>
 DEVICE=esp32-t0
-TOPIC="openprinttag/$DEVICE/tag/state"
+TOPIC="spoolsense/$DEVICE/tag/state"
 ```
 
 - [ ] Confirm `detect_and_parse` caller passes `topic=msg.topic`
@@ -226,7 +226,7 @@ TOPIC="openprinttag/$DEVICE/tag/state"
     "spoolman_id":-1,"blank":false}'
   ```
 
-- [ ] Check dispatcher detects `openprinttag_scanner` format
+- [ ] Check dispatcher detects `spoolsense_scanner` format (keys: `present` + `tag_data_valid`)
 - [ ] Check `ScanEvent` shows `uid`, `present`, `tag_data_valid`
 - [ ] Check `_handle_rich_tag` is reached
 - [ ] Publish payload with `uid` removed
@@ -253,7 +253,7 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 
 - [ ] Confirm graceful no-op path
 
-**Hardware tests (needs ESP32-WROOM-32 + PN5180 + openprinttag_scanner)**
+**Hardware tests (needs ESP32-WROOM-32 + PN5180 + spoolsense_scanner)**
 - [ ] Flash firmware — does it boot? Does the "Home Assistant" MQTT config accept a plain broker?
 - [ ] Scan an OpenPrintTag (ISO 15693 / ICODE SLIX2) tag — capture the raw MQTT payload and verify it matches the confirmed schema
 - [ ] Verify `present=False` payload — confirm the dispatcher returns a ScanEvent (not raise) and `_handle_rich_tag` skips activation cleanly
@@ -299,8 +299,8 @@ TOPIC="openprinttag/$DEVICE/tag/state"
 - [ ] MQTT reconnect — does paho-mqtt reconnect automatically on broker drop, or do we need `on_disconnect`?
 
 **Write-back (future)**
-- [ ] After a print completes, read remaining weight from Spoolman and write it back to the tag via openprinttag_scanner write commands
-- [ ] Requires understanding the scanner's command topic (`openprinttag/<deviceId>/cmd/response`) and what write operations it supports
+- [ ] After a print completes, read remaining weight from Spoolman and write it back to the tag via spoolsense_scanner write commands
+- [ ] Scanner command topic: `spoolsense/<deviceId>/cmd/<command>/<uid>` (response: `spoolsense/<deviceId>/cmd/response`)
 
 ### Cleanup
 - [ ] Remove `middleware_DO_NOT_USE/` once master middleware is confirmed stable

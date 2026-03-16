@@ -195,7 +195,7 @@ def test_dispatcher_warning_when_scanner_map_set_and_dispatcher_unavailable(
         if cfg.get("scanner_lane_map") and not spoolsense.DISPATCHER_AVAILABLE:
             spoolsense.logger.warning(
                 "scanner_lane_map is configured but the rich-tag dispatcher is not available "
-                "(adapters/ directory not found). openprinttag_scanner topics will be subscribed "
+                "(adapters/ directory not found). spoolsense_scanner topics will be subscribed "
                 "but payloads will not be parsed — scans will be silently ignored. "
                 "Ensure the adapters/ directory is present to enable scanner support."
             )

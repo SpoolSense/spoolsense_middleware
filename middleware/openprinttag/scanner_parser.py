@@ -6,13 +6,13 @@ logger = logging.getLogger(__name__)
 from state.models import ScanEvent
 
 
-def scan_event_from_openprinttag_scanner(payload: dict, target_id: str, topic: str = "") -> ScanEvent:
+def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str = "") -> ScanEvent:
     """
-    Converts a payload from ryanch/openprinttag_scanner into a normalized ScanEvent.
+    Converts a payload from sjordan0228/spoolsense_scanner into a normalized ScanEvent.
 
     The scanner publishes to two topics — both carry an identical payload:
-        openprinttag/<deviceId>/tag/state
-        openprinttag/<deviceId>/tag/attributes
+        spoolsense/<deviceId>/tag/state
+        spoolsense/<deviceId>/tag/attributes
 
     Color handling:
         color is published as a hex string (e.g. "#1A1A2E"). We strip the leading
@@ -21,7 +21,7 @@ def scan_event_from_openprinttag_scanner(payload: dict, target_id: str, topic: s
 
     spoolman_id handling:
         The scanner embeds the Spoolman spool ID if the tag was linked via the
-        openprinttag_scanner UI. -1 means unlinked. SpoolSense stores it as a hint
+        spoolsense_scanner UI. -1 means unlinked. SpoolSense stores it as a hint
         in scanner_spoolman_id but re-resolves via the NFC UID as the authority.
 
     Field mapping:
@@ -61,14 +61,14 @@ def scan_event_from_openprinttag_scanner(payload: dict, target_id: str, topic: s
             else ""
         )
         logger.warning(
-            "OpenPrintTag scanner payload indicates a valid tag but no UID was provided. "
+            "SpoolSense scanner payload indicates a valid tag but no UID was provided. "
             "Spoolman sync will be skipped. This likely indicates a firmware bug or "
             "malformed MQTT payload.%s",
             context,
         )
 
     return ScanEvent(
-        source="openprinttag_scanner",
+        source="spoolsense_scanner",
         target_id=target_id,
         scanned_at=datetime.now(timezone.utc).isoformat(),
         uid=uid,

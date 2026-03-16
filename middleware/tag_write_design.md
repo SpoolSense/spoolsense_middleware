@@ -1,8 +1,8 @@
-# Tag Writeback Design (SpoolSense + openprinttag_scanner)
+# Tag Writeback Design (SpoolSense + spoolsense_scanner)
 
 ## Overview
 
-`openprinttag_scanner` should be responsible for **physically writing NFC tags**.
+`spoolsense_scanner` should be responsible for **physically writing NFC tags**.
 
 SpoolSense should be responsible for **deciding what data should be written and when**.
 
@@ -11,7 +11,7 @@ This keeps responsibilities clean:
 | Component | Responsibility |
 |-----------|---------------|
 | SpoolSense | Business logic, Spoolman sync, policy decisions |
-| openprinttag_scanner | NFC tag presence detection, UID validation, CBOR/NDEF encoding, PN5180 writes |
+| spoolsense_scanner | NFC tag presence detection, UID validation, CBOR/NDEF encoding, PN5180 writes |
 
 SpoolSense communicates write requests to the scanner via **MQTT command topics** already implemented by the scanner firmware.
 
@@ -177,7 +177,7 @@ This module decides:
 
 ## tag_sync/scanner_writer.py
 
-MQTT interface to `openprinttag_scanner`.
+MQTT interface to the `spoolsense_scanner` firmware.
 
 Example functions:
 
@@ -193,10 +193,9 @@ Responsibilities:
 - listen for command responses
 - correlate responses to requests
 
-> **Note:** Response correlation is aspirational for Phase 1. The
-> `openprinttag_scanner` command response topic and schema are not yet
-> documented. Phase 1 may publish write commands fire-and-forget without
-> waiting for a response. Full response handling is a Phase 2 concern.
+> **Note:** Response correlation is aspirational for Phase 1. Phase 1 publishes
+> write commands fire-and-forget to `spoolsense/<deviceId>/cmd/<command>/<uid>`
+> without waiting for a response. Full response handling is a Phase 2 concern.
 
 ---
 
@@ -229,7 +228,7 @@ from typing import Any, Literal
 @dataclass
 class TagWritePlan:
     device_id: str                              # Scanner deviceId extracted from the MQTT scan topic
-                                                # (openprinttag/<deviceId>/...)
+                                                # (spoolsense/<deviceId>/...)
     uid: str                                    # NFC tag UID to target
     command: Literal["update_remaining", "write_tag"]  # Allowed write commands
     payload: dict[str, Any]                     # Command payload

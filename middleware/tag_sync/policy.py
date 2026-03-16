@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TagWritePlan:
     device_id: str                                      # Scanner deviceId extracted from the MQTT scan topic
-                                                        # (openprinttag/<deviceId>/...)
+                                                        # (spoolsense/<deviceId>/...)
     uid: str                                            # NFC tag UID to target
     command: Literal["update_remaining", "write_tag"]   # Allowed write commands
     payload: dict[str, Any]                             # Command payload
@@ -55,7 +55,7 @@ def build_write_plan(
     Decides whether a tag write is needed and returns a TagWritePlan, or None.
 
     Only produces a plan when:
-      - device_id is known (scanner topic was an openprinttag_scanner topic)
+      - device_id is known (scanner topic was a spoolsense_scanner topic)
       - scan.uid is present (needed to target the correct tag)
       - should_write_remaining() returns True
 

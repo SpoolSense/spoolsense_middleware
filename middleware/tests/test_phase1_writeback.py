@@ -26,7 +26,7 @@ from state.models import ScanEvent, SpoolInfo
 
 def make_scan(uid="04A2B31C5F2280", remaining_weight_g=None):
     return ScanEvent(
-        source="openprinttag_scanner",
+        source="spoolsense_scanner",
         target_id="T0",
         scanned_at="2026-03-14T00:00:00+00:00",
         uid=uid,

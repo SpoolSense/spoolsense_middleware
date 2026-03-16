@@ -15,10 +15,10 @@ WHAT THIS TESTS:
     3.  OpenTag3D — partial tag (only one detection key)
     4.  Unknown/blank payload — should raise ValueError
     5.  OpenPrintTag spec (CBOR direct) — should raise NotImplementedError
-    6.  openprinttag_scanner — valid tag (valid=True)
-    7.  openprinttag_scanner — valid=False (bad read)
-    8.  openprinttag_scanner — color_hex derived from color name
-    9.  openprinttag_scanner — remaining_m converted to remaining_length_mm
+    6.  spoolsense_scanner — valid tag (valid=True)
+    7.  spoolsense_scanner — valid=False (bad read)
+    8.  spoolsense_scanner — color_hex derived from color name
+    9.  spoolsense_scanner — remaining_m converted to remaining_length_mm
 
 HOW TO FEED YOUR OWN DATA:
     Add or replace payloads below. Pass the full payload dict and a target_id
@@ -117,13 +117,13 @@ run(
 )
 
 
-# ── Test 6: openprinttag_scanner — valid tag ──────────────────────────────────
-# Full confirmed payload from ryanch/openprinttag_scanner.
+# ── Test 6: spoolsense_scanner — valid tag ──────────────────────────────────
+# Full confirmed payload from sjordan0228/spoolsense_scanner.
 # tag_data_valid=True — should parse cleanly.
 # color_hex should be "1A1A2E" (# stripped, uppercased).
 # scanner_spoolman_id should be None (-1 stripped).
 run(
-    "Test 6: openprinttag_scanner (valid tag)",
+    "Test 6: spoolsense_scanner (valid tag)",
     payload={
         "uid": "04A2B31C5F2280",
         "present": True,
@@ -141,11 +141,11 @@ run(
 )
 
 
-# ── Test 7: openprinttag_scanner — tag_data_valid=False ───────────────────────
+# ── Test 7: spoolsense_scanner — tag_data_valid=False ───────────────────────
 # Tag detected but data could not be read cleanly.
 # Should return a ScanEvent with tag_data_valid=False, not raise.
 run(
-    "Test 7: openprinttag_scanner (tag_data_valid=False — bad read)",
+    "Test 7: spoolsense_scanner (tag_data_valid=False — bad read)",
     payload={
         "uid": "04A2B31C5F2280",
         "present": True,
@@ -163,10 +163,10 @@ run(
 )
 
 
-# ── Test 8: openprinttag_scanner — color hex strip ────────────────────────────
+# ── Test 8: spoolsense_scanner — color hex strip ────────────────────────────
 # color "#FF6600" should produce color_hex="FF6600" (# stripped, uppercased).
 run(
-    "Test 8: openprinttag_scanner (color hex # stripped)",
+    "Test 8: spoolsense_scanner (color hex # stripped)",
     payload={
         "uid": "04BBCCDD112233",
         "present": True,
@@ -184,11 +184,11 @@ run(
 )
 
 
-# ── Test 9: openprinttag_scanner — present=False ──────────────────────────────
+# ── Test 9: spoolsense_scanner — present=False ──────────────────────────────
 # No tag on reader. present=False, tag_data_valid=False, all data fields empty.
 # Should return ScanEvent with present=False, not raise.
 run(
-    "Test 9: openprinttag_scanner (present=False — no tag)",
+    "Test 9: spoolsense_scanner (present=False — no tag)",
     payload={
         "uid": "",
         "present": False,

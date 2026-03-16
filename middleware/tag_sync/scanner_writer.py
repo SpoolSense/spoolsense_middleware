@@ -1,14 +1,14 @@
 """
-tag_sync/scanner_writer.py — MQTT interface to openprinttag_scanner.
+tag_sync/scanner_writer.py — MQTT interface to spoolsense_scanner.
 
 Publishes write commands to the scanner firmware via MQTT.
 Phase 1: fire-and-forget. No response correlation or retries.
 
 Command topic format:
-    openprinttag/<deviceId>/cmd/<command>/<uid>
+    spoolsense/<deviceId>/cmd/<command>/<uid>
 
 Response topic (not consumed in Phase 1, for future observability):
-    openprinttag/<deviceId>/cmd/response
+    spoolsense/<deviceId>/cmd/response
 """
 
 import json
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def execute(plan: TagWritePlan, mqtt_client) -> None:
     """
-    Publishes a write command to the openprinttag_scanner firmware.
+    Publishes a write command to the spoolsense_scanner firmware.
 
     Phase 1 behavior:
       - Fire-and-forget: does not wait for or consume cmd/response
@@ -46,7 +46,7 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
         )
         return
 
-    topic = f"openprinttag/{plan.device_id}/cmd/{plan.command}/{plan.uid}"
+    topic = f"spoolsense/{plan.device_id}/cmd/{plan.command}/{plan.uid}"
     payload = json.dumps(plan.payload)
 
     try:
