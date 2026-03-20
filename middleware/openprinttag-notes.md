@@ -1,6 +1,6 @@
 # SpoolSense Scanner — Integration Notes & TODO
 
-Reference: [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner)
+Reference: [spoolsense/spoolsense_scanner](https://github.com/spoolsense/spoolsense_scanner)
 
 ---
 

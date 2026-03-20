@@ -63,7 +63,7 @@ Repeat this for each device, updating `lane_id` and the static IP for each one.
 1. Clone the repo (if you haven't already):
    ```bash
    cd ~
-   git clone https://github.com/sjordan0228/SpoolSense.git
+   git clone https://github.com/spoolsense/SpoolSense.git
    ```
 
 2. Copy the config template and fill in your values:

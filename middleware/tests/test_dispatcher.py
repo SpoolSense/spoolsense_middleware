@@ -118,7 +118,7 @@ run(
 
 
 # ── Test 6: spoolsense_scanner — valid tag ──────────────────────────────────
-# Full confirmed payload from sjordan0228/spoolsense_scanner.
+# Full confirmed payload from spoolsense/spoolsense_scanner.
 # tag_data_valid=True — should parse cleanly.
 # color_hex should be "1A1A2E" (# stripped, uppercased).
 # scanner_spoolman_id should be None (-1 stripped).

@@ -8,7 +8,7 @@ from state.models import ScanEvent
 
 def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str = "") -> ScanEvent:
     """
-    Converts a payload from sjordan0228/spoolsense_scanner into a normalized ScanEvent.
+    Converts a payload from spoolsense/spoolsense_scanner into a normalized ScanEvent.
 
     The scanner publishes to two topics — both carry an identical payload:
         spoolsense/<deviceId>/tag/state

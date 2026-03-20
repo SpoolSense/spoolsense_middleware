@@ -58,7 +58,7 @@ def detect_and_parse(payload: dict, target_id: str, topic: str = "") -> ScanEven
     elif fmt == "openprinttag":
         raise NotImplementedError(
             "OpenPrintTag spec format (CBOR direct) is not yet supported. "
-            "Use sjordan0228/spoolsense_scanner instead."
+            "Use spoolsense/spoolsense_scanner instead."
         )
 
     else:

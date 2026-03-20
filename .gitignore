@@ -2,6 +2,9 @@
 # config.example.yaml is the tracked template
 config.yaml
 
+# AI session context — local only
+AI_CONTEXT.md
+
 # ESPHome secrets
 esphome/secrets.yaml
 

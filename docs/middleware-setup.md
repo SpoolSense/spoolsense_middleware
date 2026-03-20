@@ -13,7 +13,7 @@
 1. Clone the repo:
 ```bash
 cd ~
-git clone https://github.com/sjordan0228/SpoolSense.git
+git clone https://github.com/spoolsense/SpoolSense.git
 ```
 
 2. Copy the config template and fill in your values:
@@ -153,7 +153,7 @@ Add the following to your `moonraker.conf`:
 [update_manager spoolsense]
 type: git_repo
 path: ~/SpoolSense
-origin: https://github.com/sjordan0228/SpoolSense.git
+origin: https://github.com/spoolsense/SpoolSense.git
 primary_branch: master
 managed_services: spoolsense
 ```

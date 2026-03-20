@@ -1,6 +1,6 @@
 # SpoolSense Scanner Support
 
-SpoolSense supports NFC scanners running the [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner) firmware alongside the standard PN532/ESPHome path.
+SpoolSense supports NFC scanners running the [spoolsense/spoolsense_scanner](https://github.com/spoolsense/spoolsense_scanner) firmware alongside the standard PN532/ESPHome path.
 
 This enables reading **OpenPrintTag** (ISO 15693 / ICODE SLIX2) tags, which carry rich filament metadata — brand, material, color, and remaining weight — directly on the tag. The PN532 cannot read these tags; a PN5180 is required.
 
@@ -12,7 +12,7 @@ This enables reading **OpenPrintTag** (ISO 15693 / ICODE SLIX2) tags, which carr
 OpenPrintTag NFC tag
        ↓
 ESP32-WROOM-32 + PN5180
-(sjordan0228/spoolsense_scanner firmware)
+(spoolsense/spoolsense_scanner firmware)
        ↓
 MQTT broker  (spoolsense/<device_id>/tag/state)
        ↓
@@ -43,7 +43,7 @@ The PN532 readers used for the standard SpoolSense path continue to work alongsi
 
 ## Firmware Setup
 
-1. Flash [sjordan0228/spoolsense_scanner](https://github.com/sjordan0228/spoolsense_scanner) onto an ESP32-WROOM-32 + PN5180.
+1. Flash [spoolsense/spoolsense_scanner](https://github.com/spoolsense/spoolsense_scanner) onto an ESP32-WROOM-32 + PN5180.
 2. Connect to the scanner's web UI after first boot.
 3. Enable the **Home Assistant** integration (despite the name, actual Home Assistant is not required — this just enables MQTT).
 4. Enter your MQTT broker IP, port, and credentials — use the same Mosquitto broker as the rest of SpoolSense.
