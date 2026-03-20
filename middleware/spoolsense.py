@@ -429,6 +429,51 @@ def _resolve_lane_from_topic(topic):
     return None
 
 
+def _send_afc_lane_data(toolhead, color_hex, material, remaining_g):
+    """
+    Send filament data directly to AFC lane via Klipper gcode commands.
+    Used when Spoolman is not available — provides AFC with color, material,
+    and weight from tag data so LEDs and lane info work without Spoolman.
+    Each command is independent — if one fails, the others still run.
+    """
+    moonraker = cfg.get("moonraker_url", "")
+    if not moonraker:
+        return
+
+    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
+        try:
+            requests.post(
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f'SET_COLOR LANE={toolhead} COLOR={color_hex.lstrip("#").upper()}'},
+                timeout=5,
+            ).raise_for_status()
+            logger.info(f"[afc] SET_COLOR {toolhead} = {color_hex}")
+        except Exception as e:
+            logger.error(f"[afc] SET_COLOR failed for {toolhead}: {e}")
+
+    if material and material != "Unknown":
+        try:
+            requests.post(
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={material}'},
+                timeout=5,
+            ).raise_for_status()
+            logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
+        except Exception as e:
+            logger.error(f"[afc] SET_MATERIAL failed for {toolhead}: {e}")
+
+    if remaining_g is not None and remaining_g > 0:
+        try:
+            requests.post(
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f'SET_WEIGHT LANE={toolhead} WEIGHT={remaining_g:.0f}'},
+                timeout=5,
+            ).raise_for_status()
+            logger.info(f"[afc] SET_WEIGHT {toolhead} = {remaining_g:.0f}g")
+        except Exception as e:
+            logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
+
+
 def _activate_from_scan(client, toolhead, scan, spool_info=None):
     """
     Activates a toolhead from scan data, with optional Spoolman enrichment.
@@ -479,8 +524,16 @@ def _activate_from_scan(client, toolhead, scan, spool_info=None):
     #   single/toolchanger — color and low_spool via MQTT nfc/toolhead/... topics
     if mode == "afc":
         publish_lock(toolhead, "lock")
-        # AFC owns LED color — driven by lane.color set via SET_SPOOL_ID
-        # (requires AFC-Klipper-Add-On with _get_lane_color() support)
+
+        spoolman_handled = spool_info and spool_info.spoolman_id is not None
+        if spoolman_handled:
+            # SET_SPOOL_ID was sent — AFC queries Spoolman for color/material/weight.
+            # No need for direct SET_* commands; Spoolman is source of truth.
+            logger.debug(f"AFC lane data via Spoolman (spool_id={spool_info.spoolman_id})")
+        else:
+            # No Spoolman — send tag data directly to AFC lane
+            _send_afc_lane_data(toolhead, color_hex, filament_label, remaining)
+
         if is_low:
             logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
     else:
