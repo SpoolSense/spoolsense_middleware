@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+__version__ = "1.4.1"
 """
 NFC Spoolman Middleware — Unified Edition with AFC Sync & LED Color Override
 =============================================================================

@@ -4,6 +4,13 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.4.1] - 2026-03-21
+
+### Fixed
+- **SET_MATERIAL gcode spaces** — material names with spaces (e.g. "Blood red PLA") broke Klipper's gcode parser; spaces are now replaced with underscores
+
+---
+
 ## [Unreleased] - 2026-03-13
 
 ### Added
