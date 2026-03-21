@@ -6,6 +6,9 @@ Ideas and known improvements for future development. Contributions welcome.
 
 ## Middleware
 
+**Tag writeback — remaining weight sync**
+When Spoolman has more accurate remaining weight data than what's on the NFC tag (e.g. after a print), the middleware should write the updated weight back to the tag. The code infrastructure exists (`tag_sync/policy.py` and `tag_sync/scanner_writer.py`) but has not been tested end-to-end. This would keep tags up-to-date so scanning a spool on a different printer shows accurate remaining filament.
+
 **Smarter Spoolman lookups**
 Spoolman's API supports filtering by extra fields — we should query directly by NFC ID instead of pulling the full spool list and searching in Python. Not a problem at small scale, but becomes inefficient as spool counts grow.
 

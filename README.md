@@ -16,7 +16,7 @@ SpoolSense Scanner → MQTT → Middleware → Klipper / Spoolman / Home Assista
 2. Tag data is published to MQTT as a JSON payload
 3. Middleware receives the scan, looks up or creates the spool in Spoolman
 4. Middleware activates the spool in Klipper (SET_ACTIVE_SPOOL or SET_SPOOL_ID)
-5. For AFC setups, lane LEDs update to show the filament color
+5. For AFC setups, lane LEDs update to show the filament color (requires [AFC-Klipper-Add-On PR #681](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/681))
 
 ## Supported Modes
 
@@ -30,7 +30,6 @@ SpoolSense Scanner → MQTT → Middleware → Klipper / Spoolman / Home Assista
 
 - Automatic spool lookup and registration in Spoolman
 - Klipper spool activation (SET_ACTIVE_SPOOL for toolchanger/single, SET_SPOOL_ID for AFC)
-- Tag writeback — updates remaining weight on OpenPrintTag tags when Spoolman data is newer
 - Low spool detection with LED breathing effect
 - AFC file watcher — monitors lane state changes and manages scan lock/clear
 - Spool ID persistence across reboots via Klipper save_variables
