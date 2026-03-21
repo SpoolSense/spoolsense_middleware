@@ -1,6 +1,6 @@
 # Klipper Setup Guide
 
-> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for AFC-specific Klipper setup. Note that the AFC LED color integration is not yet functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for AFC-specific Klipper setup. The AFC LED filament color feature is pending review in [AFC-Klipper-Add-On PR #681](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/681).
 
 ## Add Spoolman Macros
 
@@ -116,57 +116,27 @@ sudo systemctl restart klipper
 
 Both Fluidd and Mainsail support per-toolhead spool selection when `variable_spool_id` is present in the toolchange macros. Mainsail added this support in July 2024.
 
-If you prefer Fluidd alongside Mainsail:
+---
+
+## Tips
+
+### Installing Fluidd alongside Mainsail
+
+If you prefer Fluidd alongside Mainsail for its per-toolhead spool display:
 
 1. Download Fluidd:
 ```bash
-mkdir -p ~/fluidd
-cd ~/fluidd
+mkdir -p ~/fluidd && cd ~/fluidd
 wget -q -O fluidd.zip https://github.com/fluidd-core/fluidd/releases/latest/download/fluidd.zip
-unzip fluidd.zip
-rm fluidd.zip
+unzip fluidd.zip && rm fluidd.zip
 ```
 
-2. Create nginx config at `/etc/nginx/sites-available/fluidd`:
-```nginx
-server {
-    listen 81;
-    listen [::]:81;
-
-    root /home/YOUR_USERNAME/fluidd;
-    index index.html;
-
-    server_name _;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /websocket {
-        proxy_pass http://apiserver;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location ~ ^/(printer|api|access|machine|server)/ {
-        proxy_pass http://apiserver;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
+2. Create nginx config at `/etc/nginx/sites-available/fluidd` — set `root` to your fluidd path, listen on port 81, and proxy API/websocket requests to Moonraker.
 
 3. Enable and restart nginx:
 ```bash
 sudo ln -s /etc/nginx/sites-available/fluidd /etc/nginx/sites-enabled/fluidd
-sudo nginx -t
-sudo systemctl restart nginx
+sudo nginx -t && sudo systemctl restart nginx
 ```
 
-4. Access Fluidd at `http://YOUR_KLIPPER_IP:81`
-
-5. In Fluidd Settings, add your Spoolman URL under the Spoolman section.
+4. Access Fluidd at `http://YOUR_KLIPPER_IP:81` and add your Spoolman URL in Settings.
