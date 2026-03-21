@@ -1,39 +1,40 @@
 # Spoolman Setup Guide
 
-> **This guide applies to all setups** (toolchanger, single toolhead, and AFC). The `nfc_id` extra field and NFC tag registration process is the same regardless of mode.
+> **This guide applies to all setups** (toolchanger, single toolhead, and AFC).
 
 ## Add Extra Fields
 
-Spoolman needs two custom extra fields on spools to work with this system.
+Spoolman needs custom extra fields to work with SpoolSense. The [installer](https://github.com/SpoolSense/spoolsense-installer) can create these automatically, or you can add them manually.
 
 1. Go to your Spoolman UI (e.g. `http://YOUR_SPOOLMAN_IP:7912`)
 2. Go to **Settings → Extra Fields → Spool**
 3. Add the following fields:
 
-### Field 1: NFC ID
-- **Key:** `nfc_id`
-- **Name:** `nfc_id`
-- **Field Type:** Text
-- **Order:** 1
+### Spool Extra Fields
 
-### Field 2: Active Toolhead
-- **Key:** `active_toolhead`
-- **Name:** `active_toolhead`
-- **Field Type:** Text
-- **Order:** 2
+| Key | Name | Field Type | Required |
+|-----|------|-----------|----------|
+| `nfc_id` | nfc_id | Text | Yes — used to match NFC tags to spools |
+| `tag_format` | tag_format | Text | Optional — stores the tag format (OpenPrintTag, TigerTag, OpenTag3D) |
 
-## Register NFC Tags on Spools
+### Filament Extra Fields
 
-For each spool:
+Go to **Settings → Extra Fields → Filament** and add:
 
-1. Scan the NFC tag with one of your toolhead readers
-2. Check the middleware logs — you'll see:
-   ```
-   No spool found in Spoolman for UID: XX-XX-XX-XX
-   ```
-3. Note the UID
-4. Go to Spoolman → find or create your spool
-5. Edit the spool and enter the UID in the `nfc_id` field
+| Key | Name | Field Type | Required |
+|-----|------|-----------|----------|
+| `aspect` | aspect | Text | Optional — filament finish (Silk, Matte, etc.) |
+| `dry_temp` | dry_temp | Text | Optional — recommended drying temperature |
+| `dry_time_hours` | dry_time_hours | Text | Optional — recommended drying time in hours |
+
+## Automatic Spool Registration
+
+When a tagged spool is scanned, the scanner automatically creates or updates the spool entry in Spoolman — no manual data entry needed. The scanner:
+
+- Creates the vendor if it doesn't exist
+- Creates or matches the filament (by vendor + material + color)
+- Creates the spool with the NFC tag UID in the `nfc_id` field
+- If a tag is re-written with different filament, the old spool is archived and a new one created
 
 ## Low Spool Warning
 
@@ -47,7 +48,7 @@ To enable weight-based tracking:
 4. Go to Spoolman → **Spools**
 5. Edit the spool and set **Used Weight** to reflect how much has been used, or set **Remaining Weight** directly
 
-Once `spool_weight` is set on the filament profile, Spoolman will calculate and return `remaining_weight` in grams. The middleware compares this against `LOW_SPOOL_THRESHOLD` (default: 100g) and triggers the breathing LED effect if the spool is at or below that level.
+Once `spool_weight` is set on the filament profile, Spoolman will calculate and return `remaining_weight` in grams. The middleware compares this against `low_spool_threshold` (default: 100g) and triggers the breathing LED effect if the spool is at or below that level.
 
 > **Note:** If your spool is showing remaining length in meters instead of grams in Mainsail or Fluidd, this means `spool_weight` is not set on the filament profile. Set it and the display will switch to grams.
 

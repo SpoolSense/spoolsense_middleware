@@ -1,6 +1,8 @@
 # Middleware Setup Guide
 
-> **This guide covers toolchanger and single toolhead setups.** AFC/BoxTurtle users: the middleware is the same (`spoolsense.py`) but configured with `toolhead_mode: "ams"` — see [integrations/afc/docs/setup.md](../integrations/afc/docs/setup.md) for AFC-specific middleware setup. Note that the AFC integration is not yet fully functional — it depends on [AFC-Klipper-Add-On PR #671](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/671) being merged.
+> **The [SpoolSense Installer](https://github.com/SpoolSense/spoolsense-installer) handles this automatically.** This guide is for manual setup or reference.
+
+> AFC/BoxTurtle users: the middleware is the same (`spoolsense.py`) but configured with `toolhead_mode: "afc"` — see [afc-setup.md](afc-setup.md) for AFC-specific details. The AFC LED filament color feature is pending review in [AFC-Klipper-Add-On PR #681](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/681).
 
 ## Prerequisites
 
