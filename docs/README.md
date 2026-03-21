@@ -1,5 +1,7 @@
 # SpoolSense Documentation
 
+> **Note:** Some documentation in this section is outdated and being revised to reflect the current architecture. Setup guides may reference older hardware or configuration steps. When in doubt, refer to the [SpoolSense Installer](https://github.com/SpoolSense/spoolsense-installer) for the recommended setup path.
+
 ## Setup Guides
 
 | Guide | What it covers |
