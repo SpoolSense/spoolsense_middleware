@@ -453,9 +453,11 @@ def _send_afc_lane_data(toolhead, color_hex, material, remaining_g):
 
     if material and material != "Unknown":
         try:
+            # Replace spaces with underscores — Klipper gcode is space-delimited
+            safe_material = material.replace(" ", "_")
             requests.post(
                 f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={material}'},
+                json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={safe_material}'},
                 timeout=5,
             ).raise_for_status()
             logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
