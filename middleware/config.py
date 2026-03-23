@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH: str = os.path.expanduser("~/SpoolSense/config.yaml")
 
+VALID_ACTIONS: tuple[str, ...] = ("afc_stage", "afc_lane", "toolhead")
+
 DEFAULTS: dict = {
-    "toolhead_mode": "afc",
-    "toolheads": ["lane1", "lane2", "lane3", "lane4"],
     "mqtt": {
         "broker": None,
         "port": 1883,
@@ -23,20 +23,166 @@ DEFAULTS: dict = {
     "spoolman_url": None,
     "moonraker_url": None,
     "low_spool_threshold": 100,
-    "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
     "klipper_var_path": None,
-    # spoolsense_scanner settings (optional — only needed for PN5180 setups)
-    # Maps scanner MQTT device IDs to lane/toolhead names.
-    # Each ESP32 running spoolsense_scanner publishes to:
-    #   spoolsense/<device_id>/tag/state
-    # This mapping tells the middleware which lane each scanner belongs to.
     "scanner_topic_prefix": "spoolsense",
-    "scanner_lane_map": {},  # e.g. {"scanner-lane1": "lane1", "scanner-lane2": "lane2"}
-    # Tag writeback — disabled by default. Enable only after verifying dry-run logs.
+    "scanners": {},
     "tag_writeback_enabled": False,
 }
 
-VALID_MODES: tuple[str, ...] = ("single", "toolchanger", "afc")
+# Legacy keys that trigger auto-migration
+_LEGACY_KEYS: set[str] = {"toolhead_mode", "scanner_lane_map", "afc_var_path"}
+
+
+def _migrate_legacy_config(config: dict) -> dict:
+    """
+    Auto-converts legacy toolhead_mode + scanner_lane_map configs to
+    the new scanners format. Logs deprecation warnings.
+
+    Legacy format:
+        toolhead_mode: "afc"
+        scanner_lane_map: {"ecb338": "lane1", "abcd12": "lane2"}
+
+    New format:
+        scanners:
+          ecb338: {action: "afc_lane", lane: "lane1"}
+          abcd12: {action: "afc_lane", lane: "lane2"}
+    """
+    has_legacy = any(k in config for k in _LEGACY_KEYS)
+    has_scanners = bool(config.get("scanners"))
+
+    if has_scanners and has_legacy:
+        logger.warning(
+            "Both 'scanners' and legacy config (toolhead_mode/scanner_lane_map) found. "
+            "Using 'scanners' — legacy keys are ignored."
+        )
+        return config
+
+    if not has_legacy:
+        return config
+
+    mode = config.get("toolhead_mode", "afc")
+    scanner_map = config.get("scanner_lane_map", {})
+
+    if not scanner_map:
+        logger.warning(
+            "Legacy toolhead_mode found but scanner_lane_map is empty. "
+            "No scanners to migrate. Add a 'scanners' section to your config."
+        )
+        return config
+
+    logger.warning(
+        "Migrating legacy config: toolhead_mode=%s + scanner_lane_map → scanners format. "
+        "Update your config.yaml to use the new 'scanners' section. "
+        "See config.example.afc.yaml for examples.",
+        mode,
+    )
+
+    scanners: dict[str, dict] = {}
+    for device_id, target in scanner_map.items():
+        if mode == "afc":
+            scanners[device_id] = {"action": "afc_lane", "lane": target}
+        elif mode in ("toolchanger", "single"):
+            scanners[device_id] = {"action": "toolhead", "toolhead": target}
+
+    config["scanners"] = scanners
+    return config
+
+
+def _validate_scanners(config: dict) -> None:
+    """Validates the scanners config entries."""
+    scanners = config.get("scanners", {})
+    if not scanners:
+        logger.error(
+            "No scanners configured. Add a 'scanners' section to %s. "
+            "See config.example.afc.yaml for examples.",
+            CONFIG_PATH,
+        )
+        sys.exit(1)
+
+    # Build the set of valid targets from toolheads (if provided)
+    # or derive from scanner entries
+    toolheads_list = config.get("toolheads")
+
+    for device_id, scanner_cfg in scanners.items():
+        if not isinstance(scanner_cfg, dict):
+            logger.error("Scanner '%s' must be a mapping with 'action' key.", device_id)
+            sys.exit(1)
+
+        action = scanner_cfg.get("action")
+        if action not in VALID_ACTIONS:
+            logger.error(
+                "Scanner '%s' has invalid action '%s' — must be one of: %s",
+                device_id, action, ", ".join(VALID_ACTIONS),
+            )
+            sys.exit(1)
+
+        if action == "afc_lane":
+            lane = scanner_cfg.get("lane")
+            if not lane:
+                logger.error("Scanner '%s' with action 'afc_lane' requires a 'lane' field.", device_id)
+                sys.exit(1)
+            if toolheads_list and lane not in toolheads_list:
+                logger.error(
+                    "Scanner '%s' maps to lane '%s' which is not in toolheads list. "
+                    "Add it to toolheads or fix the scanner config.",
+                    device_id, lane,
+                )
+                sys.exit(1)
+
+        elif action == "toolhead":
+            toolhead = scanner_cfg.get("toolhead")
+            if not toolhead:
+                logger.error("Scanner '%s' with action 'toolhead' requires a 'toolhead' field.", device_id)
+                sys.exit(1)
+            if toolheads_list and toolhead not in toolheads_list:
+                logger.error(
+                    "Scanner '%s' maps to toolhead '%s' which is not in toolheads list. "
+                    "Add it to toolheads or fix the scanner config.",
+                    device_id, toolhead,
+                )
+                sys.exit(1)
+
+        # afc_stage requires no additional fields
+
+
+def _derive_toolheads(config: dict) -> list[str]:
+    """
+    Derives the toolheads list from scanner entries if not explicitly provided.
+
+    Returns a list of unique lane/toolhead targets from all scanner configs.
+    afc_stage scanners don't contribute (they have no target).
+    """
+    targets: list[str] = []
+    seen: set[str] = set()
+    for scanner_cfg in config.get("scanners", {}).values():
+        action = scanner_cfg.get("action")
+        target: str | None = None
+        if action == "afc_lane":
+            target = scanner_cfg.get("lane")
+        elif action == "toolhead":
+            target = scanner_cfg.get("toolhead")
+        if target and target not in seen:
+            targets.append(target)
+            seen.add(target)
+    return targets
+
+
+def has_afc_scanners(config: dict) -> bool:
+    """Returns True if any scanner has an AFC action (afc_stage or afc_lane)."""
+    return any(
+        s.get("action") in ("afc_stage", "afc_lane")
+        for s in config.get("scanners", {}).values()
+        if isinstance(s, dict)
+    )
+
+
+def has_toolhead_scanners(config: dict) -> bool:
+    """Returns True if any scanner has a toolhead action."""
+    return any(
+        s.get("action") == "toolhead"
+        for s in config.get("scanners", {}).values()
+        if isinstance(s, dict)
+    )
 
 
 def load_config() -> dict:
@@ -63,21 +209,18 @@ def load_config() -> dict:
     mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
     config = {**DEFAULTS, **user_config}
     config["mqtt"] = mqtt_cfg
-    config["afc_var_path"] = os.path.expanduser(config.get("afc_var_path", DEFAULTS["afc_var_path"]))
     if config.get("klipper_var_path"):
         config["klipper_var_path"] = os.path.expanduser(config["klipper_var_path"])
 
     # Validate required fields
-    missing = []
-    if not config["mqtt"]["broker"]: missing.append("mqtt.broker")
-    if not config["moonraker_url"]: missing.append("moonraker_url")
+    missing: list[str] = []
+    if not config["mqtt"]["broker"]:
+        missing.append("mqtt.broker")
+    if not config["moonraker_url"]:
+        missing.append("moonraker_url")
 
     if missing:
         logger.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
-        sys.exit(1)
-
-    if config["toolhead_mode"] not in VALID_MODES:
-        logger.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
         sys.exit(1)
 
     # spoolman_url is optional — missing means tag-only mode
@@ -91,28 +234,17 @@ def load_config() -> dict:
 
     config["moonraker_url"] = config["moonraker_url"].rstrip("/")
 
-    # Validate toolheads list
-    toolheads = config.get("toolheads")
-    if not toolheads:
-        logger.error("toolheads must be a non-empty list in %s", CONFIG_PATH)
-        sys.exit(1)
+    # Migrate legacy config if needed
+    config = _migrate_legacy_config(config)
 
-    # Validate scanner_lane_map entries against toolheads list
-    scanner_map = config.get("scanner_lane_map", {})
-    if scanner_map:
-        toolheads = set(config.get("toolheads", []))
-        bad_lanes = [
-            f"{device_id!r} → {lane!r}"
-            for device_id, lane in scanner_map.items()
-            if lane not in toolheads
-        ]
-        if bad_lanes:
-            logger.error(
-                "scanner_lane_map contains lanes not in toolheads list: %s. "
-                "Add them to toolheads or fix the mapping.",
-                ", ".join(bad_lanes),
-            )
-            sys.exit(1)
+    # Derive toolheads from scanner entries if not explicitly provided
+    if not config.get("toolheads"):
+        config["toolheads"] = _derive_toolheads(config)
+        if config["toolheads"]:
+            logger.info(f"Derived toolheads from scanners: {config['toolheads']}")
+
+    # Validate scanners
+    _validate_scanners(config)
 
     return config
 
