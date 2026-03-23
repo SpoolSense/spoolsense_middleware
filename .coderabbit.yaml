@@ -1,0 +1,29 @@
+language: "en-US"
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!middleware/tests/**"
+
+instructions: |
+  Python middleware bridging SpoolSense NFC scanner to Klipper/Spoolman/Home Assistant.
+  Runs as a systemd service on the printer host (Raspberry Pi).
+
+  ## Project-specific rules
+
+  - All functions must have type hints and return type annotations
+  - All tag formats normalize to ScanEvent via the dispatcher
+  - Spoolman integration is optional — code must work with Spoolman disabled
+  - Config templates live in middleware/config.example.*.yaml
+  - Tag format parsers live in their own module (e.g. middleware/openprinttag/, middleware/opentag3d/)
+  - MQTT topics follow the pattern spoolsense/<device_id>/...
+  - No hardcoded credentials or printer-specific settings
+  - PRs must target dev branch, not master
