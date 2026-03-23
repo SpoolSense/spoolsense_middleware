@@ -1,7 +1,13 @@
+"""
+var_watcher.py — Klipper save_variables file watcher.
+
+Monitors Klipper's save_variables.cfg for changes (e.g., user manually
+changes a spool in the UI) and syncs internal state. Used for single
+and toolchanger modes only — AFC mode uses afc_status.py instead.
+"""
 from __future__ import annotations
 
 import configparser
-import json
 import logging
 import os
 import time
@@ -10,7 +16,6 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import app_state
-from activation import publish_lock
 
 logger = logging.getLogger(__name__)
 
@@ -49,77 +54,34 @@ def sync_from_klipper_vars() -> None:
         logger.error(f"Klipper Sync failed: {e}")
 
 
-def sync_from_afc_file() -> None:
-    """
-    The core logic for keeping AFC in sync.
-    AFC writes its state to a JSON file (AFC.var.unit). We watch that file.
-    When AFC changes state (e.g., finishes loading, or user ejects a spool), this runs.
-    """
-    path = app_state.cfg["afc_var_path"]
-    if not os.path.exists(path):
-        logger.warning(f"AFC var file not found: {path}")
-        return
-
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-
-        for unit_name, unit_data in data.items():
-            if unit_name == "system":
-                continue
-
-            for lane_name, lane_data in unit_data.items():
-                spool_id = lane_data.get("spool_id")
-                status = lane_data.get("status")
-                is_locked = app_state.lane_locks.get(lane_name, False)
-
-                # 1. Save the AFC status so our LED logic knows if it's safe to override
-                app_state.lane_statuses[lane_name] = status
-
-                if spool_id:
-                    # 2. If AFC has a spool, lock our NFC reader so it ignores new scans
-                    if not is_locked:
-                        logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
-                        publish_lock(lane_name, "lock")
-                    app_state.active_spools[lane_name] = spool_id
-                else:
-                    # 3. If AFC says the lane is empty, unlock the NFC reader so it can scan again
-                    if is_locked:
-                        logger.info(f"AFC Sync: {lane_name} empty, clearing")
-                        publish_lock(lane_name, "clear")
-                    app_state.active_spools[lane_name] = None
-    except Exception as e:
-        logger.error(f"AFC Sync failed: {e}")
-
-
-class VarFileHandler(FileSystemEventHandler):
-    """Watches the file system. When Klipper or AFC modifies their save file, it triggers our sync functions."""
+class KlipperVarHandler(FileSystemEventHandler):
+    """Watches Klipper's save_variables file for changes."""
 
     def on_modified(self, event: object) -> None:
-        time.sleep(0.5)  # Give the OS a half-second to finish writing the file before we read it
-        if event.src_path == app_state.cfg["afc_var_path"]:
-            sync_from_afc_file()
-        elif event.src_path == app_state.cfg.get("klipper_var_path"):
+        time.sleep(0.5)
+        if event.src_path == app_state.cfg.get("klipper_var_path"):
             sync_from_klipper_vars()
 
 
-def start_watcher() -> Observer:
-    """Hooks the VarFileHandler into the operating system's file watcher."""
+def start_klipper_watcher() -> Observer | None:
+    """
+    Starts a file watcher for Klipper's save_variables file.
+
+    Returns the Observer, or None if no klipper_var_path is configured.
+    Only used for single/toolchanger modes — AFC mode uses afc_status.py.
+    """
+    klipper_path = app_state.cfg.get("klipper_var_path")
+    if not klipper_path:
+        return None
+
+    klipper_dir = os.path.dirname(klipper_path)
+    if not os.path.exists(klipper_dir):
+        logger.warning(f"Klipper var directory not found: {klipper_dir}")
+        return None
+
     observer = Observer()
-    handler = VarFileHandler()
-
-    if app_state.cfg["toolhead_mode"] == "afc":
-        afc_dir = os.path.dirname(app_state.cfg["afc_var_path"])
-        if os.path.exists(afc_dir):
-            observer.schedule(handler, afc_dir, recursive=False)
-            logger.info(f"Watching AFC var file in {afc_dir}")
-    else:
-        klipper_path = app_state.cfg.get("klipper_var_path")
-        if klipper_path:
-            klipper_dir = os.path.dirname(klipper_path)
-            if os.path.exists(klipper_dir):
-                observer.schedule(handler, klipper_dir, recursive=False)
-                logger.info(f"Watching Klipper var file in {klipper_dir}")
-
+    handler = KlipperVarHandler()
+    observer.schedule(handler, klipper_dir, recursive=False)
     observer.start()
+    logger.info(f"Watching Klipper var file in {klipper_dir}")
     return observer
