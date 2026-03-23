@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import requests
 
@@ -65,6 +66,19 @@ def activate_spool(spool_id: int, toolhead: str) -> bool:
         return False
 
 
+def _validate_color_hex(color_hex: str) -> str | None:
+    """Return the normalized 6-digit uppercase hex string, or None if invalid."""
+    stripped = color_hex.lstrip("#").upper()
+    if re.fullmatch(r"[A-Fa-f0-9]{6}", stripped):
+        return stripped
+    return None
+
+
+def _validate_material(material: str) -> bool:
+    """Return True only if material contains safe characters and is a reasonable length."""
+    return bool(material) and len(material) <= 50 and bool(re.fullmatch(r"[A-Za-z0-9_ -]{1,50}", material))
+
+
 def _send_afc_lane_data(
     toolhead: str,
     color_hex: str,
@@ -82,28 +96,35 @@ def _send_afc_lane_data(
         return
 
     if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_COLOR LANE={toolhead} COLOR={color_hex.lstrip("#").upper()}'},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] SET_COLOR {toolhead} = {color_hex}")
-        except Exception as e:
-            logger.error(f"[afc] SET_COLOR failed for {toolhead}: {e}")
+        safe_color = _validate_color_hex(color_hex)
+        if safe_color is None:
+            logger.warning(f"[afc] Skipping SET_COLOR for {toolhead} — invalid color_hex: {color_hex!r}")
+        else:
+            try:
+                requests.post(
+                    f"{moonraker}/printer/gcode/script",
+                    json={"script": f'SET_COLOR LANE={toolhead} COLOR={safe_color}'},
+                    timeout=5,
+                ).raise_for_status()
+                logger.info(f"[afc] SET_COLOR {toolhead} = {safe_color}")
+            except Exception as e:
+                logger.error(f"[afc] SET_COLOR failed for {toolhead}: {e}")
 
     if material and material != "Unknown":
-        try:
-            # Replace spaces with underscores — Klipper gcode is space-delimited
-            safe_material = material.replace(" ", "_")
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={safe_material}'},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
-        except Exception as e:
-            logger.error(f"[afc] SET_MATERIAL failed for {toolhead}: {e}")
+        if not _validate_material(material):
+            logger.warning(f"[afc] Skipping SET_MATERIAL for {toolhead} — invalid material: {material!r}")
+        else:
+            try:
+                # Replace spaces with underscores — Klipper gcode is space-delimited
+                safe_material = material.replace(" ", "_")
+                requests.post(
+                    f"{moonraker}/printer/gcode/script",
+                    json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={safe_material}'},
+                    timeout=5,
+                ).raise_for_status()
+                logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
+            except Exception as e:
+                logger.error(f"[afc] SET_MATERIAL failed for {toolhead}: {e}")
 
     if remaining_g is not None and remaining_g > 0:
         try:

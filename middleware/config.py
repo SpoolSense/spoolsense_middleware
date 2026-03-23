@@ -53,6 +53,13 @@ def load_config() -> dict:
         logger.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
         sys.exit(1)
 
+    if not isinstance(user_config, dict):
+        logger.error(
+            f"{CONFIG_PATH} must be a YAML mapping (key: value pairs), "
+            f"but got {type(user_config).__name__}. Check your config file."
+        )
+        sys.exit(1)
+
     mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
     config = {**DEFAULTS, **user_config}
     config["mqtt"] = mqtt_cfg
