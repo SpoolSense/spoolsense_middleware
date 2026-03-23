@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 import requests
 
 import app_state
+
+if TYPE_CHECKING:
+    from spoolman.client import SpoolInfo
+    from state.models import ScanEvent
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +143,7 @@ def _send_afc_lane_data(
             logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
 
 
-def _activate_from_scan(toolhead: str, scan: object, spool_info: object = None) -> None:
+def _activate_from_scan(toolhead: str, scan: ScanEvent, spool_info: SpoolInfo | None = None) -> None:
     """
     Activates a toolhead from scan data, with optional Spoolman enrichment.
 
