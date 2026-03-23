@@ -8,7 +8,7 @@ import paho.mqtt.client as mqtt
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
-from var_watcher import sync_from_afc_file, sync_from_klipper_vars, start_watcher
+from var_watcher import sync_from_klipper_vars, start_klipper_watcher
 from config import discover_klipper_var_path
 
 if app_state.DISPATCHER_AVAILABLE:
@@ -181,17 +181,16 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
         refresh_spool_cache()
 
         # Kick off the initial state sync based on our mode
-        if app_state.cfg["toolhead_mode"] == "afc":
-            sync_from_afc_file()
-        else:
+        # AFC mode: afc_status.py handles sync via Moonraker API (started in main())
+        if app_state.cfg["toolhead_mode"] != "afc":
             app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
             sync_from_klipper_vars()
 
-            # Restart the file watcher now that we know the path
+            # Restart the Klipper var watcher now that we know the path
             if app_state.watcher:
                 app_state.watcher.stop()
                 app_state.watcher.join(timeout=2)
-            app_state.watcher = start_watcher()
+            app_state.watcher = start_klipper_watcher()
     else:
         logger.error(f"MQTT connection failed: {rc}")
 

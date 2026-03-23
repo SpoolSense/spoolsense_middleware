@@ -21,21 +21,8 @@ Supports three toolhead modes (set toolhead_mode in config.yaml):
   afc         — Calls AFC's SET_SPOOL_ID to register the spool in the correct
                 lane. AFC auto-pulls color, material, and weight from Spoolman.
                 After a successful scan, locks the scanner on that lane.
-                Watches AFC.var.unit for lane changes (eject → clear scanner).
-                Overrides BoxTurtle LEDs with filament color via a Klipper macro.
+                Polls Moonraker's AFC status API for lane changes (eject → clear).
                 Designed for BoxTurtle, NightOwl, and other AFC-based units.
-
-LED Override Strategy (AFC mode):
-  AFC sets lane LEDs to hardcoded colors (green=ready, blue=loaded, etc.).
-  This middleware overrides led_ready and led_tool_loaded with the actual
-  filament color from Spoolman, so the BoxTurtle LEDs show what color
-  filament is in each lane. Critical states are never overridden:
-    - led_fault (red)     — never override, indicates a real problem
-    - led_loading (white) — never override, animation in progress
-    - led_not_ready (red) — never override, lane needs attention
-  The override is re-asserted on every AFC.var.unit file change, since AFC
-  resets LEDs to defaults on state transitions. Our gcode command runs after
-  AFC's internal LED set, so we reliably "win" the race.
 
 Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.yaml.
 """
@@ -51,7 +38,8 @@ import app_state
 from config import CONFIG_PATH, load_config
 from mqtt_handler import on_connect, on_message
 from activation import publish_lock
-from var_watcher import start_watcher
+from afc_status import AfcStatusSync
+from var_watcher import start_klipper_watcher
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -61,6 +49,8 @@ logger = logging.getLogger(__name__)
 def on_shutdown(signum: int, frame: object) -> None:
     """Runs when you hit Ctrl+C or stop the service. Cleans up locks and disconnects."""
     logger.info("Shutting down...")
+    if app_state.afc_status_sync:
+        app_state.afc_status_sync.stop()
     if app_state.mqtt_client:
         app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
         if app_state.cfg["toolhead_mode"] == "afc":
@@ -107,6 +97,7 @@ def main() -> None:
         print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
         print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
         print(f"  scanner_lane_map : {app_state.cfg.get('scanner_lane_map') or 'not set'}")
+        print(f"  afc_sync         : {'Moonraker API polling' if app_state.cfg['toolhead_mode'] == 'afc' else 'n/a (non-AFC mode)'}")
         print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
         print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
         sys.exit(0)
@@ -150,7 +141,7 @@ def main() -> None:
         logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
     if app_state.cfg["toolhead_mode"] == "afc":
         logger.info(f"Lanes: {', '.join(app_state.cfg['toolheads'])}")
-        logger.info(f"AFC var file: {app_state.cfg['afc_var_path']}")
+        logger.info("AFC sync: Moonraker API polling")
     else:
         logger.info(f"Toolheads: {', '.join(app_state.cfg['toolheads'])}")
         logger.info(f"Low spool threshold: {app_state.cfg['low_spool_threshold']}g")
@@ -158,12 +149,18 @@ def main() -> None:
     if scanner_map:
         logger.info(f"Scanner lane map: {json.dumps(scanner_map)}")
 
-    # Start the infinite loop
+    # Start AFC status polling or Klipper var watcher based on mode
+    if app_state.cfg["toolhead_mode"] == "afc":
+        app_state.afc_status_sync = AfcStatusSync()
+        app_state.afc_status_sync.start()
+    else:
+        app_state.watcher = start_klipper_watcher()
+
+    # Start the MQTT loop
     try:
         app_state.mqtt_client.connect(
             app_state.cfg["mqtt"]["broker"], app_state.cfg["mqtt"]["port"], 60
         )
-        app_state.watcher = start_watcher()
         app_state.mqtt_client.loop_forever()
     except Exception as e:
         logger.error(f"Fatal error: {e}")
