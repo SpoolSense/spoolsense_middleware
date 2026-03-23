@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import paho.mqtt.client as mqtt
 from watchdog.observers import Observer
 
@@ -30,7 +32,9 @@ spool_cache: dict = {}
 last_cache_refresh: float = 0.0
 CACHE_TTL: int = 3600
 
-# Lane state
+# Lane state — protected by state_lock for thread-safe access
+# from MQTT callback thread and AFC polling thread
+state_lock: threading.Lock = threading.Lock()
 lane_locks: dict = {}
 active_spools: dict = {}
 lane_statuses: dict = {}

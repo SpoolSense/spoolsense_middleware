@@ -70,21 +70,21 @@ def _sync_lane_state(data: dict) -> None:
 
             spool_id = lane_data.get("spool_id")
             status = lane_data.get("status")
-            is_locked = app_state.lane_locks.get(lane_name, False)
 
-            # Track AFC status for LED override logic
-            app_state.lane_statuses[lane_name] = status
+            with app_state.state_lock:
+                is_locked = app_state.lane_locks.get(lane_name, False)
+                app_state.lane_statuses[lane_name] = status
 
-            if spool_id:
-                if not is_locked:
-                    logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
-                    publish_lock(lane_name, "lock")
-                app_state.active_spools[lane_name] = spool_id
-            else:
-                if is_locked:
-                    logger.info(f"AFC Sync: {lane_name} empty, clearing")
-                    publish_lock(lane_name, "clear")
-                app_state.active_spools[lane_name] = None
+                if spool_id is not None:
+                    if not is_locked:
+                        logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
+                        publish_lock(lane_name, "lock")
+                    app_state.active_spools[lane_name] = spool_id
+                else:
+                    if is_locked:
+                        logger.info(f"AFC Sync: {lane_name} empty, clearing")
+                        publish_lock(lane_name, "clear")
+                    app_state.active_spools[lane_name] = None
 
 
 def _fetch_afc_status() -> dict | None:
