@@ -473,7 +473,7 @@ def _send_afc_lane_data(toolhead: str, color_hex: str, material: str, remaining_
             logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
 
 
-def _activate_from_scan(client: mqtt.Client, toolhead: str, scan, spool_info=None) -> None:
+def _activate_from_scan(toolhead: str, scan, spool_info=None) -> None:
     """
     Activates a toolhead from scan data, with optional Spoolman enrichment.
 
@@ -602,7 +602,7 @@ def _handle_rich_tag(client: mqtt.Client, toolhead: str, payload: dict, topic: s
                 )
 
         # --- Activation path (always runs) ---
-        _activate_from_scan(client, toolhead, scan, spool_info=spool_info)
+        _activate_from_scan(toolhead, scan, spool_info=spool_info)
 
         # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
         device_id = _extract_scanner_device_id(topic)
@@ -824,17 +824,17 @@ def main():
         print(f"  mqtt.broker      : {cfg['mqtt']['broker']}")
         print(f"  scanner_lane_map : {cfg.get('scanner_lane_map') or 'not set'}")
         print(f"  tag_writeback    : {'enabled' if cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
-        print(f"  dispatcher       : {'available' if DISPATCHER_AVAILABLE else 'unavailable (UID-only mode)'}")
+        print(f"  dispatcher       : {'available' if DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
         sys.exit(0)
 
-    # Warn if scanner_lane_map is configured but dispatcher is unavailable
-    if cfg.get("scanner_lane_map") and not DISPATCHER_AVAILABLE:
-        logger.warning(
-            "scanner_lane_map is configured but the rich-tag dispatcher is not available "
-            "(adapters/ directory not found). spoolsense_scanner topics will be subscribed "
-            "but payloads will not be parsed — scans will be silently ignored. "
-            "Ensure the adapters/ directory is present to enable scanner support."
+    # Fail early if dispatcher is unavailable — required for all scanner payloads
+    if not DISPATCHER_AVAILABLE:
+        logger.error(
+            "Rich-tag dispatcher is required but not available "
+            "(adapters/ directory not found). The middleware will not start. "
+            "Ensure the adapters/ directory is present."
         )
+        sys.exit(1)
 
     # SpoolmanClient for rich-data tag sync (OpenTag3D, spoolsense_scanner)
     if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
