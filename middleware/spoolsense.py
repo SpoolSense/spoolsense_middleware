@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-__version__ = "1.4.1"
+from __future__ import annotations
+
+__version__ = "1.4.2"
 """
 NFC Spoolman Middleware — Unified Edition with AFC Sync & LED Color Override
 =============================================================================
@@ -38,756 +40,39 @@ LED Override Strategy (AFC mode):
 Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.yaml.
 """
 
-import paho.mqtt.client as mqtt
-import requests
 import json
 import logging
 import signal
 import sys
-import os
-import yaml
-import time
-import configparser
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
-# Dispatcher for rich-data NFC tag formats (OpenTag3D, spoolsense_scanner)
-try:
-    from adapters.dispatcher import detect_and_parse, detect_format
-    from state.models import ScanEvent
-    from spoolman.client import SpoolmanClient
-    DISPATCHER_AVAILABLE = True
-except ImportError:
-    DISPATCHER_AVAILABLE = False
+import paho.mqtt.client as mqtt
 
-# Tag writeback — independent of dispatcher, always available
-from tag_sync.policy import build_write_plan
-from tag_sync import scanner_writer
+import app_state
+from config import CONFIG_PATH, load_config
+from mqtt_handler import on_connect, on_message
+from activation import publish_lock
+from var_watcher import start_watcher
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# Configuration & Global State
-# ============================================================
 
-CONFIG_PATH = os.path.expanduser("~/SpoolSense/config.yaml")
-
-DEFAULTS = {
-    "toolhead_mode": "afc",
-    "toolheads": ["lane1", "lane2", "lane3", "lane4"],
-    "mqtt": {
-        "broker": None,
-        "port": 1883,
-        "username": None,
-        "password": None,
-    },
-    "spoolman_url": None,
-    "moonraker_url": None,
-    "low_spool_threshold": 100,
-    "afc_var_path": "~/printer_data/config/AFC/AFC.var.unit",
-    "klipper_var_path": None,
-    # spoolsense_scanner settings (optional — only needed for PN5180 setups)
-    # Maps scanner MQTT device IDs to lane/toolhead names.
-    # Each ESP32 running spoolsense_scanner publishes to:
-    #   spoolsense/<device_id>/tag/state
-    # This mapping tells the middleware which lane each scanner belongs to.
-    "scanner_topic_prefix": "spoolsense",
-    "scanner_lane_map": {},  # e.g. {"scanner-lane1": "lane1", "scanner-lane2": "lane2"}
-    # Tag writeback — disabled by default. Enable only after verifying dry-run logs.
-    "tag_writeback_enabled": False,
-}
-
-VALID_MODES = ("single", "toolchanger", "afc")
-
-# --- Global State Caches ---
-# We cache data in memory so we don't hammer the Spoolman or Moonraker APIs every second.
-spool_cache = {}
-last_cache_refresh = 0
-CACHE_TTL = 3600       # How long (in seconds) before we force a full Spoolman re-sync
-
-lane_locks = {}        # Tracks if a lane's NFC reader is locked (prevents duplicate scans)
-active_spools = {}     # Maps toolhead/lane to the currently loaded spool_id
-lane_statuses = {}     # Caches the last known AFC status (e.g., 'led_ready')
-mqtt_client = None
-watcher = None
-
-# SpoolmanClient is initialized after cfg is loaded (see below load_config() call)
-
-
-def load_config():
-    """Load and validate configuration from ~/SpoolSense/config.yaml."""
-    if not os.path.exists(CONFIG_PATH):
-        logger.error(f"Config file not found: {CONFIG_PATH}")
-        logger.error("Copy the template:  cp config.example.yaml ~/SpoolSense/config.yaml")
-        sys.exit(1)
-
-    try:
-        with open(CONFIG_PATH, "r") as f:
-            user_config = yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
-        sys.exit(1)
-
-    mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
-    config = {**DEFAULTS, **user_config}
-    config["mqtt"] = mqtt_cfg
-    config["afc_var_path"] = os.path.expanduser(config.get("afc_var_path", DEFAULTS["afc_var_path"]))
-    if config.get("klipper_var_path"):
-        config["klipper_var_path"] = os.path.expanduser(config["klipper_var_path"])
-
-    # Validate required fields
-    missing = []
-    if not config["mqtt"]["broker"]: missing.append("mqtt.broker")
-    if not config["moonraker_url"]: missing.append("moonraker_url")
-
-    if missing:
-        logger.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
-        sys.exit(1)
-
-    if config["toolhead_mode"] not in VALID_MODES:
-        logger.error(f"Invalid toolhead_mode: '{config['toolhead_mode']}' — must be one of: {', '.join(VALID_MODES)}")
-        sys.exit(1)
-
-    # spoolman_url is optional — missing means tag-only mode
-    if config["spoolman_url"]:
-        config["spoolman_url"] = config["spoolman_url"].rstrip("/")
-    else:
-        logger.warning(
-            "spoolman_url not set — running in tag-only mode. "
-            "Spoolman lookup, spool creation, and weight sync are disabled."
-        )
-
-    config["moonraker_url"] = config["moonraker_url"].rstrip("/")
-
-    # Validate toolheads list
-    toolheads = config.get("toolheads")
-    if not toolheads:
-        logger.error("toolheads must be a non-empty list in %s", CONFIG_PATH)
-        sys.exit(1)
-
-    # Validate scanner_lane_map entries against toolheads list
-    scanner_map = config.get("scanner_lane_map", {})
-    if scanner_map:
-        toolheads = set(config.get("toolheads", []))
-        bad_lanes = [
-            f"{device_id!r} → {lane!r}"
-            for device_id, lane in scanner_map.items()
-            if lane not in toolheads
-        ]
-        if bad_lanes:
-            logger.error(
-                "scanner_lane_map contains lanes not in toolheads list: %s. "
-                "Add them to toolheads or fix the mapping.",
-                ", ".join(bad_lanes),
-            )
-            sys.exit(1)
-
-    return config
-
-
-# cfg and spoolman_client are initialized in main() at runtime.
-# Defaults are set here so helper functions are safe to import and test
-# without main() having been called.
-cfg = DEFAULTS.copy()
-spoolman_client = None
-
-# ============================================================
-# Discovery Helpers
-# ============================================================
-
-def discover_klipper_var_path():
-    """
-    Queries Moonraker to find exactly where Klipper is saving its variables.
-    This is better than hardcoding it, because users put save_variables.cfg in different places.
-    """
-    if cfg.get("klipper_var_path"):
-        return cfg["klipper_var_path"]
-
-    try:
-        logger.info("Discovering Klipper save_variables path...")
-        response = requests.get(f"{cfg['moonraker_url']}/printer/configfile/settings", timeout=5)
-        response.raise_for_status()
-        settings = response.json().get("result", {}).get("settings", {})
-        filename = settings.get("save_variables", {}).get("filename")
-
-        if not filename:
-            logger.warning("No [save_variables] in Klipper config. Klipper sync disabled.")
-            return None
-
-        if not filename.startswith("/"):
-            filename = os.path.join(os.path.expanduser("~/printer_data/config"), filename)
-
-        logger.info(f"Discovered Klipper variables file: {filename}")
-        return filename
-    except Exception as e:
-        logger.error(f"Failed to discover Klipper variables path: {e}")
-        return None
-
-# ============================================================
-# Spoolman Helpers
-# ============================================================
-
-def get_spool_by_id(spool_id):
-    """Fetch a single spool directly from Spoolman."""
-    if not cfg["spoolman_url"]:
-        return None
-    try:
-        response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool/{spool_id}", timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        logger.error(f"Failed to fetch spool {spool_id}: {e}")
-        return None
-
-def refresh_spool_cache():
-    """
-    Pulls ALL spools from Spoolman and builds a local dictionary mapping NFC UIDs to Spoolman data.
-    We do this so when a tag is scanned, the lookup is instant instead of waiting on a network request.
-    """
-    global spool_cache, last_cache_refresh
-    if not cfg["spoolman_url"]:
-        return False
-    try:
-        logger.info("Refreshing Spoolman cache...")
-        response = requests.get(f"{cfg['spoolman_url']}/api/v1/spool", timeout=5)
-        response.raise_for_status()
-        spools = response.json()
-
-        new_cache = {}
-        for spool in spools:
-            # Look for the nfc_id inside Spoolman's "extra" fields
-            extra = spool.get("extra", {})
-            nfc_id = extra.get("nfc_id", "").strip('"').lower()
-            if nfc_id:
-                new_cache[nfc_id] = spool
-
-        spool_cache = new_cache
-        last_cache_refresh = time.time()
-        logger.info(f"Cache updated: {len(spool_cache)} spools indexed.")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to refresh Spoolman cache: {e}")
-        return False
-
-def find_spool_by_nfc(uid):
-    """
-    Looks up a scanned NFC UID in our local memory cache.
-    If it's not there, or the cache is too old, it forces a refresh.
-    """
-    uid_lower = uid.lower()
-    if time.time() - last_cache_refresh > CACHE_TTL:
-        refresh_spool_cache()
-        
-    if uid_lower in spool_cache:
-        return spool_cache[uid_lower]
-        
-    # If we didn't find it, maybe it was just added to Spoolman 5 seconds ago. Force a refresh.
-    logger.info(f"UID {uid} not in cache, performing forced refresh...")
-    if refresh_spool_cache():
-        return spool_cache.get(uid_lower)
-    return None
-
-# ============================================================
-# Klipper/Moonraker Actions
-# ============================================================
-
-def activate_spool(spool_id: int, toolhead: str) -> bool:
-    """Routes the spool activation to the correct Klipper logic based on your setup."""
-    mode = cfg["toolhead_mode"]
-    try:
-        if mode == "single":
-            # Tell Moonraker/Spoolman directly
-            requests.post(f"{cfg['moonraker_url']}/server/spoolman/spool_id",
-                          json={"spool_id": spool_id}, timeout=5).raise_for_status()
-            # Save it to Klipper variables so macros survive a restart
-            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
-                          json={"script": f"SAVE_VARIABLE VARIABLE=t0_spool_id VALUE={spool_id}"},
-                          timeout=5).raise_for_status()
-            logger.info(f"[single] Activated spool {spool_id}")
-
-        elif mode == "toolchanger":
-            macro = f"T{toolhead[-1]}"
-            # Update the specific tool's macro variable
-            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
-                          json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"},
-                          timeout=5).raise_for_status()
-            # Save to disk
-            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
-                          json={"script": f"SAVE_VARIABLE VARIABLE=t{toolhead[-1]}_spool_id VALUE={spool_id}"},
-                          timeout=5).raise_for_status()
-            logger.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
-
-        elif mode == "afc":
-            # Let AFC handle the actual assignment logic
-            requests.post(f"{cfg['moonraker_url']}/printer/gcode/script",
-                          json={"script": f"SET_SPOOL_ID LANE={toolhead} SPOOL_ID={spool_id}"},
-                          timeout=5).raise_for_status()
-            logger.info(f"[afc] Set spool {spool_id} on {toolhead} via AFC")
-
-        return True
-    except Exception as e:
-        logger.error(f"Activation failed: {e}")
-        return False
-
-# ============================================================
-# MQTT Logic
-# ============================================================
-
-def publish_lock(lane: str, state: str) -> None:
-    """Updates internal lock state for a lane. Lock prevents duplicate scans; clear re-enables scanning."""
-    lane_locks[lane] = (state == "lock")
-    logger.info(f"Lock: {lane} -> {state}")
-
-def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> None:
-    """Fires when we successfully connect to the MQTT broker."""
-    if rc == 0:
-        logger.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
-
-        if not DISPATCHER_AVAILABLE:
-            logger.error(
-                "Rich-tag dispatcher is required but not available "
-                "(adapters/ directory not found). Cannot process scanner payloads."
-            )
-            client.disconnect()
-            return
-
-        scanner_map = cfg.get("scanner_lane_map", {})
-        if not scanner_map:
-            logger.error(
-                "scanner_lane_map is empty — no scanner topics to subscribe to. "
-                "Add scanner device IDs to scanner_lane_map in config.yaml."
-            )
-            client.disconnect()
-            return
-
-        # Subscribe to spoolsense_scanner topics
-        prefix = cfg.get("scanner_topic_prefix", "spoolsense")
-        for device_id in scanner_map:
-            topic = f"{prefix}/{device_id}/tag/state"
-            client.subscribe(topic)
-        logger.info(f"Subscribed to {len(scanner_map)} spoolsense_scanner(s): {', '.join(scanner_map.keys())}")
-
-        client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
-        refresh_spool_cache()
-
-        # Kick off the initial state sync based on our mode
-        if cfg["toolhead_mode"] == "afc":
-            sync_from_afc_file()
-        else:
-            cfg["klipper_var_path"] = discover_klipper_var_path()
-            sync_from_klipper_vars()
-            
-            # Restart the file watcher now that we know the path
-            global watcher
-            if watcher:
-                watcher.stop()
-                watcher.join(timeout=2)
-            watcher = start_watcher()
-    else:
-        logger.error(f"MQTT connection failed: {rc}")
-
-def _extract_scanner_device_id(topic: str) -> str | None:
-    """
-    Extracts the scanner deviceId from a spoolsense_scanner MQTT topic.
-
-    Expected topic shape: spoolsense/<deviceId>/tag/state
-    Returns the deviceId string, or None if the topic does not match.
-
-    This is the single authoritative place that parses scanner topics.
-    Both _resolve_lane_from_topic() and _handle_rich_tag() use this.
-    """
-    prefix = cfg.get("scanner_topic_prefix", "spoolsense")
-    parts = topic.split("/") if topic else []
-    if len(parts) == 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
-        return parts[1]
-    return None
-
-
-def _resolve_lane_from_topic(topic: str) -> str | None:
-    """
-    Determines the lane/toolhead name from an MQTT topic.
-
-    For spoolsense_scanner topics like 'spoolsense/scanner-lane1/tag/state',
-    looks up the device ID in scanner_lane_map to find the lane name.
-    Returns None if the topic can't be mapped to a lane.
-    """
-    scanner_map = cfg.get("scanner_lane_map", {})
-
-    device_id = _extract_scanner_device_id(topic)
-    if device_id is not None:
-        lane = scanner_map.get(device_id)
-        if lane:
-            return lane
-        logger.warning(f"Scanner device '{device_id}' not found in scanner_lane_map")
-        return None
-
-    return None
-
-
-def _send_afc_lane_data(toolhead: str, color_hex: str, material: str, remaining_g: float | None) -> None:
-    """
-    Send filament data directly to AFC lane via Klipper gcode commands.
-    Used when Spoolman is not available — provides AFC with color, material,
-    and weight from tag data so LEDs and lane info work without Spoolman.
-    Each command is independent — if one fails, the others still run.
-    """
-    moonraker = cfg.get("moonraker_url", "")
-    if not moonraker:
-        return
-
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_COLOR LANE={toolhead} COLOR={color_hex.lstrip("#").upper()}'},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] SET_COLOR {toolhead} = {color_hex}")
-        except Exception as e:
-            logger.error(f"[afc] SET_COLOR failed for {toolhead}: {e}")
-
-    if material and material != "Unknown":
-        try:
-            # Replace spaces with underscores — Klipper gcode is space-delimited
-            safe_material = material.replace(" ", "_")
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_MATERIAL LANE={toolhead} MATERIAL={safe_material}'},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
-        except Exception as e:
-            logger.error(f"[afc] SET_MATERIAL failed for {toolhead}: {e}")
-
-    if remaining_g is not None and remaining_g > 0:
-        try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f'SET_WEIGHT LANE={toolhead} WEIGHT={remaining_g:.0f}'},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] SET_WEIGHT {toolhead} = {remaining_g:.0f}g")
-        except Exception as e:
-            logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
-
-
-def _activate_from_scan(toolhead: str, scan, spool_info=None) -> None:
-    """
-    Activates a toolhead from scan data, with optional Spoolman enrichment.
-
-    Two separate concerns:
-      1. Spool-ID activation (Spoolman-backed only)
-           — only runs when spool_info.spoolman_id is available
-           — updates active_spools, calls activate_spool()
-      2. Tag-state publication (always runs from scan data)
-           — color, low-spool state, LED updates
-           — driven by scan object; spool_info enriches color if available
-
-    This means activation always succeeds even when Spoolman is unreachable.
-    """
-    mode = cfg["toolhead_mode"]
-
-    # --- Spool-ID activation (Spoolman-backed, optional) ---
-    spoolman_activated: bool = False
-    if spool_info and spool_info.spoolman_id is not None:
-        spoolman_activated = activate_spool(spool_info.spoolman_id, toolhead)
-        if spoolman_activated:
-            active_spools[toolhead] = spool_info.spoolman_id
-        else:
-            logger.error(f"Activation failed for spool {spool_info.spoolman_id} on {toolhead}")
-    else:
-        logger.warning(
-            "No Spoolman spool_id available for toolhead %s; "
-            "skipping spool-id activation and continuing with tag-only updates",
-            toolhead,
-        )
-
-    # --- Resolve color and low-spool state from best available source ---
-    # Spoolman color wins when available — a human set it deliberately.
-    # Fall back to scan color, then white.
-    # Use explicit is not None checks — 0.0 remaining and "" color are valid values
-    # and must not fall through to the scan fallback via truthiness short-circuit.
-    if spool_info and spool_info.color_hex is not None:
-        color_hex = spool_info.color_hex
-    else:
-        color_hex = scan.color_hex or "FFFFFF"
-
-    if spool_info and spool_info.remaining_weight_g is not None:
-        remaining = spool_info.remaining_weight_g
-    else:
-        remaining = scan.remaining_weight_g
-    is_low = remaining is not None and remaining <= cfg["low_spool_threshold"]
-    filament_label = scan.material_name or scan.material_type or "Unknown"
-
-    # --- Mode-specific tag-state output ---
-    if mode == "afc":
-        if spoolman_activated:
-            # SET_SPOOL_ID was sent — AFC queries Spoolman for color/material/weight.
-            logger.debug(f"AFC lane data via Spoolman (spool_id={spool_info.spoolman_id})")
-            publish_lock(toolhead, "lock")
-        elif spool_info and spool_info.spoolman_id is not None:
-            # Activation failed — don't lock, allow rescan
-            logger.warning(f"Not locking {toolhead} — activation failed, rescan allowed")
-        else:
-            # No Spoolman — send tag data directly to AFC lane
-            _send_afc_lane_data(toolhead, color_hex, filament_label, remaining)
-            publish_lock(toolhead, "lock")
-
-    if is_low:
-        logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
-
-
-def _handle_rich_tag(client: mqtt.Client, toolhead: str, payload: dict, topic: str) -> None:
-    """
-    Handles a rich-data NFC tag (OpenTag3D or spoolsense_scanner).
-
-    Routes through the dispatcher to parse the tag data into a ScanEvent.
-    Spoolman sync is best-effort — if it fails, activation continues from
-    tag data alone. The two concerns are kept separate:
-
-      - Activation path  : always runs from scan data
-      - Enrichment path  : Spoolman sync, weight update, spool ID tracking
-    """
-    try:
-        scan = detect_and_parse(payload, toolhead, topic)
-        logger.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
-
-        # Guard: scanner may report present=False or invalid data
-        if not scan.present:
-            logger.debug(f"Scanner reported no tag present on {toolhead}")
-            return
-
-        # UID-only ISO14443A tag (e.g. NTAG215) — no embedded filament data,
-        # but we can still look the spool up in Spoolman via extra.nfc_id.
-        if not scan.tag_data_valid and not scan.blank and scan.uid:
-            uid = scan.uid.lower()
-            logger.info(f"UID-only tag on {toolhead}: {uid} — looking up in Spoolman")
-            spool = find_spool_by_nfc(uid)
-            if spool:
-                spool_id = spool["id"]
-                filament = spool.get("filament", {})
-                name = filament.get("name", "Unknown")
-                color_hex = (filament.get("color_hex") or "FFFFFF").lstrip("#").upper()
-                logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
-                if activate_spool(spool_id, toolhead):
-                    active_spools[toolhead] = spool_id
-                    if cfg["toolhead_mode"] == "afc":
-                        publish_lock(toolhead, "lock")
-                    remaining = spool.get("remaining_weight")
-                    if remaining is not None and remaining <= cfg["low_spool_threshold"]:
-                        logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {toolhead}")
-            else:
-                logger.warning(f"No spool found in Spoolman for UID: {uid}")
-            return
-
-        if not scan.tag_data_valid:
-            logger.warning(f"Scanner reported invalid tag data on {toolhead}")
-            return
-
-        # --- Enrichment path (best-effort) ---
-        spool_info = None
-        if spoolman_client is None:
-            logger.debug("Spoolman not configured — skipping enrichment, running tag-only activation")
-        else:
-            try:
-                spool_info = spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
-            except Exception:
-                logger.exception(
-                    "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
-                    "uid=%s topic=%s",
-                    scan.uid,
-                    topic,
-                )
-
-        # --- Activation path (always runs) ---
-        _activate_from_scan(toolhead, scan, spool_info=spool_info)
-
-        # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
-        device_id = _extract_scanner_device_id(topic)
-
-        write_plan = build_write_plan(scan, spool_info, device_id=device_id)
-        if write_plan:
-            if cfg.get("tag_writeback_enabled"):
-                scanner_writer.execute(write_plan, client)
-            else:
-                logger.info(
-                    "[tag writeback disabled] would write: tag=%s device=%s payload=%s reason=%s",
-                    write_plan.uid,
-                    write_plan.device_id,
-                    write_plan.payload,
-                    write_plan.reason,
-                )
-
-    except NotImplementedError as e:
-        logger.warning(f"Tag format not yet supported: {e}")
-    except ValueError as e:
-        logger.debug(f"Dispatcher rejected payload: {e}")
-    except Exception as e:
-        logger.error(f"Rich tag processing error: {e}")
-
-
-def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
-    """
-    Fires every time an MQTT message arrives on a subscribed topic.
-
-    All payloads are rich data from spoolsense_scanner — JSON with tag data.
-    Routes through the dispatcher to parse, syncs with Spoolman, then activates.
-    The lane is resolved from the MQTT topic via scanner_lane_map.
-    """
-    try:
-        payload: dict = json.loads(msg.payload.decode())
-        topic: str = msg.topic
-
-        # Resolve which lane/toolhead this message belongs to
-        toolhead = _resolve_lane_from_topic(topic)
-        if not toolhead:
-            logger.warning(f"Could not resolve lane from topic: {topic}")
-            return
-
-        # If the lane is locked (already has a spool), ignore the scan
-        if lane_locks.get(toolhead):
-            logger.info(f"Ignoring scan on {toolhead} (locked)")
-            return
-
-        if not DISPATCHER_AVAILABLE:
-            logger.warning("Rich-tag dispatcher not available — cannot process scanner payload")
-            return
-
-        _handle_rich_tag(client, toolhead, payload, topic)
-
-    except Exception as e:
-        logger.error(f"Message error: {e}")
-
-# ============================================================
-# Variable File Watchers (AFC & Klipper)
-# ============================================================
-
-def sync_from_klipper_vars() -> None:
-    """
-    Reads Klipper's save_variables.cfg.
-    If a user manually changes a spool in the UI, this catches it and updates internal state.
-    """
-    path: str | None = cfg.get("klipper_var_path")
-    if not path or not os.path.exists(path):
-        return
-
-    try:
-        cp = configparser.ConfigParser()
-        cp.read(path)
-        if 'variables' not in cp:
-            return
-
-        for t in cfg["toolheads"]:
-            var_name = f"t{t[-1]}_spool_id"
-            spool_id_str = cp['variables'].get(var_name)
-
-            if spool_id_str:
-                try:
-                    spool_id = int(spool_id_str)
-                    if active_spools.get(t) != spool_id:
-                        logger.info(f"Klipper Sync: {t} -> spool {spool_id}")
-                        active_spools[t] = spool_id
-                except ValueError:
-                    pass
-            elif active_spools.get(t):
-                logger.info(f"Klipper Sync: {t} cleared")
-                active_spools[t] = None
-    except Exception as e:
-        logger.error(f"Klipper Sync failed: {e}")
-
-def sync_from_afc_file():
-    """
-    The core logic for keeping AFC in sync.
-    AFC writes its state to a JSON file (AFC.var.unit). We watch that file.
-    When AFC changes state (e.g., finishes loading, or user ejects a spool), this runs.
-    """
-    path = cfg["afc_var_path"]
-    if not os.path.exists(path):
-        logger.warning(f"AFC var file not found: {path}")
-        return
-
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-
-        for unit_name, unit_data in data.items():
-            if unit_name == "system":
-                continue
-            
-            for lane_name, lane_data in unit_data.items():
-                spool_id = lane_data.get("spool_id")
-                status = lane_data.get("status")
-                is_locked = lane_locks.get(lane_name, False)
-
-                # 1. Save the AFC status so our LED logic knows if it's safe to override
-                lane_statuses[lane_name] = status
-
-                if spool_id:
-                    # 2. If AFC has a spool, lock our NFC reader so it ignores new scans
-                    if not is_locked:
-                        logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
-                        publish_lock(lane_name, "lock")
-                    active_spools[lane_name] = spool_id
-                else:
-                    # 3. If AFC says the lane is empty, unlock the NFC reader so it can scan again
-                    if is_locked:
-                        logger.info(f"AFC Sync: {lane_name} empty, clearing")
-                        publish_lock(lane_name, "clear")
-                    active_spools[lane_name] = None
-    except Exception as e:
-        logger.error(f"AFC Sync failed: {e}")
-
-class VarFileHandler(FileSystemEventHandler):
-    """Watches the file system. When Klipper or AFC modifies their save file, it triggers our sync functions."""
-    def on_modified(self, event):
-        time.sleep(0.5) # Give the OS a half-second to finish writing the file before we read it
-        if event.src_path == cfg["afc_var_path"]:
-            sync_from_afc_file()
-        elif event.src_path == cfg.get("klipper_var_path"):
-            sync_from_klipper_vars()
-
-def start_watcher():
-    """Hooks the VarFileHandler into the operating system's file watcher."""
-    observer = Observer()
-    handler = VarFileHandler()
-
-    if cfg["toolhead_mode"] == "afc":
-        afc_dir = os.path.dirname(cfg["afc_var_path"])
-        if os.path.exists(afc_dir):
-            observer.schedule(handler, afc_dir, recursive=False)
-            logger.info(f"Watching AFC var file in {afc_dir}")
-    else:
-        klipper_path = cfg.get("klipper_var_path")
-        if klipper_path:
-            klipper_dir = os.path.dirname(klipper_path)
-            if os.path.exists(klipper_dir):
-                observer.schedule(handler, klipper_dir, recursive=False)
-                logger.info(f"Watching Klipper var file in {klipper_dir}")
-
-    observer.start()
-    return observer
-
-# ============================================================
-# Main Execution Loop
-# ============================================================
-
-def on_shutdown(signum: int, frame) -> None:
+def on_shutdown(signum: int, frame: object) -> None:
     """Runs when you hit Ctrl+C or stop the service. Cleans up locks and disconnects."""
     logger.info("Shutting down...")
-    if mqtt_client:
-        mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
-        if cfg["toolhead_mode"] == "afc":
-            for lane in cfg["toolheads"]:
+    if app_state.mqtt_client:
+        app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
+        if app_state.cfg["toolhead_mode"] == "afc":
+            for lane in app_state.cfg["toolheads"]:
                 publish_lock(lane, "clear")
-        mqtt_client.disconnect()
-    if watcher:
-        watcher.stop()
+        app_state.mqtt_client.disconnect()
+    if app_state.watcher:
+        app_state.watcher.stop()
     sys.exit(0)
 
 
-def main():
+def main() -> None:
     """
     Application entry point. All runtime startup logic lives here.
 
@@ -803,7 +88,6 @@ def main():
     dataclass and passing dependencies explicitly into handlers.
     """
     import argparse
-    global cfg, spoolman_client, watcher, mqtt_client
 
     parser = argparse.ArgumentParser(description="SpoolSense NFC Middleware")
     parser.add_argument(
@@ -813,22 +97,22 @@ def main():
     )
     args = parser.parse_args()
 
-    cfg = load_config()
+    app_state.cfg = load_config()
 
     if args.check_config:
         print(f"Config OK: {CONFIG_PATH}")
-        print(f"  toolhead_mode    : {cfg['toolhead_mode']}")
-        print(f"  toolheads        : {', '.join(cfg['toolheads'])}")
-        print(f"  spoolman_url     : {cfg['spoolman_url'] or 'not set (tag-only mode)'}")
-        print(f"  moonraker_url    : {cfg['moonraker_url']}")
-        print(f"  mqtt.broker      : {cfg['mqtt']['broker']}")
-        print(f"  scanner_lane_map : {cfg.get('scanner_lane_map') or 'not set'}")
-        print(f"  tag_writeback    : {'enabled' if cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
-        print(f"  dispatcher       : {'available' if DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
+        print(f"  toolhead_mode    : {app_state.cfg['toolhead_mode']}")
+        print(f"  toolheads        : {', '.join(app_state.cfg['toolheads'])}")
+        print(f"  spoolman_url     : {app_state.cfg['spoolman_url'] or 'not set (tag-only mode)'}")
+        print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
+        print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
+        print(f"  scanner_lane_map : {app_state.cfg.get('scanner_lane_map') or 'not set'}")
+        print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
+        print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
         sys.exit(0)
 
     # Fail early if dispatcher is unavailable — required for all scanner payloads
-    if not DISPATCHER_AVAILABLE:
+    if not app_state.DISPATCHER_AVAILABLE:
         logger.error(
             "Rich-tag dispatcher is required but not available "
             "(adapters/ directory not found). The middleware will not start. "
@@ -837,44 +121,50 @@ def main():
         sys.exit(1)
 
     # SpoolmanClient for rich-data tag sync (OpenTag3D, spoolsense_scanner)
-    if DISPATCHER_AVAILABLE and cfg["spoolman_url"]:
-        spoolman_client = SpoolmanClient(cfg["spoolman_url"])
+    if app_state.DISPATCHER_AVAILABLE and app_state.cfg["spoolman_url"]:
+        from spoolman.client import SpoolmanClient
+        app_state.spoolman_client = SpoolmanClient(app_state.cfg["spoolman_url"])
 
     # Hook up shutdown signals
     signal.signal(signal.SIGTERM, on_shutdown)
     signal.signal(signal.SIGINT, on_shutdown)
 
     # Setup MQTT
-    mqtt_client = mqtt.Client()
-    if cfg["mqtt"].get("username"):
-        mqtt_client.username_pw_set(cfg["mqtt"]["username"], cfg["mqtt"].get("password"))
+    app_state.mqtt_client = mqtt.Client()
+    if app_state.cfg["mqtt"].get("username"):
+        app_state.mqtt_client.username_pw_set(
+            app_state.cfg["mqtt"]["username"],
+            app_state.cfg["mqtt"].get("password"),
+        )
 
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
-    mqtt_client.will_set("spoolsense/middleware/online", "false", qos=1, retain=True)
+    app_state.mqtt_client.on_connect = on_connect
+    app_state.mqtt_client.on_message = on_message
+    app_state.mqtt_client.will_set("spoolsense/middleware/online", "false", qos=1, retain=True)
 
-    logger.info(f"Starting SpoolSense Middleware (Mode: {cfg['toolhead_mode']})")
-    logger.info(f"Spoolman: {cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
-    logger.info(f"Moonraker: {cfg['moonraker_url']}")
-    if DISPATCHER_AVAILABLE:
+    logger.info(f"Starting SpoolSense Middleware (Mode: {app_state.cfg['toolhead_mode']})")
+    logger.info(f"Spoolman: {app_state.cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
+    logger.info(f"Moonraker: {app_state.cfg['moonraker_url']}")
+    if app_state.DISPATCHER_AVAILABLE:
         logger.info("Rich tag dispatcher: enabled (OpenTag3D, spoolsense_scanner)")
     else:
         logger.info("Rich tag dispatcher: disabled (adapters/ not found, UID-only mode)")
-    if cfg["toolhead_mode"] == "afc":
-        logger.info(f"Lanes: {', '.join(cfg['toolheads'])}")
-        logger.info(f"AFC var file: {cfg['afc_var_path']}")
+    if app_state.cfg["toolhead_mode"] == "afc":
+        logger.info(f"Lanes: {', '.join(app_state.cfg['toolheads'])}")
+        logger.info(f"AFC var file: {app_state.cfg['afc_var_path']}")
     else:
-        logger.info(f"Toolheads: {', '.join(cfg['toolheads'])}")
-        logger.info(f"Low spool threshold: {cfg['low_spool_threshold']}g")
-    scanner_map = cfg.get("scanner_lane_map", {})
+        logger.info(f"Toolheads: {', '.join(app_state.cfg['toolheads'])}")
+        logger.info(f"Low spool threshold: {app_state.cfg['low_spool_threshold']}g")
+    scanner_map = app_state.cfg.get("scanner_lane_map", {})
     if scanner_map:
         logger.info(f"Scanner lane map: {json.dumps(scanner_map)}")
 
     # Start the infinite loop
     try:
-        mqtt_client.connect(cfg["mqtt"]["broker"], cfg["mqtt"]["port"], 60)
-        watcher = start_watcher()
-        mqtt_client.loop_forever()
+        app_state.mqtt_client.connect(
+            app_state.cfg["mqtt"]["broker"], app_state.cfg["mqtt"]["port"], 60
+        )
+        app_state.watcher = start_watcher()
+        app_state.mqtt_client.loop_forever()
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
