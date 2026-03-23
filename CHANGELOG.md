@@ -4,6 +4,24 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.4.2] - 2026-03-23
+
+### Changed
+- **MQTT topics migrated to `spoolsense/` namespace** — all MQTT topics have moved from `nfc/toolhead/...` to `spoolsense/...`. If you have Home Assistant automations, Node-RED flows, or anything else subscribing to the old `nfc/toolhead/` topics, update them to use `spoolsense/` instead. The old topics are no longer published.
+- **Middleware refactored into modules** — `spoolsense.py` has been split into focused modules (`config.py`, `activation.py`, `mqtt_handler.py`, `spoolman_cache.py`, `var_watcher.py`, `app_state.py`). No behavior changes — the entry point is still `spoolsense.py`. If you update via `git pull`, no action needed.
+
+### Removed
+- **PN532/ESPHome dead code** — removed all legacy PN532 topic parsing, subscriptions, and publishes. The SpoolSense scanner firmware replaced the PN532 setup and these code paths were no longer reachable.
+
+### Fixed
+- **Gcode input validation** — color and material values from NFC tags are now validated before being sent as gcode commands, preventing potential command injection via crafted tag data
+- **Config file validation** — malformed YAML config files (e.g. a list instead of key-value pairs) now fail with a clear error instead of crashing
+
+### Added
+- Type hints on all middleware function signatures
+
+---
+
 ## [1.4.1] - 2026-03-21
 
 ### Fixed
