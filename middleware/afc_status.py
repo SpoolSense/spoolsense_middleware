@@ -71,20 +71,28 @@ def _sync_lane_state(data: dict) -> None:
             spool_id = lane_data.get("spool_id")
             status = lane_data.get("status")
 
+            # Compute state change under lock, then publish outside it
+            action: str | None = None
             with app_state.state_lock:
                 is_locked = app_state.lane_locks.get(lane_name, False)
                 app_state.lane_statuses[lane_name] = status
 
                 if spool_id is not None:
                     if not is_locked:
-                        logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
-                        publish_lock(lane_name, "lock")
+                        action = "lock"
                     app_state.active_spools[lane_name] = spool_id
                 else:
                     if is_locked:
-                        logger.info(f"AFC Sync: {lane_name} empty, clearing")
-                        publish_lock(lane_name, "clear")
+                        action = "clear"
                     app_state.active_spools[lane_name] = None
+
+            # Publish lock/clear outside the lock to avoid holding it during I/O
+            if action == "lock":
+                logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
+                publish_lock(lane_name, "lock")
+            elif action == "clear":
+                logger.info(f"AFC Sync: {lane_name} empty, clearing")
+                publish_lock(lane_name, "clear")
 
 
 def _fetch_afc_status() -> dict | None:
@@ -121,10 +129,10 @@ def _fetch_afc_status() -> dict | None:
         if e.response is not None and e.response.status_code == 404:
             logger.warning("AFC status: endpoint not found — AFC may not be installed")
         else:
-            logger.error(f"AFC status: HTTP error: {e}")
+            logger.exception("AFC status: HTTP error")
         return None
-    except Exception as e:
-        logger.error(f"AFC status: unexpected error: {e}")
+    except Exception:
+        logger.exception("AFC status: unexpected error")
         return None
 
 
@@ -190,8 +198,8 @@ class AfcStatusSync:
             if data is not None:
                 try:
                     _sync_lane_state(data)
-                except Exception as e:
-                    logger.error(f"AFC status: sync error: {e}")
+                except Exception:
+                    logger.exception("AFC status: sync error")
                 consecutive_failures = 0
                 wait = POLL_INTERVAL
             else:
