@@ -344,18 +344,32 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     """Fires when we successfully connect to the MQTT broker."""
     if rc == 0:
         logger.info(f"Connected to MQTT broker (Mode: {cfg['toolhead_mode']})")
-        client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
+
+        if not DISPATCHER_AVAILABLE:
+            logger.error(
+                "Rich-tag dispatcher is required but not available "
+                "(adapters/ directory not found). Cannot process scanner payloads."
+            )
+            client.disconnect()
+            return
+
+        scanner_map = cfg.get("scanner_lane_map", {})
+        if not scanner_map:
+            logger.error(
+                "scanner_lane_map is empty — no scanner topics to subscribe to. "
+                "Add scanner device IDs to scanner_lane_map in config.yaml."
+            )
+            client.disconnect()
+            return
 
         # Subscribe to spoolsense_scanner topics
-        # Each scanner publishes to: spoolsense/<device_id>/tag/state
-        scanner_map = cfg.get("scanner_lane_map", {})
-        if scanner_map:
-            prefix = cfg.get("scanner_topic_prefix", "spoolsense")
-            for device_id in scanner_map:
-                topic = f"{prefix}/{device_id}/tag/state"
-                client.subscribe(topic)
-            logger.info(f"Subscribed to {len(scanner_map)} spoolsense_scanner(s): {', '.join(scanner_map.keys())}")
-            
+        prefix = cfg.get("scanner_topic_prefix", "spoolsense")
+        for device_id in scanner_map:
+            topic = f"{prefix}/{device_id}/tag/state"
+            client.subscribe(topic)
+        logger.info(f"Subscribed to {len(scanner_map)} spoolsense_scanner(s): {', '.join(scanner_map.keys())}")
+
+        client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
         refresh_spool_cache()
 
         # Kick off the initial state sync based on our mode
@@ -476,9 +490,13 @@ def _activate_from_scan(client: mqtt.Client, toolhead: str, scan, spool_info=Non
     mode = cfg["toolhead_mode"]
 
     # --- Spool-ID activation (Spoolman-backed, optional) ---
+    spoolman_activated: bool = False
     if spool_info and spool_info.spoolman_id is not None:
-        if activate_spool(spool_info.spoolman_id, toolhead):
+        spoolman_activated = activate_spool(spool_info.spoolman_id, toolhead)
+        if spoolman_activated:
             active_spools[toolhead] = spool_info.spoolman_id
+        else:
+            logger.error(f"Activation failed for spool {spool_info.spoolman_id} on {toolhead}")
     else:
         logger.warning(
             "No Spoolman spool_id available for toolhead %s; "
@@ -505,15 +523,17 @@ def _activate_from_scan(client: mqtt.Client, toolhead: str, scan, spool_info=Non
 
     # --- Mode-specific tag-state output ---
     if mode == "afc":
-        publish_lock(toolhead, "lock")
-
-        spoolman_handled = spool_info and spool_info.spoolman_id is not None
-        if spoolman_handled:
+        if spoolman_activated:
             # SET_SPOOL_ID was sent — AFC queries Spoolman for color/material/weight.
             logger.debug(f"AFC lane data via Spoolman (spool_id={spool_info.spoolman_id})")
+            publish_lock(toolhead, "lock")
+        elif spool_info and spool_info.spoolman_id is not None:
+            # Activation failed — don't lock, allow rescan
+            logger.warning(f"Not locking {toolhead} — activation failed, rescan allowed")
         else:
             # No Spoolman — send tag data directly to AFC lane
             _send_afc_lane_data(toolhead, color_hex, filament_label, remaining)
+            publish_lock(toolhead, "lock")
 
     if is_low:
         logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")

@@ -54,7 +54,7 @@ Starting NFC Spoolman Middleware (TOOLHEAD_MODE: toolchanger)
 Config loaded from /home/youruser/SpoolSense/config.yaml
 Toolheads: T0, T1, T2, T3
 Connected to MQTT broker (TOOLHEAD_MODE: toolchanger)
-Subscribed to nfc/toolhead/ for T0, T1, T2, T3
+Subscribed to 4 spoolsense_scanner(s): scanner-t0, scanner-t1, scanner-t2, scanner-t3
 ```
 
 If the config file is missing or has placeholder values, the middleware will exit with a clear error telling you which fields need to be set.
@@ -172,15 +172,15 @@ Your `~/SpoolSense/config.yaml` is never overwritten — it lives outside the re
 
 ## Optional: Home Assistant Monitoring
 
-The middleware publishes its online/offline status to `nfc/middleware/online` (retained, QoS 1). If the middleware crashes or loses its MQTT connection, the broker automatically publishes `false` via Last Will and Testament. A clean shutdown also publishes `false` before disconnecting.
+The middleware publishes its online/offline status to `spoolsense/middleware/online` (retained, QoS 1). If the middleware crashes or loses its MQTT connection, the broker automatically publishes `false` via Last Will and Testament. A clean shutdown also publishes `false` before disconnecting.
 
 If you use Home Assistant, you can optionally surface this as a dashboard sensor. Add the following to your `configuration.yaml`:
 
 ```yaml
 mqtt:
   binary_sensor:
-    - name: "NFC Middleware"
-      state_topic: "nfc/middleware/online"
+    - name: "SpoolSense Middleware"
+      state_topic: "spoolsense/middleware/online"
       payload_on: "true"
       payload_off: "false"
       device_class: connectivity
