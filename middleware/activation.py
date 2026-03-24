@@ -155,6 +155,43 @@ def _send_afc_lane_data(
             logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
 
 
+def _send_toolhead_tag_data(
+    target: str,
+    color_hex: str,
+    material: str,
+    remaining_g: float | None,
+) -> None:
+    """
+    Send tag data directly to a toolhead via Klipper gcode variables.
+    Used when Spoolman is not available — provides the toolhead macro with
+    color from tag data so slicer integration still works without Spoolman.
+    """
+    moonraker = app_state.cfg.get("moonraker_url", "")
+    if not moonraker or not target:
+        return
+
+    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
+        safe_color = _validate_color_hex(color_hex)
+        if safe_color is None:
+            logger.warning(f"[toolhead] Skipping SET_GCODE_VARIABLE for {target} — invalid color: {color_hex!r}")
+        else:
+            try:
+                requests.post(
+                    f"{moonraker}/printer/gcode/script",
+                    json={"script": f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{safe_color}'\""},
+                    timeout=5,
+                ).raise_for_status()
+                logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{safe_color}'")
+            except Exception as e:
+                logger.error(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}: {e}")
+
+    if material and material != "Unknown":
+        logger.info(f"[toolhead] {target} material: {material}")
+
+    if remaining_g is not None and remaining_g > 0:
+        logger.info(f"[toolhead] {target} weight: {remaining_g:.0f}g")
+
+
 def _activate_from_scan(
     scanner_cfg: dict,
     scan: ScanEvent,
@@ -233,8 +270,14 @@ def _activate_from_scan(
             publish_lock(target, "lock")
 
     elif action == "toolhead":
-        # Toolhead activation — lock is implicit (scanner is per-toolhead)
         if spoolman_activated:
+            publish_lock(target, "lock")
+        elif spool_info and spool_info.spoolman_id is not None:
+            # Activation failed — don't lock, allow rescan
+            logger.warning(f"Not locking {target} — activation failed, rescan allowed")
+        else:
+            # No Spoolman — send tag data directly to toolhead via gcode variables
+            _send_toolhead_tag_data(target, color_hex, filament_label, remaining)
             publish_lock(target, "lock")
 
     elif action == "toolhead_stage":
