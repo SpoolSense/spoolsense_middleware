@@ -4,6 +4,32 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.0] - 2026-03-24
+
+### Added
+- **Per-scanner action routing** — replace `toolhead_mode` with a unified `scanners` config. Each scanner declares an action that determines how scans are routed:
+  - `afc_stage` — shared scanner for AFC. Scan a spool, load into any lane. AFC assigns automatically. One scanner for all lanes.
+  - `afc_lane` — dedicated scanner per AFC lane. Locks scanner until lane is cleared. (Existing behavior, new config format.)
+  - `toolhead` — dedicated scanner per toolhead. Sets active spool and saves to Klipper variables.
+  - `toolhead_stage` — shared scanner for toolchanger printers using klipper-toolchanger. Scan a spool, pick up any tool, spool auto-assigns. One scanner for all toolheads.
+- **AFC status sync via Moonraker API** — replaced the `watchdog` file watcher on `AFC.var.unit` with HTTP polling of Moonraker's `/printer/afc/status` endpoint. No filesystem dependency — middleware can run on a different machine. Removes the `time.sleep(0.5)` race condition workaround.
+- **Toolchanger status sync** — polls Moonraker's `toolchanger` object to detect tool pickups for `toolhead_stage` scanners.
+- **Pending spool cache** — for shared scanner modes (`afc_stage` and `toolhead_stage`), tag data is cached on scan and automatically pushed when a lane loads or a tool is picked up. Works with and without Spoolman.
+- **Legacy config migration** — old `toolhead_mode` + `scanner_lane_map` configs are auto-converted to the new `scanners` format with a deprecation warning.
+- **Thread-safe state access** — added `threading.Lock` for lane state mutations across MQTT and polling threads.
+
+### Changed
+- **`toolhead_mode` removed** — behavior is now derived from scanner actions. Mixed configs (e.g. `afc_stage` + `toolhead` scanners on the same printer) are supported.
+- **`scanner_lane_map` removed** — replaced by `scanners` config section.
+- **`afc_var_path` removed** — no longer needed with Moonraker API sync.
+- **`watchdog` dependency removed for AFC mode** — Klipper vars file watcher still used for single/toolchanger setups (see #18 for planned API replacement).
+- **Config examples updated** — all three example configs (`afc`, `single`, `toolchanger`) rewritten for the new `scanners` format.
+
+### Migration
+If you have an existing `config.yaml` with `toolhead_mode` and `scanner_lane_map`, the middleware will auto-convert it on startup and log a deprecation warning. Update your config to the new format when convenient — see `config.example.afc.yaml` for examples.
+
+---
+
 ## [1.4.2] - 2026-03-23
 
 ### Changed
