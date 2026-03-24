@@ -14,25 +14,36 @@ SpoolSense Scanner → MQTT → Middleware → Klipper / Spoolman / Home Assista
 
 1. Scanner reads an NFC tag on a filament spool
 2. Tag data is published to MQTT as a JSON payload
-3. Middleware receives the scan, looks up or creates the spool in Spoolman
-4. Middleware activates the spool in Klipper (SET_ACTIVE_SPOOL or SET_SPOOL_ID)
-5. For AFC setups, lane LEDs update to show the filament color (requires [AFC-Klipper-Add-On PR #681](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On/pull/681))
+3. Middleware receives the scan and routes it based on the scanner's configured action
+4. If Spoolman is configured, the spool is looked up or created and synced
+5. Spool data (color, material, weight) is sent to Klipper — with or without Spoolman
+6. For shared scanner modes (`afc_stage`, `toolhead_stage`), tag data is cached until a lane loads or a tool is picked up
 
-## Supported Modes
+## Supported Setups
 
-| Mode | Description |
-|------|-------------|
-| **Single Toolhead** | One scanner, one extruder. Spool activates on scan. |
-| **Toolchanger** | One scanner per toolhead (T0–T3+). Spool IDs tracked per tool. |
-| **AFC / BoxTurtle** | One scanner per lane. Scan-lock-clear lifecycle with AFC-Klipper-Add-On. |
+Each scanner is configured with an **action** that determines how scans are routed:
+
+| Action | Description |
+|--------|-------------|
+| **`afc_stage`** | Shared scanner for AFC (BoxTurtle, NightOwl). Scan a spool, load into any lane — AFC assigns automatically. One scanner for all lanes. |
+| **`afc_lane`** | Dedicated scanner per AFC lane. Locks scanner until lane is cleared. |
+| **`toolhead_stage`** | Shared scanner for toolchanger printers (klipper-toolchanger). Scan a spool, pick up any tool — spool auto-assigns. One scanner for all toolheads. |
+| **`toolhead`** | Dedicated scanner per toolhead. Sets active spool and saves to Klipper variables. |
+| **`single`** | One scanner, one extruder. Spool activates on scan. |
+
+Mixed configs are supported — for example, `afc_stage` for BoxTurtle lanes and `toolhead` for direct toolheads on the same printer.
 
 ## Features
 
-- Automatic spool lookup and registration in Spoolman
-- Klipper spool activation (SET_ACTIVE_SPOOL for toolchanger/single, SET_SPOOL_ID for AFC)
+- **Per-scanner action routing** — each scanner independently routes to AFC lanes, toolheads, or shared staging
+- **Works with or without Spoolman** — tag data (color, material, weight) is sent directly when Spoolman is not configured
+- Automatic spool lookup and registration in Spoolman (when configured)
+- Klipper spool activation (SET_ACTIVE_SPOOL, SET_SPOOL_ID, SET_NEXT_SPOOL_ID)
+- AFC lane state sync via Moonraker API polling — no file watcher dependency
+- Toolchanger state sync via Moonraker — detects tool pickups for `toolhead_stage`
 - Low spool detection with LED breathing effect
-- AFC file watcher — monitors lane state changes and manages scan lock/clear
 - Spool ID persistence across reboots via Klipper save_variables
+- Legacy config auto-migration — old `toolhead_mode` + `scanner_lane_map` configs are converted automatically
 - Home Assistant online/offline status via MQTT Last Will
 - Moonraker update_manager compatible for automatic updates
 
