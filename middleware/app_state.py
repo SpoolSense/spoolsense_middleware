@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from afc_status import AfcStatusSync
+    from toolchanger_status import ToolchangerStatusSync
 
 # Dispatcher availability — set at import time
 try:
@@ -26,6 +27,7 @@ spoolman_client: SpoolmanClient | None = None
 mqtt_client: mqtt.Client | None = None
 watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
+toolchanger_status_sync: ToolchangerStatusSync | None = None
 
 # Spoolman cache
 spool_cache: dict = {}
