@@ -38,3 +38,13 @@ state_lock: threading.Lock = threading.Lock()
 lane_locks: dict = {}
 active_spools: dict = {}
 lane_statuses: dict = {}
+
+# Tracks the physical load state (True/False) per lane from the last AFC poll.
+# Used to detect load transitions (False → True) for pending spool delivery.
+# Protected by state_lock.
+lane_load_states: dict[str, bool] = {}
+
+# Pending spool data from afc_stage scans — held until a lane loads.
+# Set by _activate_from_scan() on afc_stage, consumed by afc_status._sync_lane_state()
+# when it detects a newly loaded lane. Protected by state_lock.
+pending_spool: dict | None = None

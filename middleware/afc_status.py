@@ -23,7 +23,7 @@ import time
 import requests
 
 import app_state
-from activation import publish_lock
+from activation import publish_lock, _send_afc_lane_data
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +73,25 @@ def _sync_lane_state(data: dict) -> None:
 
             # Compute state change under lock, then publish outside it
             action: str | None = None
+            pending: dict | None = None
+            newly_loaded: bool = False
+            lane_is_loaded: bool = lane_data.get("load", False)
+
             with app_state.state_lock:
+                was_loaded = app_state.lane_load_states.get(lane_name, False)
                 is_locked = app_state.lane_locks.get(lane_name, False)
                 app_state.lane_statuses[lane_name] = status
+                app_state.lane_load_states[lane_name] = lane_is_loaded
 
                 if spool_id is not None:
                     if not is_locked:
                         action = "lock"
                     app_state.active_spools[lane_name] = spool_id
+                elif lane_is_loaded and not was_loaded and app_state.pending_spool:
+                    # Lane transitioned from unloaded → loaded with pending afc_stage data
+                    newly_loaded = True
+                    pending = app_state.pending_spool
+                    app_state.pending_spool = None
                 else:
                     if is_locked:
                         action = "clear"
@@ -93,6 +104,16 @@ def _sync_lane_state(data: dict) -> None:
             elif action == "clear":
                 logger.info(f"AFC Sync: {lane_name} empty, clearing")
                 publish_lock(lane_name, "clear")
+
+            # Push pending afc_stage tag data to the newly loaded lane
+            if newly_loaded and pending:
+                logger.info(f"AFC Sync: {lane_name} just loaded — sending cached tag data")
+                _send_afc_lane_data(
+                    lane_name,
+                    pending.get("color_hex", ""),
+                    pending.get("material", ""),
+                    pending.get("remaining_g"),
+                )
 
 
 def _fetch_afc_status() -> dict | None:

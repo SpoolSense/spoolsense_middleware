@@ -21,53 +21,61 @@ def publish_lock(lane: str, state: str) -> None:
     logger.info(f"Lock: {lane} -> {state}")
 
 
-def activate_spool(spool_id: int, toolhead: str) -> bool:
-    """Routes the spool activation to the correct Klipper logic based on your setup."""
-    mode = app_state.cfg["toolhead_mode"]
+def activate_spool(spool_id: int, action: str, target: str | None = None) -> bool:
+    """
+    Routes spool activation to Klipper based on the scanner's action.
+
+    Actions:
+      afc_stage  → SET_NEXT_SPOOL_ID SPOOL_ID={id}  (global, no lane)
+      afc_lane   → SET_SPOOL_ID LANE={target} SPOOL_ID={id}
+      toolhead   → SET_ACTIVE_SPOOL + SAVE_VARIABLE for {target}
+    """
+    moonraker = app_state.cfg.get("moonraker_url", "")
+    if not moonraker:
+        logger.error("Cannot activate spool — moonraker_url not configured")
+        return False
+    # Guard: afc_lane and toolhead require a target
+    if action in ("afc_lane", "toolhead") and not target:
+        logger.error(f"Cannot activate spool — action '{action}' requires a target but got None")
+        return False
+
     try:
-        if mode == "single":
-            # Tell Moonraker/Spoolman directly
+        if action == "afc_stage":
             requests.post(
-                f"{app_state.cfg['moonraker_url']}/server/spoolman/spool_id",
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f"SET_NEXT_SPOOL_ID SPOOL_ID={spool_id}"},
+                timeout=5,
+            ).raise_for_status()
+            logger.info(f"[afc_stage] Staged spool {spool_id} for next AFC load")
+
+        elif action == "afc_lane":
+            requests.post(
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f"SET_SPOOL_ID LANE={target} SPOOL_ID={spool_id}"},
+                timeout=5,
+            ).raise_for_status()
+            logger.info(f"[afc_lane] Set spool {spool_id} on {target} via AFC")
+
+        elif action == "toolhead":
+            requests.post(
+                f"{moonraker}/server/spoolman/spool_id",
                 json={"spool_id": spool_id},
                 timeout=5,
             ).raise_for_status()
-            # Save it to Klipper variables so macros survive a restart
             requests.post(
-                f"{app_state.cfg['moonraker_url']}/printer/gcode/script",
-                json={"script": f"SAVE_VARIABLE VARIABLE=t0_spool_id VALUE={spool_id}"},
+                f"{moonraker}/printer/gcode/script",
+                json={"script": f"SAVE_VARIABLE VARIABLE={target}_spool_id VALUE={spool_id}"},
                 timeout=5,
             ).raise_for_status()
-            logger.info(f"[single] Activated spool {spool_id}")
+            logger.info(f"[toolhead] Activated spool {spool_id} on {target}")
 
-        elif mode == "toolchanger":
-            macro = f"T{toolhead[-1]}"
-            # Update the specific tool's macro variable
-            requests.post(
-                f"{app_state.cfg['moonraker_url']}/printer/gcode/script",
-                json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spool_id}"},
-                timeout=5,
-            ).raise_for_status()
-            # Save to disk
-            requests.post(
-                f"{app_state.cfg['moonraker_url']}/printer/gcode/script",
-                json={"script": f"SAVE_VARIABLE VARIABLE=t{toolhead[-1]}_spool_id VALUE={spool_id}"},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[toolchanger] Updated {macro} with spool {spool_id}")
-
-        elif mode == "afc":
-            # Let AFC handle the actual assignment logic
-            requests.post(
-                f"{app_state.cfg['moonraker_url']}/printer/gcode/script",
-                json={"script": f"SET_SPOOL_ID LANE={toolhead} SPOOL_ID={spool_id}"},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[afc] Set spool {spool_id} on {toolhead} via AFC")
+        else:
+            logger.error(f"Unknown action: {action}")
+            return False
 
         return True
-    except Exception as e:
-        logger.error(f"Activation failed: {e}")
+    except Exception:
+        logger.exception(f"Activation failed ({action})")
         return False
 
 
@@ -120,7 +128,6 @@ def _send_afc_lane_data(
             logger.warning(f"[afc] Skipping SET_MATERIAL for {toolhead} — invalid material: {material!r}")
         else:
             try:
-                # Replace spaces with underscores — Klipper gcode is space-delimited
                 safe_material = material.replace(" ", "_")
                 requests.post(
                     f"{moonraker}/printer/gcode/script",
@@ -143,9 +150,13 @@ def _send_afc_lane_data(
             logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
 
 
-def _activate_from_scan(toolhead: str, scan: ScanEvent, spool_info: SpoolInfo | None = None) -> None:
+def _activate_from_scan(
+    scanner_cfg: dict,
+    scan: ScanEvent,
+    spool_info: SpoolInfo | None = None,
+) -> None:
     """
-    Activates a toolhead from scan data, with optional Spoolman enrichment.
+    Activates a scanner from scan data, routed by the scanner's action config.
 
     Two separate concerns:
       1. Spool-ID activation (Spoolman-backed only)
@@ -157,28 +168,25 @@ def _activate_from_scan(toolhead: str, scan: ScanEvent, spool_info: SpoolInfo | 
 
     This means activation always succeeds even when Spoolman is unreachable.
     """
-    mode = app_state.cfg["toolhead_mode"]
+    action: str = scanner_cfg["action"]
+    target: str | None = scanner_cfg.get("lane") or scanner_cfg.get("toolhead")
 
     # --- Spool-ID activation (Spoolman-backed, optional) ---
     spoolman_activated: bool = False
     if spool_info and spool_info.spoolman_id is not None:
-        spoolman_activated = activate_spool(spool_info.spoolman_id, toolhead)
-        if spoolman_activated:
-            app_state.active_spools[toolhead] = spool_info.spoolman_id
-        else:
-            logger.error(f"Activation failed for spool {spool_info.spoolman_id} on {toolhead}")
+        spoolman_activated = activate_spool(spool_info.spoolman_id, action, target)
+        if spoolman_activated and target:
+            app_state.active_spools[target] = spool_info.spoolman_id
+        elif not spoolman_activated:
+            logger.error(f"Activation failed for spool {spool_info.spoolman_id} ({action})")
     else:
         logger.warning(
-            "No Spoolman spool_id available for toolhead %s; "
+            "No Spoolman spool_id available for %s (%s); "
             "skipping spool-id activation and continuing with tag-only updates",
-            toolhead,
+            target or "afc_stage", action,
         )
 
     # --- Resolve color and low-spool state from best available source ---
-    # Spoolman color wins when available — a human set it deliberately.
-    # Fall back to scan color, then white.
-    # Use explicit is not None checks — 0.0 remaining and "" color are valid values
-    # and must not fall through to the scan fallback via truthiness short-circuit.
     if spool_info and spool_info.color_hex is not None:
         color_hex = spool_info.color_hex
     else:
@@ -191,19 +199,38 @@ def _activate_from_scan(toolhead: str, scan: ScanEvent, spool_info: SpoolInfo | 
     is_low = remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]
     filament_label = scan.material_name or scan.material_type or "Unknown"
 
-    # --- Mode-specific tag-state output ---
-    if mode == "afc":
+    # --- Action-specific tag-state output ---
+    if action == "afc_stage":
+        # Shared scanner — no lock, scanner stays free.
+        # Cache the tag data so afc_status can send it when a lane loads.
+        with app_state.state_lock:
+            app_state.pending_spool = {
+                "color_hex": color_hex,
+                "material": filament_label,
+                "remaining_g": remaining,
+                "spoolman_id": spool_info.spoolman_id if spool_info else None,
+            }
         if spoolman_activated:
-            # SET_SPOOL_ID was sent — AFC queries Spoolman for color/material/weight.
+            logger.info("[afc_stage] Spool staged with Spoolman ID, scanner remains unlocked")
+        else:
+            logger.info("[afc_stage] Tag data cached, waiting for lane load. Scanner remains unlocked")
+
+    elif action == "afc_lane":
+        if spoolman_activated:
             logger.debug(f"AFC lane data via Spoolman (spool_id={spool_info.spoolman_id})")
-            publish_lock(toolhead, "lock")
+            publish_lock(target, "lock")
         elif spool_info and spool_info.spoolman_id is not None:
             # Activation failed — don't lock, allow rescan
-            logger.warning(f"Not locking {toolhead} — activation failed, rescan allowed")
+            logger.warning(f"Not locking {target} — activation failed, rescan allowed")
         else:
             # No Spoolman — send tag data directly to AFC lane
-            _send_afc_lane_data(toolhead, color_hex, filament_label, remaining)
-            publish_lock(toolhead, "lock")
+            _send_afc_lane_data(target, color_hex, filament_label, remaining)
+            publish_lock(target, "lock")
+
+    elif action == "toolhead":
+        # Toolhead activation — lock is implicit (scanner is per-toolhead)
+        if spoolman_activated:
+            publish_lock(target, "lock")
 
     if is_low:
-        logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {toolhead}")
+        logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")
