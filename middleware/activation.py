@@ -64,7 +64,7 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
             ).raise_for_status()
             requests.post(
                 f"{moonraker}/printer/gcode/script",
-                json={"script": f"SAVE_VARIABLE VARIABLE={target}_spool_id VALUE={spool_id}"},
+                json={"script": f"SAVE_VARIABLE VARIABLE={target.lower()}_spool_id VALUE={spool_id}"},
                 timeout=5,
             ).raise_for_status()
             logger.info(f"[toolhead] Activated spool {spool_id} on {target}")
