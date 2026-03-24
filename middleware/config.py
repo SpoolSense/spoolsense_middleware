@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH: str = os.path.expanduser("~/SpoolSense/config.yaml")
 
-VALID_ACTIONS: tuple[str, ...] = ("afc_stage", "afc_lane", "toolhead")
+VALID_ACTIONS: tuple[str, ...] = ("afc_stage", "afc_lane", "toolhead", "toolhead_stage")
 
 DEFAULTS: dict = {
     "mqtt": {
@@ -154,16 +154,14 @@ def _validate_scanners(config: dict) -> None:
                 )
                 sys.exit(1)
 
-        elif action == "afc_stage":
+        elif action in ("afc_stage", "toolhead_stage"):
             if "lane" in scanner_cfg or "toolhead" in scanner_cfg:
                 logger.error(
-                    "Scanner '%s' has action 'afc_stage' but has a 'lane' or 'toolhead' field — "
-                    "afc_stage is a shared scanner with no target. Remove the extra field.",
-                    device_id,
+                    "Scanner '%s' has action '%s' but has a 'lane' or 'toolhead' field — "
+                    "%s is a shared scanner with no target. Remove the extra field.",
+                    device_id, action, action,
                 )
                 sys.exit(1)
-
-        # afc_stage requires no additional fields
 
 
 def _derive_toolheads(config: dict) -> list[str]:
@@ -201,6 +199,15 @@ def has_toolhead_scanners(config: dict) -> bool:
     """Returns True if any scanner has a toolhead action."""
     return any(
         s.get("action") == "toolhead"
+        for s in config.get("scanners", {}).values()
+        if isinstance(s, dict)
+    )
+
+
+def has_toolhead_stage_scanners(config: dict) -> bool:
+    """Returns True if any scanner has a toolhead_stage action."""
+    return any(
+        s.get("action") == "toolhead_stage"
         for s in config.get("scanners", {}).values()
         if isinstance(s, dict)
     )

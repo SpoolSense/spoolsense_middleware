@@ -32,10 +32,11 @@ import sys
 import paho.mqtt.client as mqtt
 
 import app_state
-from config import CONFIG_PATH, load_config, has_afc_scanners, has_toolhead_scanners
+from config import CONFIG_PATH, load_config, has_afc_scanners, has_toolhead_scanners, has_toolhead_stage_scanners
 from mqtt_handler import on_connect, on_message
 from activation import publish_lock
 from afc_status import AfcStatusSync
+from toolchanger_status import ToolchangerStatusSync
 from var_watcher import start_klipper_watcher
 
 # Configure logging
@@ -48,6 +49,8 @@ def on_shutdown(signum: int, frame: object) -> None:
     logger.info("Shutting down...")
     if app_state.afc_status_sync:
         app_state.afc_status_sync.stop()
+    if app_state.toolchanger_status_sync:
+        app_state.toolchanger_status_sync.stop()
     if app_state.mqtt_client:
         app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
         # Clear locks for scanners that use them (afc_lane and toolhead)
@@ -94,6 +97,7 @@ def main() -> None:
         print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
         print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
         print(f"  afc_sync         : {'Moonraker API polling' if has_afc_scanners(app_state.cfg) else 'n/a'}")
+        print(f"  toolchanger_sync : {'Moonraker API polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
         print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
         print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
         print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
@@ -139,14 +143,20 @@ def main() -> None:
         logger.info(f"  {device_id}: {cfg['action']} → {target}")
     if has_afc_scanners(app_state.cfg):
         logger.info("AFC sync: Moonraker API polling")
+    if has_toolhead_stage_scanners(app_state.cfg):
+        logger.info("Toolchanger sync: Moonraker API polling")
     if has_toolhead_scanners(app_state.cfg):
-        logger.info(f"Klipper sync: file watcher")
+        logger.info("Klipper sync: file watcher")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 
     # Start sync services based on scanner actions
     if has_afc_scanners(app_state.cfg):
         app_state.afc_status_sync = AfcStatusSync()
         app_state.afc_status_sync.start()
+
+    if has_toolhead_stage_scanners(app_state.cfg):
+        app_state.toolchanger_status_sync = ToolchangerStatusSync()
+        app_state.toolchanger_status_sync.start()
 
     if has_toolhead_scanners(app_state.cfg):
         app_state.watcher = start_klipper_watcher()

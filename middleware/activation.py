@@ -69,6 +69,11 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
             ).raise_for_status()
             logger.info(f"[toolhead] Activated spool {spool_id} on {target}")
 
+        elif action == "toolhead_stage":
+            # Shared scanner — spool_id is staged, actual assignment happens
+            # on tool pickup (handled by toolchanger_status.py)
+            logger.info(f"[toolhead_stage] Staged spool {spool_id} for next tool pickup")
+
         else:
             logger.error(f"Unknown action: {action}")
             return False
@@ -231,6 +236,21 @@ def _activate_from_scan(
         # Toolhead activation — lock is implicit (scanner is per-toolhead)
         if spoolman_activated:
             publish_lock(target, "lock")
+
+    elif action == "toolhead_stage":
+        # Shared scanner for toolchanger — no lock, scanner stays free.
+        # Cache the tag data so toolchanger_status can send it when a tool is picked up.
+        with app_state.state_lock:
+            app_state.pending_spool = {
+                "color_hex": color_hex,
+                "material": filament_label,
+                "remaining_g": remaining,
+                "spoolman_id": spool_info.spoolman_id if spool_info else None,
+            }
+        if spoolman_activated:
+            logger.info("[toolhead_stage] Spool staged with Spoolman ID, scanner remains unlocked")
+        else:
+            logger.info("[toolhead_stage] Tag data cached, waiting for tool pickup. Scanner remains unlocked")
 
     if is_low:
         logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")

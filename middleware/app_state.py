@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from afc_status import AfcStatusSync
+    from toolchanger_status import ToolchangerStatusSync
 
 # Dispatcher availability — set at import time
 try:
@@ -26,6 +27,7 @@ spoolman_client: SpoolmanClient | None = None
 mqtt_client: mqtt.Client | None = None
 watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
+toolchanger_status_sync: ToolchangerStatusSync | None = None
 
 # Spoolman cache
 spool_cache: dict = {}
@@ -44,7 +46,14 @@ lane_statuses: dict = {}
 # Protected by state_lock.
 lane_load_states: dict[str, bool] = {}
 
-# Pending spool data from afc_stage scans — held until a lane loads.
-# Set by _activate_from_scan() on afc_stage, consumed by afc_status._sync_lane_state()
-# when it detects a newly loaded lane. Protected by state_lock.
+# Pending spool data from afc_stage or toolhead_stage scans.
+# Set by _activate_from_scan(), consumed by afc_status (on lane load)
+# or toolchanger_status (on tool pickup). Protected by state_lock.
+#
+# NOTE: This is a single shared slot. If a user has both afc_stage and
+# toolhead_stage scanners in the same config, a scan on one could be
+# consumed by the other's poller. In practice this is unlikely — the user
+# would need to scan on an AFC scanner then pick up a toolhead (or vice
+# versa) before the first action completes. If this becomes a reported
+# issue, split into pending_spool_afc and pending_spool_toolchanger.
 pending_spool: dict | None = None
