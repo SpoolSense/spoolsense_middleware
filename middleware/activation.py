@@ -198,13 +198,19 @@ def _activate_from_scan(
 
     # --- Action-specific tag-state output ---
     if action == "afc_stage":
-        # Shared scanner — no lock, no lane data. Scanner stays free.
-        # SET_NEXT_SPOOL_ID was already sent above (if Spoolman had a spool_id).
-        # Without Spoolman, there's no spool ID to stage — just log it.
+        # Shared scanner — no lock, scanner stays free.
+        # Cache the tag data so afc_status can send it when a lane loads.
+        with app_state.state_lock:
+            app_state.pending_spool = {
+                "color_hex": color_hex,
+                "material": filament_label,
+                "remaining_g": remaining,
+                "spoolman_id": spool_info.spoolman_id if spool_info else None,
+            }
         if spoolman_activated:
-            logger.info("[afc_stage] Spool staged, scanner remains unlocked")
+            logger.info("[afc_stage] Spool staged with Spoolman ID, scanner remains unlocked")
         else:
-            logger.warning("[afc_stage] No spool ID to stage (Spoolman unavailable), scanner remains unlocked")
+            logger.info("[afc_stage] Tag data cached, waiting for lane load. Scanner remains unlocked")
 
     elif action == "afc_lane":
         if spoolman_activated:
