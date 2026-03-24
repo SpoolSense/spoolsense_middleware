@@ -272,6 +272,9 @@ def _activate_from_scan(
     elif action == "toolhead":
         if spoolman_activated:
             publish_lock(target, "lock")
+        elif spool_info and spool_info.spoolman_id is not None:
+            # Activation failed — don't lock, allow rescan
+            logger.warning(f"Not locking {target} — activation failed, rescan allowed")
         else:
             # No Spoolman — send tag data directly to toolhead via gcode variables
             _send_toolhead_tag_data(target, color_hex, filament_label, remaining)
