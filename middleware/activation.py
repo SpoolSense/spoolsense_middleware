@@ -34,6 +34,11 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
     if not moonraker:
         logger.error("Cannot activate spool — moonraker_url not configured")
         return False
+    # Guard: afc_lane and toolhead require a target
+    if action in ("afc_lane", "toolhead") and not target:
+        logger.error(f"Cannot activate spool — action '{action}' requires a target but got None")
+        return False
+
     try:
         if action == "afc_stage":
             requests.post(
@@ -52,13 +57,11 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
             logger.info(f"[afc_lane] Set spool {spool_id} on {target} via AFC")
 
         elif action == "toolhead":
-            # Set active spool in Moonraker/Spoolman
             requests.post(
                 f"{moonraker}/server/spoolman/spool_id",
                 json={"spool_id": spool_id},
                 timeout=5,
             ).raise_for_status()
-            # Save to Klipper variables so it survives a restart
             requests.post(
                 f"{moonraker}/printer/gcode/script",
                 json={"script": f"SAVE_VARIABLE VARIABLE={target}_spool_id VALUE={spool_id}"},
@@ -71,8 +74,8 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
             return False
 
         return True
-    except Exception as e:
-        logger.error(f"Activation failed ({action}): {e}")
+    except Exception:
+        logger.exception(f"Activation failed ({action})")
         return False
 
 
