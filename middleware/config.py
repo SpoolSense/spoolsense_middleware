@@ -91,10 +91,10 @@ def _migrate_legacy_config(config: dict) -> dict:
 def _validate_scanners(config: dict) -> None:
     """Validates the scanners config entries."""
     scanners = config.get("scanners", {})
-    if not scanners:
+    if not isinstance(scanners, dict) or not scanners:
         logger.error(
-            "No scanners configured. Add a 'scanners' section to %s. "
-            "See config.example.afc.yaml for examples.",
+            "No scanners configured (or 'scanners' is not a mapping). "
+            "Add a 'scanners' section to %s. See config.example.afc.yaml for examples.",
             CONFIG_PATH,
         )
         sys.exit(1)
@@ -121,6 +121,12 @@ def _validate_scanners(config: dict) -> None:
             if not lane:
                 logger.error("Scanner '%s' with action 'afc_lane' requires a 'lane' field.", device_id)
                 sys.exit(1)
+            if "toolhead" in scanner_cfg:
+                logger.error(
+                    "Scanner '%s' has action 'afc_lane' but also has a 'toolhead' field — remove it.",
+                    device_id,
+                )
+                sys.exit(1)
             if toolheads_list and lane not in toolheads_list:
                 logger.error(
                     "Scanner '%s' maps to lane '%s' which is not in toolheads list. "
@@ -134,11 +140,26 @@ def _validate_scanners(config: dict) -> None:
             if not toolhead:
                 logger.error("Scanner '%s' with action 'toolhead' requires a 'toolhead' field.", device_id)
                 sys.exit(1)
+            if "lane" in scanner_cfg:
+                logger.error(
+                    "Scanner '%s' has action 'toolhead' but also has a 'lane' field — remove it.",
+                    device_id,
+                )
+                sys.exit(1)
             if toolheads_list and toolhead not in toolheads_list:
                 logger.error(
                     "Scanner '%s' maps to toolhead '%s' which is not in toolheads list. "
                     "Add it to toolheads or fix the scanner config.",
                     device_id, toolhead,
+                )
+                sys.exit(1)
+
+        elif action == "afc_stage":
+            if "lane" in scanner_cfg or "toolhead" in scanner_cfg:
+                logger.error(
+                    "Scanner '%s' has action 'afc_stage' but has a 'lane' or 'toolhead' field — "
+                    "afc_stage is a shared scanner with no target. Remove the extra field.",
+                    device_id,
                 )
                 sys.exit(1)
 
