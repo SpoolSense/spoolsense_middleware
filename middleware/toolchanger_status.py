@@ -23,6 +23,7 @@ import threading
 import requests
 
 import app_state
+from publishers.klipper import _send_gcode, _validate_color_hex
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,12 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
     """
     Pushes cached spool data to the specified tool via Klipper gcode commands.
 
+    This function is Klipper-coupled by design — toolchanger is a Klipper/AFC
+    concept; there is no platform-agnostic equivalent. When Bambu or Prusa
+    support is added, they will have their own polling modules.
+
     With Spoolman (spoolman_id present):
+      - POST /server/spoolman/spool_id
       - SET_GCODE_VARIABLE MACRO=T{n} VARIABLE=spool_id VALUE={id}
       - SAVE_VARIABLE VARIABLE=t{n}_spool_id VALUE={id}
       - SET_GCODE_VARIABLE MACRO=T{n} VARIABLE=color VALUE="'{hex}'"
@@ -48,10 +54,10 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
         return
 
     macro = f"T{tool_number}"
-    spoolman_id = pending.get("spoolman_id")
-    color_hex = pending.get("color_hex", "")
-    material = pending.get("material", "")
-    remaining_g = pending.get("remaining_g")
+    spoolman_id: int | None = pending.get("spoolman_id")
+    color_hex: str = pending.get("color_hex", "")
+    material: str = pending.get("material", "")
+    remaining_g: float | None = pending.get("remaining_g")
 
     # Spoolman path — set spool_id and persist
     if spoolman_id is not None:
@@ -66,36 +72,29 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
             logger.exception(f"[toolhead_stage] Failed to set active spool on {macro}")
 
         try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}"},
-                timeout=5,
-            ).raise_for_status()
+            _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}")
             logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} spool_id={spoolman_id}")
         except Exception:
             logger.exception(f"[toolhead_stage] Failed to set spool_id variable on {macro}")
 
         try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f"SAVE_VARIABLE VARIABLE=t{tool_number}_spool_id VALUE={spoolman_id}"},
-                timeout=5,
-            ).raise_for_status()
+            _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number}_spool_id VALUE={spoolman_id}")
             logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number}_spool_id={spoolman_id}")
         except Exception:
             logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
 
     # Color — always set from tag data (Spoolman or not)
     if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        try:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{color_hex}'\""},
-                timeout=5,
-            ).raise_for_status()
-            logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{color_hex}'")
-        except Exception:
-            logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
+        safe_color = _validate_color_hex(color_hex)
+        if safe_color is not None:
+            try:
+                _send_gcode(
+                    moonraker,
+                    f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{safe_color}'\"",
+                )
+                logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{safe_color}'")
+            except Exception:
+                logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
 
     if material:
         logger.info(f"[toolhead_stage] {macro} material: {material}")

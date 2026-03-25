@@ -15,7 +15,7 @@ reviews:
   path_filters:
     - "!middleware/tests/**"
 
-instructions: |
+  instructions: |
   Python middleware bridging SpoolSense NFC scanner to Klipper/Spoolman/Home Assistant.
   Runs as a systemd service on the printer host (Raspberry Pi).
 

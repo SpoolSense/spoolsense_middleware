@@ -36,6 +36,8 @@ from config import CONFIG_PATH, load_config, has_afc_scanners, has_toolhead_scan
 from mqtt_handler import on_connect, on_message
 from activation import publish_lock
 from afc_status import AfcStatusSync
+from publisher_manager import PublisherManager
+from publishers.klipper import KlipperPublisher
 from toolchanger_status import ToolchangerStatusSync
 from var_watcher import start_klipper_watcher
 
@@ -47,6 +49,8 @@ logger = logging.getLogger(__name__)
 def on_shutdown(signum: int, frame: object) -> None:
     """Runs when you hit Ctrl+C or stop the service. Cleans up locks and disconnects."""
     logger.info("Shutting down...")
+    if app_state.publisher_manager:
+        app_state.publisher_manager.shutdown()
     if app_state.afc_status_sync:
         app_state.afc_status_sync.stop()
     if app_state.toolchanger_status_sync:
@@ -83,6 +87,10 @@ def main() -> None:
     args = parser.parse_args()
 
     app_state.cfg = load_config()
+
+    # Initialize publisher_manager early so check-config can reference it if needed
+    app_state.publisher_manager = PublisherManager()
+    app_state.publisher_manager.register(KlipperPublisher(app_state.cfg))
 
     if args.check_config:
         scanners = app_state.cfg.get("scanners", {})
