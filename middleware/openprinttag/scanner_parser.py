@@ -82,5 +82,9 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
         color_hex=color_hex,
         full_weight_g=payload.get("initial_weight_g"),
         remaining_weight_g=payload.get("remaining_g"),
+        nozzle_temp_min_c=payload.get("min_print_temp"),
+        nozzle_temp_max_c=payload.get("max_print_temp"),
+        bed_temp_min_c=payload.get("min_bed_temp"),
+        bed_temp_max_c=payload.get("max_bed_temp"),
         raw=payload,
     )
