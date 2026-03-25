@@ -38,6 +38,7 @@ from activation import publish_lock
 from afc_status import AfcStatusSync
 from publisher_manager import PublisherManager
 from publishers.klipper import KlipperPublisher
+from publishers.lane_data import LaneDataPublisher
 from toolchanger_status import ToolchangerStatusSync
 from var_watcher import start_klipper_watcher
 
@@ -91,6 +92,7 @@ def main() -> None:
     # Initialize publisher_manager early so check-config can reference it if needed
     app_state.publisher_manager = PublisherManager()
     app_state.publisher_manager.register(KlipperPublisher(app_state.cfg))
+    app_state.publisher_manager.register(LaneDataPublisher(app_state.cfg))
 
     if args.check_config:
         scanners = app_state.cfg.get("scanners", {})
