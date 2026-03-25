@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def _validate_color_hex(color_hex: str) -> str | None:
     """Return the normalized 6-digit uppercase hex string, or None if invalid."""
     stripped = color_hex.lstrip("#").upper()
-    if re.fullmatch(r"[A-Fa-f0-9]{6}", stripped):
+    if re.fullmatch(r"[A-F0-9]{6}", stripped):
         return stripped
     return None
 
@@ -82,8 +82,8 @@ def _send_afc_lane_data(
             try:
                 _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={safe_color}")
                 logger.info(f"[afc] SET_COLOR {toolhead} = {safe_color}")
-            except Exception as e:
-                logger.error(f"[afc] SET_COLOR failed for {toolhead}: {e}")
+            except Exception:
+                logger.exception(f"[afc] SET_COLOR failed for {toolhead}")
 
     if material and material != "Unknown":
         if not _validate_material(material):
@@ -93,15 +93,15 @@ def _send_afc_lane_data(
                 safe_material = material.replace(" ", "_")
                 _send_gcode(moonraker, f"SET_MATERIAL LANE={toolhead} MATERIAL={safe_material}")
                 logger.info(f"[afc] SET_MATERIAL {toolhead} = {material}")
-            except Exception as e:
-                logger.error(f"[afc] SET_MATERIAL failed for {toolhead}: {e}")
+            except Exception:
+                logger.exception(f"[afc] SET_MATERIAL failed for {toolhead}")
 
     if remaining_g is not None and remaining_g > 0:
         try:
             _send_gcode(moonraker, f"SET_WEIGHT LANE={toolhead} WEIGHT={remaining_g:.0f}")
             logger.info(f"[afc] SET_WEIGHT {toolhead} = {remaining_g:.0f}g")
-        except Exception as e:
-            logger.error(f"[afc] SET_WEIGHT failed for {toolhead}: {e}")
+        except Exception:
+            logger.exception(f"[afc] SET_WEIGHT failed for {toolhead}")
 
 
 def _send_toolhead_tag_data(
@@ -131,8 +131,8 @@ def _send_toolhead_tag_data(
                     f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{safe_color}'\"",
                 )
                 logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{safe_color}'")
-            except Exception as e:
-                logger.error(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}: {e}")
+            except Exception:
+                logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
 
     if material and material != "Unknown":
         logger.info(f"[toolhead] {target} material: {material}")
@@ -220,11 +220,7 @@ class KlipperPublisher(Publisher):
             # tag-only mode — nothing for Klipper to do at scan time
             return True
 
-        requests.post(
-            f"{moonraker}/printer/gcode/script",
-            json={"script": f"SET_NEXT_SPOOL_ID SPOOL_ID={event.spool_id}"},
-            timeout=5,
-        ).raise_for_status()
+        _send_gcode(moonraker, f"SET_NEXT_SPOOL_ID SPOOL_ID={event.spool_id}")
         logger.info(f"[afc_stage] Staged spool {event.spool_id} for next AFC load")
         return True
 

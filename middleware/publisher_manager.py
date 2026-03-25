@@ -98,10 +98,7 @@ class PublisherManager:
                     event.action,
                     event.target,
                 )
-                primary_succeeded = False
-            # primary_succeeded tracks the last primary's result; we only expect one
-            else:
-                primary_succeeded = True
+            primary_succeeded = primary_succeeded and result
 
         for publisher in secondaries:
             try:

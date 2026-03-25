@@ -13,6 +13,7 @@ toolchanger_status.py. It is NOT part of the publisher system.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
@@ -211,20 +212,7 @@ def _activate_from_scan(
             logger.warning(f"Not locking {target} — activation failed, rescan allowed")
         else:
             # No Spoolman — publish tag-only event (klipper.py sends AFC lane data)
-            tag_event = SpoolEvent(
-                spool_id=None,
-                action=action_enum,
-                target=target or "",
-                color=color_hex,
-                material=filament_label,
-                weight=remaining,
-                nozzle_temp_min=event.nozzle_temp_min,
-                nozzle_temp_max=event.nozzle_temp_max,
-                bed_temp_min=event.bed_temp_min,
-                bed_temp_max=event.bed_temp_max,
-                scanner_id=event.scanner_id,
-                tag_only=True,
-            )
+            tag_event = dataclasses.replace(event, spool_id=None, tag_only=True)
             manager = app_state.publisher_manager
             if manager is not None:
                 manager.publish(tag_event)
@@ -241,20 +229,7 @@ def _activate_from_scan(
             logger.warning(f"Not locking {target} — activation failed, rescan allowed")
         else:
             # No Spoolman — publish tag-only event (klipper.py sends gcode variable)
-            tag_event = SpoolEvent(
-                spool_id=None,
-                action=action_enum,
-                target=target or "",
-                color=color_hex,
-                material=filament_label,
-                weight=remaining,
-                nozzle_temp_min=event.nozzle_temp_min,
-                nozzle_temp_max=event.nozzle_temp_max,
-                bed_temp_min=event.bed_temp_min,
-                bed_temp_max=event.bed_temp_max,
-                scanner_id=event.scanner_id,
-                tag_only=True,
-            )
+            tag_event = dataclasses.replace(event, spool_id=None, tag_only=True)
             manager = app_state.publisher_manager
             if manager is not None:
                 manager.publish(tag_event)

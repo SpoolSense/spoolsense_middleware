@@ -144,3 +144,4 @@ class Publisher(ABC):
         Connection-holding publishers (websocket, persistent MQTT) use it to
         close connections and cancel timers.
         """
+        pass
