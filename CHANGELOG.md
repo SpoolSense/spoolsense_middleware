@@ -4,6 +4,17 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.1] - 2026-03-24
+
+### Fixed
+- **SAVE_VARIABLE uppercase rejection** — Klipper requires lowercase variable names. Toolhead names now lowercased (e.g. T0 → t0_spool_id).
+
+### Added
+- **Tag-only activation for toolhead action** — scans without Spoolman now send color via SET_GCODE_VARIABLE instead of silently doing nothing.
+- **Failed-activation guard** — if Spoolman activation fails (e.g. Moonraker timeout), scanner is not locked, allowing rescan.
+
+---
+
 ## [1.5.0] - 2026-03-24
 
 ### Added
