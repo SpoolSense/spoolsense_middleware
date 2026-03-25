@@ -23,7 +23,8 @@ import time
 import requests
 
 import app_state
-from activation import publish_lock, _send_afc_lane_data
+from activation import publish_lock
+from publishers.klipper import _send_afc_lane_data
 
 logger = logging.getLogger(__name__)
 

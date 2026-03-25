@@ -6,7 +6,7 @@ import logging
 import paho.mqtt.client as mqtt
 
 import app_state
-from activation import activate_spool, publish_lock, _activate_from_scan
+from activation import activate_spool, publish_lock, _activate_from_scan  # activate_spool used for UID-only path
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_toolhead_scanners
 from var_watcher import sync_from_klipper_vars, start_klipper_watcher
