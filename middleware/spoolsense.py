@@ -105,7 +105,7 @@ def main() -> None:
         print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
         print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
         print(f"  afc_sync         : {'Moonraker API polling' if has_afc_scanners(app_state.cfg) else 'n/a'}")
-        print(f"  toolchanger_sync : {'Moonraker API polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
+        print(f"  macro_assign     : {'ASSIGN_SPOOL macro polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
         print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
         print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
         print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
@@ -152,7 +152,7 @@ def main() -> None:
     if has_afc_scanners(app_state.cfg):
         logger.info("AFC sync: Moonraker API polling")
     if has_toolhead_stage_scanners(app_state.cfg):
-        logger.info("Toolchanger sync: Moonraker API polling")
+        logger.info("Macro assign: ASSIGN_SPOOL macro polling")
     if has_toolhead_scanners(app_state.cfg):
         logger.info("Klipper sync: file watcher")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
