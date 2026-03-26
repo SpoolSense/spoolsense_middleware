@@ -99,6 +99,14 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                 material = filament.get("material", "Unknown")
                 logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
 
+                # Send color to scanner LED — UID-only tags have no color on the tag,
+                # so the scanner LED won't change unless we tell it the color from Spoolman
+                device_id = _extract_scanner_device_id(topic)
+                if device_id and color_hex and color_hex not in ("FFFFFF", "000000"):
+                    color_topic = f"{app_state.cfg.get('scanner_topic_prefix', 'spoolsense')}/{device_id}/cmd/set_color"
+                    client.publish(color_topic, color_hex)
+                    logger.info(f"Sent color #{color_hex} to scanner {device_id} LED")
+
                 # toolhead_stage/afc_stage: cache for later assignment via macro or lane load
                 if action in ("toolhead_stage", "afc_stage"):
                     with app_state.state_lock:
