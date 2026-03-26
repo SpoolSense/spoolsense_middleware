@@ -4,6 +4,17 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.3] - 2026-03-26
+
+### Added
+- **ASSIGN_SPOOL macro** — replaces tool-pickup detection for `toolhead_stage`. Scan a tag, run `ASSIGN_SPOOL TOOL=T5` in Klipper console, spool auto-assigns. Faster and works for any number of tools without physical pickup. Includes `klipper/spoolsense.cfg` macro file — add `[include spoolsense.cfg]` to printer.cfg.
+- **UID-only LED color** — scanner LED now shows the filament color from Spoolman when scanning plain NFC tags. Previously LED stayed default since UID-only tags have no color data on the tag.
+
+### Fixed
+- **UID-only tags with toolhead_stage** — plain NFC tags now cache correctly for macro assignment instead of trying to activate directly
+
+---
+
 ## [1.5.2] - 2026-03-25
 
 ### Added
