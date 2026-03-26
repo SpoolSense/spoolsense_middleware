@@ -37,6 +37,8 @@ Mixed configs are supported — for example, `afc_stage` for BoxTurtle lanes and
 
 - **Per-scanner action routing** — each scanner independently routes to AFC lanes, toolheads, or shared staging
 - **Works with or without Spoolman** — tag data (color, material, weight) is sent directly when Spoolman is not configured
+- **Slicer integration** — publish spool data (color, material, weight, nozzle/bed temps) to Moonraker's `lane_data` database. Orca Slicer and other slicers auto-populate tool info. Opt-in via `publish_lane_data: true`. For users without AFC or Happy Hare (they already provide this).
+- **Extensible publisher architecture** — spool activation output is decoupled from Klipper/Moonraker. Adding support for new printer platforms (Prusa, Bambu, etc.) requires one new file.
 - Automatic spool lookup and registration in Spoolman (when configured)
 - Klipper spool activation (SET_ACTIVE_SPOOL, SET_SPOOL_ID, SET_NEXT_SPOOL_ID)
 - AFC lane state sync via Moonraker API polling — no file watcher dependency

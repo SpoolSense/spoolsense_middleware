@@ -4,6 +4,23 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.2] - 2026-03-25
+
+### Added
+- **Slicer integration** — publish spool data (color, material, weight, nozzle/bed temps) to Moonraker's `lane_data` database. Orca Slicer and other slicers auto-populate tool info. Opt-in via `publish_lane_data: true`. For users without AFC or Happy Hare.
+- **Publisher architecture** — spool activation output decoupled from Klipper/Moonraker. New `publishers/` module with SpoolEvent, Publisher protocol, and fan-out dispatcher. Adding new output targets (Prusa, Bambu, etc.) requires one new file.
+  - `publishers/base.py` — SpoolEvent dataclass, Publisher ABC, Action enum
+  - `publishers/klipper.py` — existing gcode logic extracted from activation.py
+  - `publisher_manager.py` — registry, fan-out with error isolation
+
+### Changed
+- **activation.py refactored** — builds platform-neutral SpoolEvent and routes through publisher_manager. Still owns lock decisions, staging logic, and active spool tracking.
+
+### Fixed
+- **Temp field name mismatch** — parser read `nozzle_temp_min` instead of `nozzle_temp_min_c`, causing temps to always be None in lane_data
+
+---
+
 ## [1.5.1] - 2026-03-24
 
 ### Fixed
