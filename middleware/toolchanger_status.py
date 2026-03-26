@@ -1,15 +1,26 @@
 """
-toolchanger_status.py — Toolchanger state sync via Moonraker API.
+toolchanger_status.py — Tool assignment via Klipper macro polling.
 
-Polls Moonraker's toolchanger object to detect tool changes. When a tool
-pickup is detected and there is pending spool data (from a toolhead_stage
-scan), pushes the cached data to the newly active tool.
+Polls Moonraker for the ASSIGN_SPOOL gcode macro variable. When a user
+runs `ASSIGN_SPOOL TOOL=T5` in Klipper, this module detects the pending
+tool assignment and pairs it with cached spool data from the last scan.
+
+Replaces the previous tool-pickup detection approach — macro assignment
+is faster and works for any number of tools without physical pickup.
+
+Required Klipper macro (user adds to their printer.cfg):
+
+    [gcode_macro ASSIGN_SPOOL]
+    variable_pending_tool: ""
+    gcode:
+      SET_GCODE_VARIABLE MACRO=ASSIGN_SPOOL VARIABLE=pending_tool VALUE="'{params.TOOL}'"
 
 Data flow:
-    poll_loop() → GET /printer/objects/query?toolchanger
-                    → tool_number changed?
-                        → yes + pending_spool → assign to T{n}
-                        → no → sleep and poll again
+    poll_loop() → GET /printer/objects/query?gcode_macro ASSIGN_SPOOL
+                    → pending_tool changed from ""?
+                        → yes + pending_spool → assign to that tool
+                        → clear pending_tool via SET_GCODE_VARIABLE
+                    → no → sleep and poll again
 
 Works with and without Spoolman:
     With Spoolman: SET_GCODE_VARIABLE (spool_id + color) + SAVE_VARIABLE
@@ -18,6 +29,7 @@ Works with and without Spoolman:
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 import requests
@@ -31,14 +43,19 @@ POLL_INTERVAL: float = 2.0
 RETRY_BASE: float = 2.0
 RETRY_MAX: float = 30.0
 
+MACRO_NAME = "ASSIGN_SPOOL"
+VARIABLE_NAME = "pending_tool"
 
-def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
+# Pattern to extract tool number from values like "T5", "t12", etc.
+_TOOL_PATTERN = re.compile(r"^[Tt](\d+)$")
+
+
+def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     """
     Pushes cached spool data to the specified tool via Klipper gcode commands.
 
-    This function is Klipper-coupled by design — toolchanger is a Klipper/AFC
-    concept; there is no platform-agnostic equivalent. When Bambu or Prusa
-    support is added, they will have their own polling modules.
+    tool_name is the full macro name (e.g. "T5") — used for SET_GCODE_VARIABLE.
+    The numeric suffix is extracted for SAVE_VARIABLE.
 
     With Spoolman (spoolman_id present):
       - POST /server/spoolman/spool_id
@@ -53,7 +70,10 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
     if not moonraker:
         return
 
-    macro = f"T{tool_number}"
+    macro = tool_name.upper()
+    match = _TOOL_PATTERN.match(macro)
+    tool_number_str = match.group(1) if match else "0"
+
     spoolman_id: int | None = pending.get("spoolman_id")
     color_hex: str = pending.get("color_hex", "")
     material: str = pending.get("material", "")
@@ -78,8 +98,8 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
             logger.exception(f"[toolhead_stage] Failed to set spool_id variable on {macro}")
 
         try:
-            _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number}_spool_id VALUE={spoolman_id}")
-            logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number}_spool_id={spoolman_id}")
+            _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
+            logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number_str}_spool_id={spoolman_id}")
         except Exception:
             logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
 
@@ -102,11 +122,11 @@ def _assign_spool_to_tool(tool_number: int, pending: dict) -> None:
         logger.info(f"[toolhead_stage] {macro} weight: {remaining_g:.0f}g")
 
 
-def _fetch_tool_number() -> int | None:
+def _fetch_pending_tool() -> str | None:
     """
-    Fetches the current active tool number from Moonraker.
+    Fetches the pending_tool value from the ASSIGN_SPOOL macro.
 
-    Returns the tool_number (0-N), -1 (no tool), or None on error.
+    Returns the tool name (e.g. "T5"), empty string (no pending), or None on error.
     """
     moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker:
@@ -114,55 +134,73 @@ def _fetch_tool_number() -> int | None:
 
     try:
         response = requests.get(
-            f"{moonraker}/printer/objects/query?toolchanger",
+            f"{moonraker}/printer/objects/query?gcode_macro%20{MACRO_NAME}",
             timeout=5,
         )
         response.raise_for_status()
         result = response.json()
-        toolchanger = result.get("result", {}).get("status", {}).get("toolchanger", {})
-        return toolchanger.get("tool_number")
+        macro_data = result.get("result", {}).get("status", {}).get(f"gcode_macro {MACRO_NAME}", {})
+        return macro_data.get(VARIABLE_NAME, "")
     except requests.ConnectionError:
-        logger.debug("Toolchanger status: Moonraker not reachable")
+        logger.debug("Macro assign: Moonraker not reachable")
         return None
     except requests.Timeout:
-        logger.warning("Toolchanger status: Moonraker request timed out")
+        logger.warning("Macro assign: Moonraker request timed out")
         return None
     except Exception:
-        logger.exception("Toolchanger status: unexpected error")
+        logger.exception("Macro assign: unexpected error")
         return None
+
+
+def _clear_pending_tool() -> None:
+    """Clear the pending_tool variable after assignment."""
+    moonraker = app_state.cfg.get("moonraker_url", "")
+    if not moonraker:
+        return
+
+    try:
+        _send_gcode(
+            moonraker,
+            f'SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE="\'\'\"',
+        )
+        logger.debug("Macro assign: cleared pending_tool")
+    except Exception:
+        logger.exception("Macro assign: failed to clear pending_tool")
 
 
 class ToolchangerStatusSync:
     """
-    Polls Moonraker's toolchanger object in a background thread.
+    Polls the ASSIGN_SPOOL Klipper macro in a background thread.
 
-    Detects tool changes and pushes pending spool data to the new tool.
-    Same start/stop interface as AfcStatusSync for consistency.
+    Detects when a user sets a pending tool via macro and pushes
+    cached spool data to that tool. Same start/stop interface as
+    AfcStatusSync for consistency.
     """
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._last_tool_number: int | None = None
 
     def start(self) -> None:
         """Start the background polling thread."""
-        # Capture initial tool state so we don't trigger on startup
-        initial = _fetch_tool_number()
-        self._last_tool_number = initial
-        if initial is not None:
-            logger.info(f"Toolchanger status: initial tool_number={initial}")
+        # Verify the macro exists
+        initial = _fetch_pending_tool()
+        if initial is None:
+            logger.warning(
+                "Macro assign: ASSIGN_SPOOL macro not found — "
+                "add it to your printer.cfg (see docs)"
+            )
         else:
-            logger.warning("Toolchanger status: could not read initial state — will retry in background")
+            logger.info("Macro assign: ASSIGN_SPOOL macro detected, polling started")
 
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._poll_loop,
-            name="toolchanger-status-sync",
+            name="macro-assign-sync",
             daemon=True,
         )
         self._thread.start()
-        logger.info(f"Toolchanger status: polling started (interval={POLL_INTERVAL}s)")
+        logger.info(f"Macro assign: polling started (interval={POLL_INTERVAL}s)")
 
     def stop(self) -> None:
         """Signal the polling thread to stop and wait for it."""
@@ -171,30 +209,26 @@ class ToolchangerStatusSync:
         self._stop_event.set()
         self._thread.join(timeout=5)
         if self._thread.is_alive():
-            logger.warning("Toolchanger status: polling thread did not stop cleanly")
+            logger.warning("Macro assign: polling thread did not stop cleanly")
         else:
-            logger.info("Toolchanger status: polling stopped")
+            logger.info("Macro assign: polling stopped")
         self._thread = None
 
     def _poll_loop(self) -> None:
-        """Background loop that polls toolchanger state at regular intervals."""
+        """Background loop that polls macro state at regular intervals."""
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            tool_number = _fetch_tool_number()
+            pending_tool = _fetch_pending_tool()
 
-            if tool_number is not None:
+            if pending_tool is not None:
                 consecutive_failures = 0
 
-                # Detect tool change: number changed AND new tool is valid (>= 0)
-                if (
-                    self._last_tool_number is not None
-                    and tool_number != self._last_tool_number
-                    and tool_number >= 0
-                ):
-                    logger.info(
-                        f"Toolchanger: tool changed {self._last_tool_number} → {tool_number}"
-                    )
+                # Detect assignment: pending_tool is non-empty
+                if pending_tool and pending_tool.strip():
+                    tool_name = pending_tool.strip()
+                    logger.info(f"Macro assign: tool {tool_name} requested")
+
                     # Check for pending spool data
                     pending: dict | None = None
                     with app_state.state_lock:
@@ -204,24 +238,27 @@ class ToolchangerStatusSync:
 
                     if pending:
                         logger.info(
-                            f"Toolchanger: assigning cached spool data to T{tool_number}"
+                            f"Macro assign: assigning cached spool data to {tool_name}"
                         )
-                        _assign_spool_to_tool(tool_number, pending)
+                        _assign_spool_to_tool(tool_name, pending)
                     else:
-                        logger.debug(
-                            f"Toolchanger: tool changed to T{tool_number} but no pending spool data"
+                        logger.warning(
+                            f"Macro assign: {tool_name} requested but no spool scanned yet — "
+                            "scan a tag first, then run ASSIGN_SPOOL"
                         )
 
-                self._last_tool_number = tool_number
+                    # Clear the macro variable
+                    _clear_pending_tool()
+
                 wait = POLL_INTERVAL
             else:
                 consecutive_failures += 1
                 wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
                 if consecutive_failures == 1:
-                    logger.warning("Toolchanger status: poll failed, retrying with backoff")
+                    logger.warning("Macro assign: poll failed, retrying with backoff")
                 elif consecutive_failures % 10 == 0:
                     logger.warning(
-                        f"Toolchanger status: {consecutive_failures} consecutive failures, "
+                        f"Macro assign: {consecutive_failures} consecutive failures, "
                         f"retrying every {wait:.0f}s"
                     )
 

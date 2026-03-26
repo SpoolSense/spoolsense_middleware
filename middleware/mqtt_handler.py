@@ -95,13 +95,28 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                 filament = spool.get("filament", {})
                 name = filament.get("name", "Unknown")
                 color_hex = (filament.get("color_hex") or "FFFFFF").lstrip("#").upper()
+                remaining = spool.get("remaining_weight")
+                material = filament.get("material", "Unknown")
                 logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
+
+                # toolhead_stage/afc_stage: cache for later assignment via macro or lane load
+                if action in ("toolhead_stage", "afc_stage"):
+                    with app_state.state_lock:
+                        app_state.pending_spool = {
+                            "color_hex": color_hex,
+                            "material": material,
+                            "remaining_g": remaining,
+                            "spoolman_id": spool_id,
+                        }
+                    logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
+                    return
+
+                # Direct activation for afc_lane, toolhead, single
                 if activate_spool(spool_id, action, target):
                     if target:
                         app_state.active_spools[target] = spool_id
                     if action in ("afc_lane", "toolhead"):
                         publish_lock(target, "lock")
-                    remaining = spool.get("remaining_weight")
                     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
                         logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {target_id}")
             else:
