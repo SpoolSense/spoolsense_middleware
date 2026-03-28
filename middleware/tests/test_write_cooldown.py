@@ -123,14 +123,23 @@ class TestWriteCooldown(unittest.TestCase):
         plan = build_write_plan(scan, spool, device_id="abc123")
         self.assertIsNone(plan)
 
-    def test_build_write_plan_claims_slot_optimistically(self):
-        """build_write_plan records timestamp even before publish."""
+    def test_build_write_plan_claims_slot_on_write(self):
+        """build_write_plan records timestamp when a write plan is produced."""
         uid = "CLAIM_TEST"
         scan = FakeScanEvent(uid=uid, remaining_weight_g=800.0)
         spool = FakeSpoolInfo(remaining_weight_g=500.0)
         plan = build_write_plan(scan, spool, device_id="abc123")
         self.assertIsNotNone(plan)
         self.assertIn(uid, app_state.tag_write_timestamps)
+
+    def test_no_claim_when_write_not_needed(self):
+        """build_write_plan does NOT burn cooldown when no write is needed."""
+        uid = "NO_WRITE"
+        scan = FakeScanEvent(uid=uid, remaining_weight_g=500.0)
+        spool = FakeSpoolInfo(remaining_weight_g=500.0)  # equal — no write
+        plan = build_write_plan(scan, spool, device_id="abc123")
+        self.assertIsNone(plan)
+        self.assertNotIn(uid, app_state.tag_write_timestamps)
 
     def test_pruning_removes_expired_entries(self):
         """Lazy pruning clears expired UIDs when dict exceeds threshold."""
