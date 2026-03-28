@@ -128,7 +128,7 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
         return
 
     safe_color = ""
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
+    if color_hex:
         c = _validate_color_hex(color_hex)
         if c:
             safe_color = f"#{c}"
