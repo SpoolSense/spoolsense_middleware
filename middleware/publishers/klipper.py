@@ -325,11 +325,27 @@ class KlipperPublisher(Publisher):
                 json={"spool_id": event.spool_id},
                 timeout=5,
             ).raise_for_status()
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f"SAVE_VARIABLE VARIABLE={event.target.lower()}_spool_id VALUE={event.spool_id}"},
-                timeout=5,
-            ).raise_for_status()
+            try:
+                requests.post(
+                    f"{moonraker}/printer/gcode/script",
+                    json={"script": f"SAVE_VARIABLE VARIABLE={event.target.lower()}_spool_id VALUE={event.spool_id}"},
+                    timeout=5,
+                ).raise_for_status()
+            except Exception:
+                # Rollback: revert Spoolman to prevent orphaned spool_id (#15)
+                logger.error(
+                    "[toolhead] SAVE_VARIABLE failed for spool %s on %s — rolling back Spoolman",
+                    event.spool_id, event.target,
+                )
+                try:
+                    requests.post(
+                        f"{moonraker}/server/spoolman/spool_id",
+                        json={"spool_id": 0},
+                        timeout=5,
+                    )
+                except Exception:
+                    logger.exception("[toolhead] Rollback also failed — Spoolman may have stale spool_id")
+                raise
             logger.info(f"[toolhead] Activated spool {event.spool_id} on {event.target}")
         else:
             _send_toolhead_tag_data(

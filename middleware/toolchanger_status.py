@@ -101,7 +101,15 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
             _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
             logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number_str}_spool_id={spoolman_id}")
         except Exception:
-            logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
+            logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro} — rolling back Spoolman")
+            try:
+                requests.post(
+                    f"{moonraker}/server/spoolman/spool_id",
+                    json={"spool_id": 0},
+                    timeout=5,
+                )
+            except Exception:
+                logger.exception(f"[toolhead_stage] Rollback also failed for {macro}")
 
     # Color — always set from tag data (Spoolman or not)
     spool_color = display_spoolcolor(color_hex)
