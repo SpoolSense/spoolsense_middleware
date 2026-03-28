@@ -121,6 +121,40 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     if remaining_g is not None:
         logger.info(f"[toolhead_stage] {macro} weight: {remaining_g:.0f}g")
 
+    # Write spool data to Moonraker's lane_data database for slicer integration.
+    # AFC handles this for its lanes; for toolhead assignments we write directly.
+    # Gated by publish_lane_data config flag (opt-in).
+    if not app_state.cfg.get("publish_lane_data", False):
+        return
+
+    safe_color = ""
+    if color_hex:
+        c = _validate_color_hex(color_hex)
+        if c:
+            safe_color = f"#{c}"
+
+    safe_material = ""
+    if material and material != "Unknown":
+        safe_material = material.replace(" ", "_")
+
+    lane_value = {
+        "color": safe_color,
+        "material": safe_material,
+        "weight": round(remaining_g) if remaining_g else 0,
+        "nozzle_temp": None,
+        "bed_temp": None,
+        "spool_id": spoolman_id,
+    }
+    try:
+        requests.post(
+            f"{moonraker}/server/database/item",
+            json={"namespace": "lane_data", "key": macro, "value": lane_value},
+            timeout=5,
+        ).raise_for_status()
+        logger.info(f"[toolhead_stage] Published lane_data for {macro}: {safe_material} {safe_color}")
+    except Exception:
+        logger.exception(f"[toolhead_stage] Failed to publish lane_data for {macro}")
+
 
 def _fetch_pending_tool() -> str | None:
     """

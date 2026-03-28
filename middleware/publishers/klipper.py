@@ -141,6 +141,51 @@ def _send_toolhead_tag_data(
         logger.info(f"[toolhead] {target} weight: {remaining_g:.0f}g")
 
 
+def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
+    """
+    Write spool data to Moonraker's lane_data database for a toolhead.
+
+    AFC writes lane_data for its own lanes internally. For direct toolhead
+    assignments (T0, T1, etc.), there is no AFC — so we write to the same
+    namespace so Orca Slicer and other slicers see the tool's filament info.
+
+    Gated by publish_lane_data config flag (opt-in).
+    """
+    if not app_state.cfg.get("publish_lane_data", False):
+        return
+    if not moonraker or not event.target:
+        return
+
+    color = ""
+    if event.color:
+        safe = _validate_color_hex(event.color)
+        if safe:
+            color = f"#{safe}"
+
+    material = ""
+    if event.material and event.material != "Unknown":
+        material = event.material.replace(" ", "_")
+
+    value = {
+        "color": color,
+        "material": material,
+        "weight": round(event.weight) if event.weight else 0,
+        "nozzle_temp": event.nozzle_temp_max,
+        "bed_temp": event.bed_temp_max,
+        "spool_id": event.spool_id,
+    }
+
+    try:
+        requests.post(
+            f"{moonraker}/server/database/item",
+            json={"namespace": "lane_data", "key": event.target, "value": value},
+            timeout=5,
+        ).raise_for_status()
+        logger.info(f"[toolhead] Published lane_data for {event.target}: {material} {color}")
+    except Exception:
+        logger.exception(f"[toolhead] Failed to publish lane_data for {event.target}")
+
+
 class KlipperPublisher(Publisher):
     """
     Primary publisher for Klipper/Moonraker printers.
@@ -256,8 +301,8 @@ class KlipperPublisher(Publisher):
         """
         Activate spool on a specific toolhead.
 
-        Spoolman path: POST /server/spoolman/spool_id + SAVE_VARIABLE
-        Tag-only path: _send_toolhead_tag_data() (color via SET_GCODE_VARIABLE)
+        Spoolman path: POST /server/spoolman/spool_id + SAVE_VARIABLE + lane_data
+        Tag-only path: _send_toolhead_tag_data() (color via SET_GCODE_VARIABLE) + lane_data
         """
         if not event.target:
             logger.error("KlipperPublisher [toolhead]: missing target")
@@ -282,5 +327,11 @@ class KlipperPublisher(Publisher):
                 event.material or "",
                 event.weight,
             )
+
+        # Write spool data to Moonraker's lane_data database so Orca Slicer
+        # and other slicers can auto-populate tool info. AFC handles this
+        # internally for its lanes; for direct toolhead assignments we must
+        # write it ourselves.
+        _publish_toolhead_lane_data(moonraker, event)
 
         return True
