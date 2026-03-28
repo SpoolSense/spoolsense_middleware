@@ -1,0 +1,35 @@
+name: Sync changelog to docs site
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout middleware
+        uses: actions/checkout@v4
+
+      - name: Checkout docs site
+        uses: actions/checkout@v4
+        with:
+          repository: SpoolSense/spoolsense.org
+          token: ${{ secrets.DOCS_PUSH_TOKEN }}
+          path: docs-site
+
+      - name: Update middleware changelog
+        run: |
+          cp middleware/CHANGELOG.md docs-site/docs/releases/middleware.md
+          sed -i '1s/.*/# Middleware Changelog/' docs-site/docs/releases/middleware.md
+
+      - name: Commit and push
+        working-directory: docs-site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/releases/middleware.md
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: sync middleware changelog from ${{ github.ref_name }}"
+          git push

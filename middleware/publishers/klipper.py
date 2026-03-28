@@ -177,6 +177,10 @@ def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
     if event.material and event.material != "Unknown":
         material = event.material.replace(" ", "_")
 
+    # Extract tool number from target (e.g., "T0" → "0") for Orca Slicer lane sync
+    lane_match = re.match(r"[Tt](\d+)", event.target)
+    lane = lane_match.group(1) if lane_match else event.target
+
     value = {
         "color": color,
         "material": material,
@@ -184,6 +188,7 @@ def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
         "nozzle_temp": event.nozzle_temp_max,
         "bed_temp": event.bed_temp_max,
         "spool_id": event.spool_id,
+        "lane": lane,
     }
 
     try:
