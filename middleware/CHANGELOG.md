@@ -4,20 +4,13 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
-## [1.5.5] - 2026-03-28
-
-### Fixed
-
-- **Black spool LED display** — Black spools show as dim white (#333333) on LED since black = LED off looks like no spool is scanned. New `display_spoolcolor()` helper centralizes the normalization logic across all 4 color paths.
-- **Broken toolchanger_status tests** — tests updated for current API (string tool names, `_fetch_pending_tool`). Added coverage for white color, black→dim white substitution, and lane_data write gating.
-
----
-
-## [1.5.4] - 2026-03-27
+## [1.5.4] - 2026-03-28
 
 ### Fixed
 
 - **Toolhead lane_data for slicer integration** — `publish_lane_data: true` now works for toolchanger users. When a spool is assigned to a toolhead (T0, T1, etc.) via `ASSIGN_SPOOL` or direct toolhead activation, the spool data (color, material, weight, temps, spool_id) is written to Moonraker's `lane_data` database. Previously only AFC lanes were populated (by AFC itself). Orca Slicer and other slicers now auto-populate tool info for toolchanger setups. Closes #32.
+- **Black spool LED display** — Black spools show as dim white (#333333) on LED since black = LED off looks like no spool is scanned. New `display_spoolcolor()` helper centralizes the normalization logic across all 4 color paths.
+- **Broken toolchanger_status tests** — tests updated for current API (string tool names, `_fetch_pending_tool`). Added coverage for white color, black→dim white substitution, and lane_data write gating.
 
 ### Added
 
