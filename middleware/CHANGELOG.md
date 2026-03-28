@@ -4,6 +4,15 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.5] - 2026-03-28
+
+### Fixed
+
+- **Black spool LED display** — Black spools show as dim white (#333333) on LED since black = LED off looks like no spool is scanned. New `display_spoolcolor()` helper centralizes the normalization logic across all 4 color paths.
+- **Broken toolchanger_status tests** — tests updated for current API (string tool names, `_fetch_pending_tool`). Added coverage for white color, black→dim white substitution, and lane_data write gating.
+
+---
+
 ## [1.5.4] - 2026-03-27
 
 ### Fixed

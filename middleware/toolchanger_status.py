@@ -35,7 +35,7 @@ import threading
 import requests
 
 import app_state
-from publishers.klipper import _send_gcode, _validate_color_hex
+from publishers.klipper import _send_gcode, _validate_color_hex, display_spoolcolor
 
 logger = logging.getLogger(__name__)
 
@@ -104,17 +104,16 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
             logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
 
     # Color — always set from tag data (Spoolman or not)
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is not None:
-            try:
-                _send_gcode(
-                    moonraker,
-                    f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{safe_color}'\"",
-                )
-                logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{safe_color}'")
-            except Exception:
-                logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
+    spool_color = display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(
+                moonraker,
+                f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{spool_color}'\"",
+            )
+            logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{spool_color}'")
+        except Exception:
+            logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
 
     if material:
         logger.info(f"[toolhead_stage] {macro} material: {material}")
