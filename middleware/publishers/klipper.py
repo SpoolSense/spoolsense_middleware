@@ -342,7 +342,7 @@ class KlipperPublisher(Publisher):
                         f"{moonraker}/server/spoolman/spool_id",
                         json={"spool_id": 0},
                         timeout=5,
-                    )
+                    ).raise_for_status()
                 except Exception:
                     logger.exception("[toolhead] Rollback also failed — Spoolman may have stale spool_id")
                 raise

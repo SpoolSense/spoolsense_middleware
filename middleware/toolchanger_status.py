@@ -79,7 +79,12 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     material: str = pending.get("material", "")
     remaining_g: float | None = pending.get("remaining_g")
 
-    # Spoolman path — set spool_id and persist
+    # Spoolman path — set spool_id, gcode variable, and persist to disk.
+    # If step 1 (Spoolman) fails, bail out entirely — no partial state.
+    # If step 3 (SAVE_VARIABLE) fails, rollback steps 1 and 2 to prevent
+    # orphaned assignments that disappear after reboot (#15).
+    spoolman_set = False
+    gcode_var_set = False
     if spoolman_id is not None:
         try:
             requests.post(
@@ -87,29 +92,38 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
                 json={"spool_id": spoolman_id},
                 timeout=5,
             ).raise_for_status()
+            spoolman_set = True
             logger.info(f"[toolhead_stage] SET_ACTIVE_SPOOL {spoolman_id} on {macro}")
         except Exception:
-            logger.exception(f"[toolhead_stage] Failed to set active spool on {macro}")
+            logger.exception(f"[toolhead_stage] Failed to set active spool on {macro} — skipping persist")
 
-        try:
-            _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}")
-            logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} spool_id={spoolman_id}")
-        except Exception:
-            logger.exception(f"[toolhead_stage] Failed to set spool_id variable on {macro}")
-
-        try:
-            _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
-            logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number_str}_spool_id={spoolman_id}")
-        except Exception:
-            logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro} — rolling back Spoolman")
+        if spoolman_set:
             try:
-                requests.post(
-                    f"{moonraker}/server/spoolman/spool_id",
-                    json={"spool_id": 0},
-                    timeout=5,
-                )
+                _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}")
+                gcode_var_set = True
+                logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} spool_id={spoolman_id}")
             except Exception:
-                logger.exception(f"[toolhead_stage] Rollback also failed for {macro}")
+                logger.exception(f"[toolhead_stage] Failed to set spool_id variable on {macro}")
+
+            try:
+                _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
+                logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number_str}_spool_id={spoolman_id}")
+            except Exception:
+                logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro} — rolling back")
+                try:
+                    requests.post(
+                        f"{moonraker}/server/spoolman/spool_id",
+                        json={"spool_id": 0},
+                        timeout=5,
+                    ).raise_for_status()
+                except Exception:
+                    logger.exception(f"[toolhead_stage] Spoolman rollback failed for {macro}")
+                if gcode_var_set:
+                    try:
+                        _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE=0")
+                    except Exception:
+                        logger.exception(f"[toolhead_stage] Gcode variable rollback failed for {macro}")
+                return
 
     # Color — always set from tag data (Spoolman or not)
     spool_color = display_spoolcolor(color_hex)
