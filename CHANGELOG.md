@@ -6,6 +6,10 @@ All notable changes to SpoolSense are documented here.
 
 ## [1.5.4] - 2026-03-28
 
+### Added
+
+- **Lane field in lane_data** — `lane_data` entries now include a `lane` field with the tool number for Orca Slicer filament sync. Added to both klipper publisher and toolchanger paths. (Thanks @mrsimicsak, PR #38)
+
 ### Fixed
 
 - **Toolhead lane_data for slicer integration** — `publish_lane_data: true` now works for toolchanger users. When a spool is assigned to a toolhead (T0, T1, etc.) via `ASSIGN_SPOOL` or direct toolhead activation, the spool data (color, material, weight, temps, spool_id) is written to Moonraker's `lane_data` database. Previously only AFC lanes were populated (by AFC itself). Orca Slicer and other slicers now auto-populate tool info for toolchanger setups. Closes #32.
