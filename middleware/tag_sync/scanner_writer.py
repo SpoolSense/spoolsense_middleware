@@ -13,8 +13,10 @@ Response topic (not consumed in Phase 1, for future observability):
 
 import json
 import logging
+import time
 import paho.mqtt.client as mqtt
 from tag_sync.policy import TagWritePlan
+import app_state
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,9 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
                 payload,
                 plan.reason,
             )
+            # Record write timestamp for cooldown tracking
+            with app_state.state_lock:
+                app_state.tag_write_timestamps[plan.uid] = time.monotonic()
     except Exception:
         logger.exception(
             "Tag write failed (non-blocking): topic=%s payload=%s",

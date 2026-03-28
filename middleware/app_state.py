@@ -59,3 +59,9 @@ lane_load_states: dict[str, bool] = {}
 # versa) before the first action completes. If this becomes a reported
 # issue, split into pending_spool_afc and pending_spool_toolchanger.
 pending_spool: dict | None = None
+
+# Tag writeback cooldown — tracks recent writes to prevent loops.
+# Maps uid → timestamp of the last write command sent.
+# Protected by state_lock.
+WRITE_COOLDOWN_SECONDS: int = 10
+tag_write_timestamps: dict[str, float] = {}

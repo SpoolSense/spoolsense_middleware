@@ -6,8 +6,10 @@ It decides whether a tag write should occur and what should be written.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
+import app_state
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,18 @@ def build_write_plan(
     if not scan.uid:
         # No UID means we can't target the tag
         return None
+
+    # Cooldown — prevent write loops from our own tag state republishes
+    with app_state.state_lock:
+        last_write = app_state.tag_write_timestamps.get(scan.uid)
+    if last_write is not None:
+        elapsed = time.monotonic() - last_write
+        if elapsed < app_state.WRITE_COOLDOWN_SECONDS:
+            logger.debug(
+                "build_write_plan: skipping uid=%s — wrote %.1fs ago (cooldown %ds)",
+                scan.uid, elapsed, app_state.WRITE_COOLDOWN_SECONDS,
+            )
+            return None
 
     spoolman_remaining = spool_info.remaining_weight_g if spool_info else None
     tag_remaining = scan.remaining_weight_g
