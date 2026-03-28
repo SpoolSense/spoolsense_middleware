@@ -48,7 +48,7 @@ def _validate_material(material: str) -> bool:
 _LED_BLACK_SUBSTITUTE = "333333"
 
 
-def _display_spoolcolor(color_hex: str) -> str | None:
+def display_spoolcolor(color_hex: str) -> str | None:
     """Normalize a spool color for display (LED, gcode variable). Returns 6-digit hex or None if empty/invalid."""
     if not color_hex:
         return None
@@ -91,7 +91,7 @@ def _send_afc_lane_data(
     if not moonraker:
         return
 
-    spool_color = _display_spoolcolor(color_hex)
+    spool_color = display_spoolcolor(color_hex)
     if spool_color is not None:
         try:
             _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={spool_color}")
@@ -134,7 +134,7 @@ def _send_toolhead_tag_data(
     if not moonraker or not target:
         return
 
-    spool_color = _display_spoolcolor(color_hex)
+    spool_color = display_spoolcolor(color_hex)
     if spool_color is not None:
         try:
             _send_gcode(

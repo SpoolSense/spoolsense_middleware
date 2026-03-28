@@ -35,7 +35,7 @@ import threading
 import requests
 
 import app_state
-from publishers.klipper import _send_gcode, _validate_color_hex, _display_spoolcolor
+from publishers.klipper import _send_gcode, _validate_color_hex, display_spoolcolor
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
             logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
 
     # Color — always set from tag data (Spoolman or not)
-    spool_color = _display_spoolcolor(color_hex)
+    spool_color = display_spoolcolor(color_hex)
     if spool_color is not None:
         try:
             _send_gcode(
