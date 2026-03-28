@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 """
 SpoolSense NFC Middleware
 =========================
@@ -162,7 +162,9 @@ def main() -> None:
         app_state.afc_status_sync = AfcStatusSync()
         app_state.afc_status_sync.start()
 
-    if has_toolhead_stage_scanners(app_state.cfg):
+    if has_toolhead_stage_scanners(app_state.cfg) or (
+        has_afc_scanners(app_state.cfg) and app_state.cfg.get("publish_lane_data", False)
+    ):
         app_state.toolchanger_status_sync = ToolchangerStatusSync()
         app_state.toolchanger_status_sync.start()
 

@@ -35,7 +35,7 @@ import threading
 import requests
 
 import app_state
-from publishers.klipper import _send_gcode, _validate_color_hex
+from publishers.klipper import _send_gcode, _validate_color_hex, display_spoolcolor
 
 logger = logging.getLogger(__name__)
 
@@ -104,22 +104,55 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
             logger.exception(f"[toolhead_stage] Failed to save spool_id for {macro}")
 
     # Color — always set from tag data (Spoolman or not)
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is not None:
-            try:
-                _send_gcode(
-                    moonraker,
-                    f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{safe_color}'\"",
-                )
-                logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{safe_color}'")
-            except Exception:
-                logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
+    spool_color = display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(
+                moonraker,
+                f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{spool_color}'\"",
+            )
+            logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{spool_color}'")
+        except Exception:
+            logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
 
     if material:
         logger.info(f"[toolhead_stage] {macro} material: {material}")
     if remaining_g is not None:
         logger.info(f"[toolhead_stage] {macro} weight: {remaining_g:.0f}g")
+
+    # Write spool data to Moonraker's lane_data database for slicer integration.
+    # AFC handles this for its lanes; for toolhead assignments we write directly.
+    # Gated by publish_lane_data config flag (opt-in).
+    if not app_state.cfg.get("publish_lane_data", False):
+        return
+
+    safe_color = ""
+    if color_hex:
+        c = _validate_color_hex(color_hex)
+        if c:
+            safe_color = f"#{c}"
+
+    safe_material = ""
+    if material and material != "Unknown":
+        safe_material = material.replace(" ", "_")
+
+    lane_value = {
+        "color": safe_color,
+        "material": safe_material,
+        "weight": round(remaining_g) if remaining_g else 0,
+        "nozzle_temp": None,
+        "bed_temp": None,
+        "spool_id": spoolman_id,
+    }
+    try:
+        requests.post(
+            f"{moonraker}/server/database/item",
+            json={"namespace": "lane_data", "key": macro, "value": lane_value},
+            timeout=5,
+        ).raise_for_status()
+        logger.info(f"[toolhead_stage] Published lane_data for {macro}: {safe_material} {safe_color}")
+    except Exception:
+        logger.exception(f"[toolhead_stage] Failed to publish lane_data for {macro}")
 
 
 def _fetch_pending_tool() -> str | None:

@@ -43,6 +43,23 @@ def _validate_material(material: str) -> bool:
     return bool(material) and len(material) <= 50 and bool(re.fullmatch(r"[A-Za-z0-9_ -]{1,50}", material))
 
 
+# Black (000000) can't be displayed on an LED — use dim white instead
+# so the user can tell a spool is scanned vs no spool at all.
+_LED_BLACK_SUBSTITUTE = "333333"
+
+
+def display_spoolcolor(color_hex: str) -> str | None:
+    """Normalize a spool color for display (LED, gcode variable). Returns 6-digit hex or None if empty/invalid."""
+    if not color_hex:
+        return None
+    safe = _validate_color_hex(color_hex)
+    if safe is None:
+        return None
+    if safe == "000000":
+        return _LED_BLACK_SUBSTITUTE
+    return safe
+
+
 def _send_gcode(moonraker: str, script: str) -> None:
     """
     POST a single gcode script to Moonraker.
@@ -74,16 +91,13 @@ def _send_afc_lane_data(
     if not moonraker:
         return
 
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is None:
-            logger.warning(f"[afc] Skipping SET_COLOR for {toolhead} — invalid color_hex: {color_hex!r}")
-        else:
-            try:
-                _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={safe_color}")
-                logger.info(f"[afc] SET_COLOR {toolhead} = {safe_color}")
-            except Exception:
-                logger.exception(f"[afc] SET_COLOR failed for {toolhead}")
+    spool_color = display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={spool_color}")
+            logger.info(f"[afc] SET_COLOR {toolhead} = {spool_color}")
+        except Exception:
+            logger.exception(f"[afc] SET_COLOR failed for {toolhead}")
 
     if material and material != "Unknown":
         if not _validate_material(material):
@@ -120,25 +134,67 @@ def _send_toolhead_tag_data(
     if not moonraker or not target:
         return
 
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is None:
-            logger.warning(f"[toolhead] Skipping SET_GCODE_VARIABLE for {target} — invalid color: {color_hex!r}")
-        else:
-            try:
-                _send_gcode(
-                    moonraker,
-                    f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{safe_color}'\"",
-                )
-                logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{safe_color}'")
-            except Exception:
-                logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
+    spool_color = display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(
+                moonraker,
+                f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{spool_color}'\"",
+            )
+            logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{spool_color}'")
+        except Exception:
+            logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
 
     if material and material != "Unknown":
         logger.info(f"[toolhead] {target} material: {material}")
 
     if remaining_g is not None and remaining_g > 0:
         logger.info(f"[toolhead] {target} weight: {remaining_g:.0f}g")
+
+
+def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
+    """
+    Write spool data to Moonraker's lane_data database for a toolhead.
+
+    AFC writes lane_data for its own lanes internally. For direct toolhead
+    assignments (T0, T1, etc.), there is no AFC — so we write to the same
+    namespace so Orca Slicer and other slicers see the tool's filament info.
+
+    Gated by publish_lane_data config flag (opt-in).
+    """
+    if not app_state.cfg.get("publish_lane_data", False):
+        return
+    if not moonraker or not event.target:
+        return
+
+    color = ""
+    if event.color:
+        safe = _validate_color_hex(event.color)
+        if safe:
+            color = f"#{safe}"
+
+    material = ""
+    if event.material and event.material != "Unknown":
+        material = event.material.replace(" ", "_")
+
+    value = {
+        "color": color,
+        "material": material,
+        "weight": round(event.weight) if event.weight else 0,
+        "nozzle_temp": event.nozzle_temp_max,
+        "bed_temp": event.bed_temp_max,
+        "spool_id": event.spool_id,
+    }
+
+    try:
+        requests.post(
+            f"{moonraker}/server/database/item",
+            json={"namespace": "lane_data", "key": event.target, "value": value},
+            timeout=5,
+        ).raise_for_status()
+        logger.info(f"[toolhead] Published lane_data for {event.target}: {material} {color}")
+    except Exception:
+        logger.exception(f"[toolhead] Failed to publish lane_data for {event.target}")
 
 
 class KlipperPublisher(Publisher):
@@ -256,8 +312,8 @@ class KlipperPublisher(Publisher):
         """
         Activate spool on a specific toolhead.
 
-        Spoolman path: POST /server/spoolman/spool_id + SAVE_VARIABLE
-        Tag-only path: _send_toolhead_tag_data() (color via SET_GCODE_VARIABLE)
+        Spoolman path: POST /server/spoolman/spool_id + SAVE_VARIABLE + lane_data
+        Tag-only path: _send_toolhead_tag_data() (color via SET_GCODE_VARIABLE) + lane_data
         """
         if not event.target:
             logger.error("KlipperPublisher [toolhead]: missing target")
@@ -282,5 +338,11 @@ class KlipperPublisher(Publisher):
                 event.material or "",
                 event.weight,
             )
+
+        # Write spool data to Moonraker's lane_data database so Orca Slicer
+        # and other slicers can auto-populate tool info. AFC handles this
+        # internally for its lanes; for direct toolhead assignments we must
+        # write it ourselves.
+        _publish_toolhead_lane_data(moonraker, event)
 
         return True

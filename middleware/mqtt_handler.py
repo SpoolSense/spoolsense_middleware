@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan  # activate_spool used for UID-only path
+from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_toolhead_scanners
 from var_watcher import sync_from_klipper_vars, start_klipper_watcher
@@ -102,10 +103,11 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                 # Send color to scanner LED — UID-only tags have no color on the tag,
                 # so the scanner LED won't change unless we tell it the color from Spoolman
                 device_id = _extract_scanner_device_id(topic)
-                if device_id and color_hex and color_hex not in ("FFFFFF", "000000"):
+                display_color = display_spoolcolor(color_hex)
+                if device_id and display_color:
                     color_topic = f"{app_state.cfg.get('scanner_topic_prefix', 'spoolsense')}/{device_id}/cmd/set_color"
-                    client.publish(color_topic, color_hex)
-                    logger.info(f"Sent color #{color_hex} to scanner {device_id} LED")
+                    client.publish(color_topic, display_color)
+                    logger.info(f"Sent color #{display_color} to scanner {device_id} LED")
 
                 # toolhead_stage/afc_stage: cache for later assignment via macro or lane load
                 if action in ("toolhead_stage", "afc_stage"):
