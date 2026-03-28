@@ -43,6 +43,23 @@ def _validate_material(material: str) -> bool:
     return bool(material) and len(material) <= 50 and bool(re.fullmatch(r"[A-Za-z0-9_ -]{1,50}", material))
 
 
+# Black (000000) can't be displayed on an LED — use dim white instead
+# so the user can tell a spool is scanned vs no spool at all.
+_LED_BLACK_SUBSTITUTE = "333333"
+
+
+def _display_spoolcolor(color_hex: str) -> str | None:
+    """Normalize a spool color for display (LED, gcode variable). Returns 6-digit hex or None if empty/invalid."""
+    if not color_hex:
+        return None
+    safe = _validate_color_hex(color_hex)
+    if safe is None:
+        return None
+    if safe == "000000":
+        return _LED_BLACK_SUBSTITUTE
+    return safe
+
+
 def _send_gcode(moonraker: str, script: str) -> None:
     """
     POST a single gcode script to Moonraker.
@@ -74,16 +91,13 @@ def _send_afc_lane_data(
     if not moonraker:
         return
 
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is None:
-            logger.warning(f"[afc] Skipping SET_COLOR for {toolhead} — invalid color_hex: {color_hex!r}")
-        else:
-            try:
-                _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={safe_color}")
-                logger.info(f"[afc] SET_COLOR {toolhead} = {safe_color}")
-            except Exception:
-                logger.exception(f"[afc] SET_COLOR failed for {toolhead}")
+    spool_color = _display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(moonraker, f"SET_COLOR LANE={toolhead} COLOR={spool_color}")
+            logger.info(f"[afc] SET_COLOR {toolhead} = {spool_color}")
+        except Exception:
+            logger.exception(f"[afc] SET_COLOR failed for {toolhead}")
 
     if material and material != "Unknown":
         if not _validate_material(material):
@@ -120,19 +134,16 @@ def _send_toolhead_tag_data(
     if not moonraker or not target:
         return
 
-    if color_hex and color_hex not in ("FFFFFF", "000000", ""):
-        safe_color = _validate_color_hex(color_hex)
-        if safe_color is None:
-            logger.warning(f"[toolhead] Skipping SET_GCODE_VARIABLE for {target} — invalid color: {color_hex!r}")
-        else:
-            try:
-                _send_gcode(
-                    moonraker,
-                    f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{safe_color}'\"",
-                )
-                logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{safe_color}'")
-            except Exception:
-                logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
+    spool_color = _display_spoolcolor(color_hex)
+    if spool_color is not None:
+        try:
+            _send_gcode(
+                moonraker,
+                f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{spool_color}'\"",
+            )
+            logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{spool_color}'")
+        except Exception:
+            logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
 
     if material and material != "Unknown":
         logger.info(f"[toolhead] {target} material: {material}")
