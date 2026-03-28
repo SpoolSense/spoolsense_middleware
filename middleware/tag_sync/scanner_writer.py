@@ -65,7 +65,9 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
                 payload,
                 plan.reason,
             )
-            # Record write timestamp for cooldown tracking
+            # Refresh cooldown timestamp from actual publish time.
+            # build_write_plan() claims the slot optimistically; this extends
+            # the window so the cooldown starts from the real publish moment.
             with app_state.state_lock:
                 app_state.tag_write_timestamps[plan.uid] = time.monotonic()
     except Exception:

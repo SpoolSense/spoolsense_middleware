@@ -123,6 +123,90 @@ class TestWriteCooldown(unittest.TestCase):
         plan = build_write_plan(scan, spool, device_id="abc123")
         self.assertIsNone(plan)
 
+    def test_build_write_plan_claims_slot_optimistically(self):
+        """build_write_plan records timestamp even before publish."""
+        uid = "CLAIM_TEST"
+        scan = FakeScanEvent(uid=uid, remaining_weight_g=800.0)
+        spool = FakeSpoolInfo(remaining_weight_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123")
+        self.assertIsNotNone(plan)
+        self.assertIn(uid, app_state.tag_write_timestamps)
+
+    def test_pruning_removes_expired_entries(self):
+        """Lazy pruning clears expired UIDs when dict exceeds threshold."""
+        now = time.monotonic()
+        expired_time = now - (app_state.WRITE_COOLDOWN_SECONDS + 5)
+        # Fill with 60 expired entries to trigger pruning (threshold > 50)
+        for i in range(60):
+            app_state.tag_write_timestamps[f"OLD_{i}"] = expired_time
+
+        # New write should trigger pruning
+        scan = FakeScanEvent(uid="NEW_UID", remaining_weight_g=800.0)
+        spool = FakeSpoolInfo(remaining_weight_g=500.0)
+        build_write_plan(scan, spool, device_id="abc123")
+
+        # Expired entries should be pruned, only NEW_UID remains
+        self.assertIn("NEW_UID", app_state.tag_write_timestamps)
+        self.assertNotIn("OLD_0", app_state.tag_write_timestamps)
+        self.assertLessEqual(len(app_state.tag_write_timestamps), 2)
+
+
+class TestScannerWriterTimestamp(unittest.TestCase):
+    """Verify scanner_writer.execute records timestamps correctly."""
+
+    def setUp(self):
+        app_state.tag_write_timestamps.clear()
+        app_state.state_lock = threading.Lock()
+
+    def _get_execute_and_mqtt(self):
+        """Import scanner_writer with paho.mqtt.client.MQTT_ERR_SUCCESS patched."""
+        # Set the constant on the mock before (re)importing
+        paho_mock = sys.modules.get("paho.mqtt.client")
+        if paho_mock:
+            paho_mock.MQTT_ERR_SUCCESS = 0
+        if "tag_sync.scanner_writer" in sys.modules:
+            del sys.modules["tag_sync.scanner_writer"]
+        import tag_sync.scanner_writer as sw
+        # Patch the module-level mqtt reference so the comparison works
+        sw.mqtt.MQTT_ERR_SUCCESS = 0
+        return sw.execute
+
+    def test_successful_publish_refreshes_timestamp(self):
+        """execute() refreshes the cooldown timestamp on successful publish."""
+        execute = self._get_execute_and_mqtt()
+
+        uid = "WRITER_TEST"
+        plan = TagWritePlan(device_id="dev1", uid=uid, command="update_remaining",
+                            payload={"remaining_g": 500.0})
+
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rc = 0
+        mock_client.publish.return_value = mock_result
+
+        execute(plan, mock_client)
+        self.assertIn(uid, app_state.tag_write_timestamps)
+
+    def test_failed_publish_preserves_optimistic_claim(self):
+        """execute() does not clear timestamp on publish failure (rate-limits retries)."""
+        execute = self._get_execute_and_mqtt()
+
+        uid = "FAIL_TEST"
+        # Simulate optimistic claim from build_write_plan
+        app_state.tag_write_timestamps[uid] = time.monotonic()
+
+        plan = TagWritePlan(device_id="dev1", uid=uid, command="update_remaining",
+                            payload={"remaining_g": 500.0})
+
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rc = 4  # Non-zero = failure
+        mock_client.publish.return_value = mock_result
+
+        execute(plan, mock_client)
+        # Timestamp from optimistic claim should still be there
+        self.assertIn(uid, app_state.tag_write_timestamps)
+
 
 if __name__ == "__main__":
     unittest.main()

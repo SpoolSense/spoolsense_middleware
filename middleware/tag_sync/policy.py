@@ -1,8 +1,8 @@
 """
 tag_sync/policy.py — Write decision logic for NFC tag writeback.
 
-This module is pure logic — no MQTT, no HTTP, no side effects.
-It decides whether a tag write should occur and what should be written.
+Decides whether a tag write should occur and what should be written.
+Uses app_state for per-UID write cooldown tracking (issue #21).
 """
 
 import logging
@@ -78,17 +78,29 @@ def build_write_plan(
         # No UID means we can't target the tag
         return None
 
-    # Cooldown — prevent write loops from our own tag state republishes
+    # Cooldown — prevent write loops from our own tag state republishes.
+    # Check + claim is atomic under state_lock to prevent TOCTOU races
+    # where two near-simultaneous scans both pass the gate.
+    now = time.monotonic()
     with app_state.state_lock:
         last_write = app_state.tag_write_timestamps.get(scan.uid)
-    if last_write is not None:
-        elapsed = time.monotonic() - last_write
-        if elapsed < app_state.WRITE_COOLDOWN_SECONDS:
-            logger.debug(
-                "build_write_plan: skipping uid=%s — wrote %.1fs ago (cooldown %ds)",
-                scan.uid, elapsed, app_state.WRITE_COOLDOWN_SECONDS,
-            )
-            return None
+        if last_write is not None:
+            elapsed = now - last_write
+            if elapsed < app_state.WRITE_COOLDOWN_SECONDS:
+                logger.debug(
+                    "build_write_plan: skipping uid=%s — wrote %.1fs ago (cooldown %ds)",
+                    scan.uid, elapsed, app_state.WRITE_COOLDOWN_SECONDS,
+                )
+                return None
+        # Claim the slot immediately so concurrent calls see it
+        app_state.tag_write_timestamps[scan.uid] = now
+
+        # Lazy prune expired entries (cheap — only runs when dict is large)
+        if len(app_state.tag_write_timestamps) > 50:
+            expired = [k for k, v in app_state.tag_write_timestamps.items()
+                       if now - v > app_state.WRITE_COOLDOWN_SECONDS]
+            for k in expired:
+                del app_state.tag_write_timestamps[k]
 
     spoolman_remaining = spool_info.remaining_weight_g if spool_info else None
     tag_remaining = scan.remaining_weight_g
