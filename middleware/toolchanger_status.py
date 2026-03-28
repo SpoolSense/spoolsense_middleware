@@ -143,6 +143,7 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
         "nozzle_temp": None,
         "bed_temp": None,
         "spool_id": spoolman_id,
+        "lane": tool_number_str,
     }
     try:
         requests.post(
