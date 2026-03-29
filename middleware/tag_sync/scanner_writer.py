@@ -21,6 +21,12 @@ import app_state
 logger = logging.getLogger(__name__)
 
 
+def _release_cooldown_claim(uid: str) -> None:
+    """Remove the optimistic cooldown claim so a retry isn't blocked."""
+    with app_state.state_lock:
+        app_state.tag_write_timestamps.pop(uid, None)
+
+
 def execute(plan: TagWritePlan, mqtt_client) -> None:
     """
     Publishes a write command to the spoolsense_scanner firmware.
@@ -58,6 +64,8 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
                 "Tag write publish failed (rc=%d): topic=%s payload=%s",
                 result.rc, topic, payload,
             )
+            # Release optimistic cooldown claim so a retry isn't blocked.
+            _release_cooldown_claim(plan.uid)
         else:
             logger.info(
                 "Tag write published: topic=%s payload=%s reason=%s",
@@ -76,3 +84,4 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
             topic,
             payload,
         )
+        _release_cooldown_claim(plan.uid)

@@ -196,8 +196,8 @@ class TestScannerWriterTimestamp(unittest.TestCase):
         execute(plan, mock_client)
         self.assertIn(uid, app_state.tag_write_timestamps)
 
-    def test_failed_publish_preserves_optimistic_claim(self):
-        """execute() does not clear timestamp on publish failure (rate-limits retries)."""
+    def test_failed_publish_releases_cooldown_claim(self):
+        """execute() clears cooldown on publish failure so retry isn't blocked."""
         execute = self._get_execute_and_mqtt()
 
         uid = "FAIL_TEST"
@@ -213,8 +213,26 @@ class TestScannerWriterTimestamp(unittest.TestCase):
         mock_client.publish.return_value = mock_result
 
         execute(plan, mock_client)
-        # Timestamp from optimistic claim should still be there
-        self.assertIn(uid, app_state.tag_write_timestamps)
+        # Claim should be released so a retry can proceed
+        self.assertNotIn(uid, app_state.tag_write_timestamps)
+
+    def test_exception_releases_cooldown_claim(self):
+        """execute() clears cooldown on exception so retry isn't blocked."""
+        execute = self._get_execute_and_mqtt()
+
+        uid = "EXCEPTION_TEST"
+        # Simulate optimistic claim from build_write_plan
+        app_state.tag_write_timestamps[uid] = time.monotonic()
+
+        plan = TagWritePlan(device_id="dev1", uid=uid, command="update_remaining",
+                            payload={"remaining_g": 500.0})
+
+        mock_client = MagicMock()
+        mock_client.publish.side_effect = OSError("connection lost")
+
+        execute(plan, mock_client)
+        # Claim should be released so a retry can proceed
+        self.assertNotIn(uid, app_state.tag_write_timestamps)
 
 
 if __name__ == "__main__":
