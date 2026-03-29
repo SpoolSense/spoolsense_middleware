@@ -4,6 +4,15 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.5] - 2026-03-28
+
+### Fixed
+
+- **Tag writeback loop prevention** — per-UID cooldown (10s) prevents the middleware from re-writing a tag triggered by its own state republish. Cooldown claim is released on MQTT failure so retries aren't blocked. Closes #21.
+- **Atomic toolhead activation** — if SAVE_VARIABLE fails, Spoolman spool_id and gcode variables are rolled back to prevent orphaned assignments that disappear after reboot. Closes #15.
+
+---
+
 ## [1.5.4] - 2026-03-28
 
 ### Added
