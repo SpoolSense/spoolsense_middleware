@@ -117,6 +117,65 @@ def _sync_lane_state(data: dict) -> None:
                 )
 
 
+def _sync_lane_state_single(lane_name: str, data: dict) -> None:
+    """
+    Process a single lane's state update from websocket delta.
+
+    Unlike _sync_lane_state() which processes the full AFC response,
+    this handles one lane at a time from websocket push notifications.
+    """
+    spool_id = data.get("spool_id")
+    load_state = data.get("load")
+
+    action = None
+    newly_loaded = False
+    pending = None
+
+    with app_state.state_lock:
+        prev_spool = app_state.active_spools.get(lane_name)
+        prev_load = app_state.lane_load_states.get(lane_name, False)
+
+        # Update spool tracking
+        if spool_id is not None:
+            if spool_id and not prev_spool:
+                app_state.active_spools[lane_name] = spool_id
+                action = "lock"
+            elif not spool_id and prev_spool:
+                app_state.active_spools.pop(lane_name, None)
+                action = "clear"
+            elif spool_id and spool_id != prev_spool:
+                app_state.active_spools[lane_name] = spool_id
+                action = "lock"
+
+        # Track load transitions
+        if load_state is not None:
+            if load_state and not prev_load:
+                newly_loaded = True
+            app_state.lane_load_states[lane_name] = load_state
+
+        # Check for pending afc_stage data
+        if newly_loaded and app_state.pending_spool:
+            pending = app_state.pending_spool
+
+    # Publish lock/clear outside the lock
+    if action == "lock":
+        logger.info(f"AFC WS: {lane_name} has spool {spool_id}, locking")
+        publish_lock(lane_name, "lock")
+    elif action == "clear":
+        logger.info(f"AFC WS: {lane_name} empty, clearing")
+        publish_lock(lane_name, "clear")
+
+    # Push pending tag data to newly loaded lane
+    if newly_loaded and pending:
+        logger.info(f"AFC WS: {lane_name} just loaded — sending cached tag data")
+        _send_afc_lane_data(
+            lane_name,
+            pending.get("color_hex", ""),
+            pending.get("material", ""),
+            pending.get("remaining_g"),
+        )
+
+
 def _fetch_afc_status() -> dict | None:
     """
     Fetches the current AFC status from Moonraker.
@@ -160,25 +219,37 @@ def _fetch_afc_status() -> dict | None:
 
 class AfcStatusSync:
     """
-    Polls Moonraker's AFC status endpoint in a background thread.
+    Monitors AFC lane state via Moonraker websocket (primary) or HTTP polling (fallback).
 
     Usage:
         sync = AfcStatusSync()
-        sync.start()   # starts background polling
+        sync.start()                # HTTP polling mode
+        sync.start(use_ws=True)     # websocket mode (expects callbacks)
         ...
-        sync.stop()    # clean shutdown
-
-    The start/stop interface is designed so the polling implementation
-    can be swapped for websocket subscription without changing callers.
+        sync.stop()
     """
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._use_ws = False
 
-    def start(self) -> None:
-        """Start the background polling thread. Does an initial sync first."""
-        # Initial sync — fetch once synchronously before starting the loop
+    def on_ws_lane_update(self, lane_name: str, data: dict) -> None:
+        """Callback for MoonrakerWebsocket — processes a single lane's delta."""
+        try:
+            _sync_lane_state_single(lane_name, data)
+        except Exception:
+            logger.exception(f"AFC websocket: error processing update for {lane_name}")
+
+    def start(self, use_ws: bool = False) -> None:
+        """Start monitoring. If use_ws=True, skip polling (websocket provides data)."""
+        self._use_ws = use_ws
+
+        if use_ws:
+            logger.info("AFC status: using websocket (no polling thread)")
+            return
+
+        # HTTP polling fallback
         data = _fetch_afc_status()
         if data is not None:
             _sync_lane_state(data)
@@ -200,6 +271,9 @@ class AfcStatusSync:
 
     def stop(self) -> None:
         """Signal the polling thread to stop and wait for it."""
+        if self._use_ws:
+            logger.info("AFC status: websocket mode stopped")
+            return
         if self._thread is None:
             return
         self._stop_event.set()
