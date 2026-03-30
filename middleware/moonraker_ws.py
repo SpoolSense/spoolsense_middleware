@@ -13,7 +13,7 @@ import json
 import logging
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ class MoonrakerWebsocket:
     def _dispatch_status(self, status: dict) -> None:
         """Route status updates to registered callbacks."""
         for key, value in status.items():
+            if value is None:
+                continue
             if key.startswith("AFC_stepper ") and self.on_lane_update:
                 lane_name = key[len("AFC_stepper "):]
                 self.on_lane_update(lane_name, value)
