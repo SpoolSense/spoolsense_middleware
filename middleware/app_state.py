@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from afc_status import AfcStatusSync
+    from moonraker_ws import MoonrakerWebsocket
     from publisher_manager import PublisherManager
     from toolchanger_status import ToolchangerStatusSync
 
@@ -30,6 +31,7 @@ watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
 toolchanger_status_sync: ToolchangerStatusSync | None = None
 publisher_manager: PublisherManager | None = None
+moonraker_ws: MoonrakerWebsocket | None = None
 
 # Spoolman cache
 spool_cache: dict = {}
