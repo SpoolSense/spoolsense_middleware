@@ -226,20 +226,50 @@ def _clear_pending_tool() -> None:
 
 class ToolchangerStatusSync:
     """
-    Polls the ASSIGN_SPOOL Klipper macro in a background thread.
+    Monitors ASSIGN_SPOOL macro via websocket (primary) or HTTP polling (fallback).
 
     Detects when a user sets a pending tool via macro and pushes
-    cached spool data to that tool. Same start/stop interface as
-    AfcStatusSync for consistency.
+    cached spool data to that tool.
     """
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._use_ws = False
 
-    def start(self) -> None:
-        """Start the background polling thread."""
-        # Verify the macro exists
+    def on_ws_assign_spool(self, pending_tool: str) -> None:
+        """Callback for MoonrakerWebsocket — processes macro assignment."""
+        if not pending_tool or not pending_tool.strip():
+            return
+
+        tool_name = pending_tool.strip()
+        logger.info(f"Macro assign WS: tool {tool_name} requested")
+
+        pending: dict | None = None
+        with app_state.state_lock:
+            if app_state.pending_spool:
+                pending = app_state.pending_spool
+                app_state.pending_spool = None
+
+        if pending:
+            logger.info(f"Macro assign WS: assigning cached spool data to {tool_name}")
+            _assign_spool_to_tool(tool_name, pending)
+        else:
+            logger.warning(
+                f"Macro assign WS: {tool_name} requested but no spool scanned yet"
+            )
+
+        _clear_pending_tool()
+
+    def start(self, use_ws: bool = False) -> None:
+        """Start monitoring. If use_ws=True, skip polling."""
+        self._use_ws = use_ws
+
+        if use_ws:
+            logger.info("Macro assign: using websocket (no polling thread)")
+            return
+
+        # HTTP polling fallback
         initial = _fetch_pending_tool()
         if initial is None:
             logger.warning(
@@ -260,6 +290,9 @@ class ToolchangerStatusSync:
 
     def stop(self) -> None:
         """Signal the polling thread to stop and wait for it."""
+        if self._use_ws:
+            logger.info("Macro assign: websocket mode stopped")
+            return
         if self._thread is None:
             return
         self._stop_event.set()
