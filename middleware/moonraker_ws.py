@@ -91,7 +91,7 @@ class MoonrakerWebsocket:
 
     def _run_loop(self) -> None:
         """Reconnect loop with exponential backoff."""
-        consecutive_failures = 0
+        self._consecutive_failures = 0
 
         while not self._stop_event.is_set():
             try:
@@ -110,17 +110,18 @@ class MoonrakerWebsocket:
             if self._stop_event.is_set():
                 break
 
-            consecutive_failures += 1
-            wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
+            self._consecutive_failures += 1
+            wait = min(RETRY_BASE * (2 ** (self._consecutive_failures - 1)), RETRY_MAX)
             logger.warning(
                 f"MoonrakerWebsocket: disconnected, reconnecting in {wait:.0f}s "
-                f"(attempt {consecutive_failures})"
+                f"(attempt {self._consecutive_failures})"
             )
             self._stop_event.wait(timeout=wait)
 
     def _on_open(self, ws) -> None:
         """Connected — send object subscription."""
         logger.info("MoonrakerWebsocket: connected")
+        self._consecutive_failures = 0
         objects = self._build_subscribe_objects()
         self._subscribe_id += 1
         subscribe_msg = {

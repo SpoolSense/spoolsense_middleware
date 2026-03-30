@@ -156,6 +156,12 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         # Check for pending afc_stage data
         if newly_loaded and app_state.pending_spool:
             pending = app_state.pending_spool
+            app_state.pending_spool = None
+
+        # Update lane status
+        status = data.get("status")
+        if status is not None:
+            app_state.lane_statuses[lane_name] = status
 
     # Publish lock/clear outside the lock
     if action == "lock":
