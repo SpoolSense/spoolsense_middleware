@@ -30,6 +30,7 @@ watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
 toolchanger_status_sync: ToolchangerStatusSync | None = None
 publisher_manager: PublisherManager | None = None
+moonraker_ws = None  # MoonrakerWebsocket instance (or None if polling)
 
 # Spoolman cache
 spool_cache: dict = {}
