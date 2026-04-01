@@ -30,17 +30,21 @@ RETRY_BASE: float = 2.0
 RETRY_MAX: float = 30.0
 
 
-def _fetch_active_spool_id() -> int | None:
+_FETCH_ERROR = object()  # sentinel: fetch failed (distinct from spool_id=None meaning "no spool")
+
+
+def _fetch_active_spool_id() -> int | None | object:
     """
     Fetches the current active spool ID from Moonraker.
 
     Returns:
         int: the active spool ID
-        None: no active spool (ejected) or error
+        None: no active spool (ejected)
+        _FETCH_ERROR: fetch failed (Moonraker unreachable, timeout, etc.)
     """
     moonraker_url = app_state.cfg.get("moonraker_url", "")
     if not moonraker_url:
-        return None
+        return _FETCH_ERROR
 
     try:
         response = requests.get(
@@ -59,19 +63,19 @@ def _fetch_active_spool_id() -> int | None:
 
     except requests.ConnectionError:
         logger.debug("Toolhead status: Moonraker not reachable")
-        return None
+        return _FETCH_ERROR
     except requests.Timeout:
         logger.warning("Toolhead status: Moonraker request timed out")
-        return None
+        return _FETCH_ERROR
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
             logger.debug("Toolhead status: Spoolman integration not configured in Moonraker")
         else:
             logger.exception("Toolhead status: HTTP error")
-        return None
+        return _FETCH_ERROR
     except Exception:
         logger.exception("Toolhead status: unexpected error")
-        return None
+        return _FETCH_ERROR
 
 
 class ToolheadStatusSync:
@@ -90,15 +94,14 @@ class ToolheadStatusSync:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._last_spool_id: int | None = None
-        self._fetch_failed: bool = False  # track if last fetch was an error
 
     def start(self) -> None:
         """Start the background polling thread."""
         # Initial fetch to establish baseline
-        spool_id = _fetch_active_spool_id()
+        result = _fetch_active_spool_id()
+        spool_id = result if result is not _FETCH_ERROR else None
         self._last_spool_id = spool_id
-        self._fetch_failed = (spool_id is None)
-        if spool_id is not None:
+        if isinstance(result, int):
             logger.info(f"Toolhead status: active spool is #{spool_id}")
         else:
             logger.info("Toolhead status: no active spool (or Moonraker unreachable)")
@@ -129,20 +132,20 @@ class ToolheadStatusSync:
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            spool_id = _fetch_active_spool_id()
+            result = _fetch_active_spool_id()
 
-            if spool_id is not None or not self._fetch_failed:
+            if result is not _FETCH_ERROR:
+                # Successful fetch — result is int (spool ID) or None (no spool)
                 try:
-                    self._check_transition(spool_id)
+                    self._check_transition(result)
                 except Exception:
                     logger.exception("Toolhead status: transition check error")
                 consecutive_failures = 0
                 wait = POLL_INTERVAL
-                self._fetch_failed = False
             else:
+                # Fetch failed — do NOT treat as eject, just backoff and retry
                 consecutive_failures += 1
                 wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
-                self._fetch_failed = True
                 if consecutive_failures == 1:
                     logger.warning("Toolhead status: poll failed, retrying with backoff")
                 elif consecutive_failures % 10 == 0:
@@ -187,14 +190,9 @@ class ToolheadStatusSync:
             logger.info(f"Toolhead status: active spool changed to #{current_spool_id}")
 
         elif prev != current_spool_id and prev is not None and current_spool_id is not None:
-            # Spool changed without going through null — direct swap
-            logger.info(
-                f"Toolhead status: active spool changed #{prev} → #{current_spool_id}"
+            # Global spool_id changed from one spool to another. In multi-toolhead
+            # setups this happens when a different tool is assigned — does NOT mean
+            # the previous tool's spool was ejected. Do not clear any locks.
+            logger.debug(
+                f"Toolhead status: global spool changed #{prev} → #{current_spool_id} (no lock change)"
             )
-            with app_state.state_lock:
-                for toolhead, spool_id in list(app_state.active_spools.items()):
-                    if spool_id == prev:
-                        logger.info(f"Toolhead status: clearing lock on {toolhead} (spool swapped)")
-                        publish_lock(toolhead, "clear")
-                        app_state.active_spools[toolhead] = None
-                        break
