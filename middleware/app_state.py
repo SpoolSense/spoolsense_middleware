@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from moonraker_ws import MoonrakerWebsocket
     from publisher_manager import PublisherManager
     from toolchanger_status import ToolchangerStatusSync
+    from toolhead_status import ToolheadStatusSync
 
 # Dispatcher availability — set at import time
 try:
@@ -30,6 +31,7 @@ mqtt_client: mqtt.Client | None = None
 watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
 toolchanger_status_sync: ToolchangerStatusSync | None = None
+toolhead_status_sync: ToolheadStatusSync | None = None
 publisher_manager: PublisherManager | None = None
 moonraker_ws: MoonrakerWebsocket | None = None
 
