@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.5.5"
+__version__ = "1.5.6"
 """
 SpoolSense NFC Middleware
 =========================
@@ -39,7 +39,9 @@ from afc_status import AfcStatusSync
 from publisher_manager import PublisherManager
 from publishers.klipper import KlipperPublisher
 from toolchanger_status import ToolchangerStatusSync
+from toolhead_status import ToolheadStatusSync
 from var_watcher import start_klipper_watcher
+from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -51,10 +53,14 @@ def on_shutdown(signum: int, frame: object) -> None:
     logger.info("Shutting down...")
     if app_state.publisher_manager:
         app_state.publisher_manager.shutdown()
+    if app_state.moonraker_ws:
+        app_state.moonraker_ws.stop()
     if app_state.afc_status_sync:
         app_state.afc_status_sync.stop()
     if app_state.toolchanger_status_sync:
         app_state.toolchanger_status_sync.stop()
+    if app_state.toolhead_status_sync:
+        app_state.toolhead_status_sync.stop()
     if app_state.mqtt_client:
         app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
         # Clear locks for scanners that use them (afc_lane and toolhead)
@@ -155,18 +161,66 @@ def main() -> None:
         logger.info("Macro assign: ASSIGN_SPOOL macro polling")
     if has_toolhead_scanners(app_state.cfg):
         logger.info("Klipper sync: file watcher")
+    if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
+        logger.info("Toolhead status: Moonraker spool eject polling")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 
-    # Start sync services based on scanner actions
+    # Discover AFC lane names for websocket subscription
+    lane_names = []
+    if has_afc_scanners(app_state.cfg):
+        try:
+            moonraker_url = app_state.cfg.get("moonraker_url", "")
+            if moonraker_url:
+                import requests as req
+                resp = req.get(f"{moonraker_url}/printer/objects/list", timeout=5)
+                if resp.ok:
+                    objects = resp.json().get("result", {}).get("objects", [])
+                    lane_names = [
+                        o.replace("AFC_stepper ", "")
+                        for o in objects
+                        if o.startswith("AFC_stepper ")
+                    ]
+                    if lane_names:
+                        logger.info(f"Discovered AFC lanes: {lane_names}")
+        except Exception:
+            logger.warning("Could not discover AFC lanes from Moonraker")
+
+    # Try websocket mode, fall back to HTTP polling
+    use_ws = False
+    if WEBSOCKET_AVAILABLE and app_state.cfg.get("moonraker_url"):
+        moonraker_url = app_state.cfg["moonraker_url"]
+        ws_url = moonraker_url.replace("http://", "ws://").replace("https://", "wss://")
+        if not ws_url.endswith("/websocket"):
+            ws_url = ws_url.rstrip("/") + "/websocket"
+        app_state.moonraker_ws = MoonrakerWebsocket(ws_url)
+        app_state.moonraker_ws.set_lane_names(lane_names)
+        use_ws = True
+        logger.info(f"Moonraker websocket: {ws_url}")
+    elif not WEBSOCKET_AVAILABLE:
+        logger.info("Moonraker: using HTTP polling (websocket-client not installed)")
+
+    # Start sync services
     if has_afc_scanners(app_state.cfg):
         app_state.afc_status_sync = AfcStatusSync()
-        app_state.afc_status_sync.start()
+        if use_ws:
+            app_state.moonraker_ws.on_lane_update = app_state.afc_status_sync.on_ws_lane_update
+        app_state.afc_status_sync.start(use_ws=use_ws)
 
     if has_toolhead_stage_scanners(app_state.cfg) or (
         has_afc_scanners(app_state.cfg) and app_state.cfg.get("publish_lane_data", False)
     ):
         app_state.toolchanger_status_sync = ToolchangerStatusSync()
-        app_state.toolchanger_status_sync.start()
+        if use_ws:
+            app_state.moonraker_ws.on_assign_spool = app_state.toolchanger_status_sync.on_ws_assign_spool
+        app_state.toolchanger_status_sync.start(use_ws=use_ws)
+
+    # Start websocket connection after callbacks are wired
+    if use_ws:
+        app_state.moonraker_ws.start()
+
+    if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
+        app_state.toolhead_status_sync = ToolheadStatusSync()
+        app_state.toolhead_status_sync.start()
 
     if has_toolhead_scanners(app_state.cfg):
         app_state.watcher = start_klipper_watcher()
