@@ -4,6 +4,18 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.6] - 2026-04-01
+
+### Added
+
+- **Moonraker websocket support** — AFC and toolchanger status sync can now use Moonraker's websocket for real-time updates instead of HTTP polling. Graceful fallback to polling if websocket-client is not installed. Auto-reconnect with exponential backoff. (#11)
+
+### Fixed
+
+- **Toolhead lock never clears on spool eject** — new toolhead_status.py polls Moonraker's /server/spoolman/spool_id every 2 seconds. When spool is ejected via Mainsail, the toolhead lock clears automatically. Covers both toolhead and toolhead_stage modes. Previously required a middleware restart. (#40)
+
+---
+
 ## [1.5.5] - 2026-03-28
 
 ### Fixed
