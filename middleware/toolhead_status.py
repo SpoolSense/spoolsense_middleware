@@ -59,7 +59,10 @@ def _fetch_active_spool_id() -> int | None | object:
             result = result["result"]
 
         spool_id = result.get("spool_id") if isinstance(result, dict) else None
-        return int(spool_id) if spool_id is not None else None
+        # Moonraker returns 0 (not null) when spool is cleared/ejected
+        if spool_id is None or spool_id == 0:
+            return None
+        return int(spool_id)
 
     except requests.ConnectionError:
         logger.debug("Toolhead status: Moonraker not reachable")
