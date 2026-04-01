@@ -39,6 +39,7 @@ from afc_status import AfcStatusSync
 from publisher_manager import PublisherManager
 from publishers.klipper import KlipperPublisher
 from toolchanger_status import ToolchangerStatusSync
+from toolhead_status import ToolheadStatusSync
 from var_watcher import start_klipper_watcher
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
@@ -58,6 +59,8 @@ def on_shutdown(signum: int, frame: object) -> None:
         app_state.afc_status_sync.stop()
     if app_state.toolchanger_status_sync:
         app_state.toolchanger_status_sync.stop()
+    if app_state.toolhead_status_sync:
+        app_state.toolhead_status_sync.stop()
     if app_state.mqtt_client:
         app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
         # Clear locks for scanners that use them (afc_lane and toolhead)
@@ -158,6 +161,8 @@ def main() -> None:
         logger.info("Macro assign: ASSIGN_SPOOL macro polling")
     if has_toolhead_scanners(app_state.cfg):
         logger.info("Klipper sync: file watcher")
+    if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
+        logger.info("Toolhead status: Moonraker spool eject polling")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 
     # Discover AFC lane names for websocket subscription
@@ -212,6 +217,10 @@ def main() -> None:
     # Start websocket connection after callbacks are wired
     if use_ws:
         app_state.moonraker_ws.start()
+
+    if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
+        app_state.toolhead_status_sync = ToolheadStatusSync()
+        app_state.toolhead_status_sync.start()
 
     if has_toolhead_scanners(app_state.cfg):
         app_state.watcher = start_klipper_watcher()
