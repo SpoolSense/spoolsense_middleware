@@ -4,6 +4,14 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.7] - 2026-04-02
+
+### Fixed
+
+- **Multi-tool eject detection** — active_spools now updated when ASSIGN_SPOOL macro assigns a spool to a tool. Ejecting one tool's spool no longer clears all toolhead locks. Uses consistent uppercase macro key. (#45)
+
+---
+
 ## [1.5.6] - 2026-04-01
 
 ### Added
