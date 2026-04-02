@@ -177,6 +177,11 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     except Exception:
         logger.exception(f"[toolhead_stage] Failed to publish lane_data for {macro}")
 
+    # Track active spool for toolhead_status eject detection (#45)
+    with app_state.state_lock:
+        app_state.active_spools[tool_name] = spoolman_id
+        logger.info(f"Updated active_spools[{tool_name}] = {spoolman_id}")
+
 
 def _fetch_pending_tool() -> str | None:
     """
