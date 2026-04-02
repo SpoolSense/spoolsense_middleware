@@ -142,6 +142,13 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     if remaining_g is not None:
         logger.info(f"[toolhead_stage] {macro} weight: {remaining_g:.0f}g")
 
+    # Track active spool for toolhead_status eject detection (#45)
+    # Must happen regardless of lane_data config — uses macro (uppercase) for consistent key
+    if spoolman_id is not None:
+        with app_state.state_lock:
+            app_state.active_spools[macro] = spoolman_id
+            logger.info(f"Updated active_spools[{macro}] = {spoolman_id}")
+
     # Write spool data to Moonraker's lane_data database for slicer integration.
     # AFC handles this for its lanes; for toolhead assignments we write directly.
     # Gated by publish_lane_data config flag (opt-in).
