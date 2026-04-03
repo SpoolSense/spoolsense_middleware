@@ -103,7 +103,7 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
 
     # Build payload dict matching scanner MQTT format
     payload = req.model_dump(exclude_none=True)
-    payload["source"] = "ios_app"
+    payload["source"] = "mobile"
 
     try:
         scan = detect_and_parse(payload, target_id="mobile")
