@@ -26,6 +26,8 @@ Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.*.y
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+import os
 import signal
 import sys
 
@@ -43,8 +45,21 @@ from toolhead_status import ToolheadStatusSync
 from var_watcher import start_klipper_watcher
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+# Configure logging — stdout + rotating file
+LOG_FORMAT = '%(asctime)s %(levelname)s %(message)s'
+LOG_FILE = os.path.expanduser('~/SpoolSense/middleware/spoolsense.log')
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB
+LOG_BACKUP_COUNT = 3
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+# Add rotating file handler
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
+_file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+_file_handler.setLevel(logging.INFO)
+logging.getLogger().addHandler(_file_handler)
+
 logger = logging.getLogger(__name__)
 
 
