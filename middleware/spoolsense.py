@@ -26,8 +26,11 @@ Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.*.y
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+import os
 import signal
 import sys
+import threading
 
 import paho.mqtt.client as mqtt
 
@@ -43,8 +46,21 @@ from toolhead_status import ToolheadStatusSync
 from var_watcher import start_klipper_watcher
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+# Configure logging — stdout + rotating file
+LOG_FORMAT = '%(asctime)s %(levelname)s %(message)s'
+LOG_FILE = os.path.expanduser('~/SpoolSense/middleware/spoolsense.log')
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB
+LOG_BACKUP_COUNT = 3
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+# Add rotating file handler
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
+_file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+_file_handler.setLevel(logging.INFO)
+logging.getLogger().addHandler(_file_handler)
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +131,10 @@ def main() -> None:
         print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
         print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
         print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
+        mobile = app_state.cfg.get("mobile", {})
+        print(f"  mobile_api       : {'enabled on port ' + str(mobile.get('port', 5001)) if mobile.get('enabled') else 'disabled'}")
+        if mobile.get("enabled"):
+            print(f"  mobile_action    : {mobile.get('action', 'afc_stage')}")
         sys.exit(0)
 
     # Fail early if dispatcher is unavailable
@@ -224,6 +244,23 @@ def main() -> None:
 
     if has_toolhead_scanners(app_state.cfg):
         app_state.watcher = start_klipper_watcher()
+
+    # Start REST API for mobile app (if enabled)
+    mobile_cfg = app_state.cfg.get("mobile", {})
+    if mobile_cfg.get("enabled"):
+        import uvicorn
+        from rest_api import app as rest_app
+
+        rest_port = mobile_cfg.get("port", 5001)
+
+        def _run_rest_api():
+            uvicorn.run(rest_app, host="0.0.0.0", port=rest_port, log_level="warning")
+
+        rest_thread = threading.Thread(target=_run_rest_api, name="rest-api", daemon=True)
+        rest_thread.start()
+        logger.info(f"REST API: http://0.0.0.0:{rest_port} (mobile scanning enabled)")
+    else:
+        logger.info("REST API: disabled (mobile.enabled = false)")
 
     # Start the MQTT loop
     try:
