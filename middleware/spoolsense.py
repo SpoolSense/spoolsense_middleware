@@ -28,6 +28,7 @@ import json
 import logging
 import signal
 import sys
+import threading
 
 import paho.mqtt.client as mqtt
 
@@ -115,6 +116,10 @@ def main() -> None:
         print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
         print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
         print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
+        mobile = app_state.cfg.get("mobile", {})
+        print(f"  mobile_api       : {'enabled on port ' + str(mobile.get('port', 5001)) if mobile.get('enabled') else 'disabled'}")
+        if mobile.get("enabled"):
+            print(f"  mobile_action    : {mobile.get('action', 'afc_stage')}")
         sys.exit(0)
 
     # Fail early if dispatcher is unavailable
@@ -224,6 +229,23 @@ def main() -> None:
 
     if has_toolhead_scanners(app_state.cfg):
         app_state.watcher = start_klipper_watcher()
+
+    # Start REST API for mobile app (if enabled)
+    mobile_cfg = app_state.cfg.get("mobile", {})
+    if mobile_cfg.get("enabled"):
+        import uvicorn
+        from rest_api import app as rest_app
+
+        rest_port = mobile_cfg.get("port", 5001)
+
+        def _run_rest_api():
+            uvicorn.run(rest_app, host="0.0.0.0", port=rest_port, log_level="warning")
+
+        rest_thread = threading.Thread(target=_run_rest_api, name="rest-api", daemon=True)
+        rest_thread.start()
+        logger.info(f"REST API: http://0.0.0.0:{rest_port} (mobile scanning enabled)")
+    else:
+        logger.info("REST API: disabled (mobile.enabled = false)")
 
     # Start the MQTT loop
     try:
