@@ -286,6 +286,13 @@ def load_config() -> dict:
             mobile_action,
         )
         sys.exit(1)
+    if mobile_action == "toolhead" and not mobile.get("toolhead"):
+        logger.error("mobile.action 'toolhead' requires a 'toolhead' field (e.g. T0)")
+        sys.exit(1)
+    mobile_port = mobile["port"]
+    if not isinstance(mobile_port, int) or mobile_port < 1 or mobile_port > 65535:
+        logger.error("mobile.port must be an integer 1-65535 (got %s)", mobile_port)
+        sys.exit(1)
 
     return config
 

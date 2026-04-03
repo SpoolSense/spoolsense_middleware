@@ -179,9 +179,10 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
 
     with app_state.state_lock:
         pending = app_state.pending_spool
-
-    if not pending:
-        raise HTTPException(status_code=409, detail="No pending spool — scan a tag first")
+        if not pending:
+            raise HTTPException(status_code=409, detail="No pending spool — scan a tag first")
+        # Claim it — prevent concurrent assigns from using the same pending
+        app_state.pending_spool = None
 
     moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker:
