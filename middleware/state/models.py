@@ -1,7 +1,7 @@
 from dataclasses import dataclass, asdict, field
 from typing import Any, Literal, Optional
 
-ScanSource = Literal["legacy_uid", "spoolsense_scanner", "opentag3d"]
+ScanSource = Literal["legacy_uid", "spoolsense_scanner", "opentag3d", "mobile"]
 
 
 @dataclass(slots=True)
