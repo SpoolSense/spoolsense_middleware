@@ -274,6 +274,19 @@ def load_config() -> dict:
     # Validate scanners
     _validate_scanners(config)
 
+    # Mobile REST API defaults
+    mobile = config.setdefault("mobile", {})
+    mobile.setdefault("enabled", False)
+    mobile.setdefault("action", "afc_stage")
+    mobile.setdefault("port", 5001)
+    mobile_action = mobile["action"]
+    if mobile_action not in ("afc_stage", "toolhead_stage", "toolhead"):
+        logger.error(
+            "mobile.action must be afc_stage, toolhead_stage, or toolhead (got %s)",
+            mobile_action,
+        )
+        sys.exit(1)
+
     return config
 
 
