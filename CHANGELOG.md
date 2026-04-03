@@ -4,6 +4,20 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.5.8] - 2026-04-03
+
+### Added
+
+- **REST API for SpoolSense Mobile** — FastAPI server on port 5001 alongside MQTT. Four endpoints: GET /api/config, POST /api/mobile-scan, POST /api/assign-tool, GET /api/status. Mobile scans reuse existing detect_and_parse pipeline. Toolhead_stage mode caches pending spool for tool assignment via ASSIGN_SPOOL macro. (#47)
+- **Rotating log file** — logs written to ~/SpoolSense/middleware/spoolsense.log (5MB max, 3 rotations) in addition to stdout. (#42)
+
+### Fixed
+
+- **Multi-tool eject detection** — active_spools updated on tool assignment, before lane_data gate, using consistent uppercase macro key. (#45)
+- **Mobile assign-tool timing** — pending_spool no longer cleared in REST endpoint; toolchanger_status watcher consumes it via the existing ASSIGN_SPOOL pipeline.
+
+---
+
 ## [1.5.7] - 2026-04-02
 
 ### Fixed
