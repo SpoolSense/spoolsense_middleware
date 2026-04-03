@@ -181,8 +181,8 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         pending = app_state.pending_spool
         if not pending:
             raise HTTPException(status_code=409, detail="No pending spool — scan a tag first")
-        # Claim it — prevent concurrent assigns from using the same pending
-        app_state.pending_spool = None
+        # Don't clear pending_spool here — toolchanger_status.py watcher
+        # consumes it when it detects the ASSIGN_SPOOL macro variable change
 
     moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker:
