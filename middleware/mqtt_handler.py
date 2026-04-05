@@ -9,7 +9,7 @@ import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan  # activate_spool used for UID-only path
 from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
-from config import discover_klipper_var_path, has_toolhead_scanners
+from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
 from var_watcher import sync_from_klipper_vars, start_klipper_watcher
 
 if app_state.DISPATCHER_AVAILABLE:
@@ -223,6 +223,11 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
                 app_state.watcher.stop()
                 app_state.watcher.join(timeout=2)
             app_state.watcher = start_klipper_watcher()
+
+        # Re-publish AFC lock state so scanners get current state after reconnect
+        if has_afc_scanners(app_state.cfg):
+            from afc_status import resync_lock_state
+            resync_lock_state()
     else:
         logger.error(f"MQTT connection failed: {rc}")
 
