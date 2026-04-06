@@ -223,6 +223,23 @@ def _fetch_afc_status() -> dict | None:
         return None
 
 
+def resync_lock_state() -> None:
+    """
+    Re-publishes the current lock/clear state for all tracked AFC lanes.
+
+    Called from on_connect() after an MQTT reconnect so that scanners
+    (and any other subscribers) get the correct lock state without
+    waiting for the next lane state change.
+    """
+    with app_state.state_lock:
+        snapshot = dict(app_state.lane_locks)
+
+    for lane, is_locked in snapshot.items():
+        state = "lock" if is_locked else "clear"
+        publish_lock(lane, state)
+        logger.info(f"AFC resync: re-published {state} for {lane}")
+
+
 class AfcStatusSync:
     """
     Monitors AFC lane state via Moonraker websocket (primary) or HTTP polling (fallback).

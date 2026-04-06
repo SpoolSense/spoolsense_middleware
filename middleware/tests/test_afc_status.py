@@ -16,7 +16,7 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 sys.modules.setdefault("watchdog.events", MagicMock())
 
 import app_state  # noqa: E402
-from afc_status import _sync_lane_state, _fetch_afc_status  # noqa: E402
+from afc_status import _sync_lane_state, _fetch_afc_status, resync_lock_state  # noqa: E402
 
 
 def _reset_app_state():
@@ -159,6 +159,36 @@ class TestSyncLaneState(unittest.TestCase):
         with patch("afc_status.publish_lock"):
             _sync_lane_state(data)
         assert app_state.active_spools.get("lane1") == 7
+
+
+class TestResyncLockState(unittest.TestCase):
+
+    def setUp(self):
+        _reset_app_state()
+
+    def test_resync_publishes_locked_lanes(self):
+        app_state.lane_locks["lane1"] = True
+        app_state.lane_locks["lane2"] = False
+        with patch("afc_status.publish_lock") as mock_lock:
+            resync_lock_state()
+            calls = {(c[0][0], c[0][1]) for c in mock_lock.call_args_list}
+            assert ("lane1", "lock") in calls
+            assert ("lane2", "clear") in calls
+
+    def test_resync_no_lanes_no_calls(self):
+        with patch("afc_status.publish_lock") as mock_lock:
+            resync_lock_state()
+            mock_lock.assert_not_called()
+
+    def test_resync_all_locked(self):
+        app_state.lane_locks["lane1"] = True
+        app_state.lane_locks["lane2"] = True
+        with patch("afc_status.publish_lock") as mock_lock:
+            resync_lock_state()
+            calls = {(c[0][0], c[0][1]) for c in mock_lock.call_args_list}
+            assert ("lane1", "lock") in calls
+            assert ("lane2", "lock") in calls
+            assert len(mock_lock.call_args_list) == 2
 
 
 class TestFetchAfcStatus(unittest.TestCase):
