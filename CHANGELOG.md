@@ -4,6 +4,14 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Resync AFC lock state on MQTT reconnect** — after a broker reconnect, re-publishes lock/clear for all tracked AFC lanes so scanners immediately know the correct state. Previously, scanners wouldn't get updated until the next lane state change. (#13)
+
+---
+
 ## [1.5.8] - 2026-04-03
 
 ### Added
