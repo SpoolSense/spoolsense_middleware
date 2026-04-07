@@ -57,6 +57,7 @@ class MoonrakerWebsocket:
         # Callbacks — set by consumers
         self.on_lane_update: Callable[[str, dict], None] | None = None
         self.on_assign_spool: Callable[[str], None] | None = None
+        self.on_update_tag: Callable[[int], None] | None = None
 
     def set_lane_names(self, names: list[str]) -> None:
         """Set AFC lane names to subscribe to (e.g. ['lane1', 'lane2'])."""
@@ -168,6 +169,7 @@ class MoonrakerWebsocket:
         for lane in self._lane_names:
             objects[f"AFC_stepper {lane}"] = None
         objects["gcode_macro ASSIGN_SPOOL"] = None
+        objects["gcode_macro UPDATE_TAG"] = None
         return objects
 
     def _dispatch_status(self, status: dict) -> None:
@@ -181,3 +183,6 @@ class MoonrakerWebsocket:
             elif key == "gcode_macro ASSIGN_SPOOL" and self.on_assign_spool:
                 pending_tool = value.get("pending_tool", "")
                 self.on_assign_spool(pending_tool)
+            elif key == "gcode_macro UPDATE_TAG" and self.on_update_tag:
+                pending = value.get("pending", 0)
+                self.on_update_tag(pending)
