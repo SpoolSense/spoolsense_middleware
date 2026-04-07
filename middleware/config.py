@@ -88,80 +88,65 @@ def _migrate_legacy_config(config: dict) -> dict:
     return config
 
 
+def _config_error(msg: str, *args) -> None:
+    """Log a config error and exit. All config validation failures are fatal."""
+    logger.error(msg, *args)
+    sys.exit(1)
+
+
+def _validate_targeted_scanner(device_id: str, scanner_cfg: dict, action: str,
+                               target_field: str, conflict_field: str,
+                               toolheads_list: list | None) -> None:
+    """Validate a scanner that requires a target (afc_lane or toolhead).
+    target_field is 'lane' or 'toolhead', conflict_field is the opposite."""
+    target = scanner_cfg.get(target_field)
+    if not target:
+        _config_error("Scanner '%s' with action '%s' requires a '%s' field.", device_id, action, target_field)
+    if conflict_field in scanner_cfg:
+        _config_error("Scanner '%s' has action '%s' but also has a '%s' field — remove it.", device_id, action, conflict_field)
+    if toolheads_list and target not in toolheads_list:
+        _config_error(
+            "Scanner '%s' maps to %s '%s' which is not in toolheads list. "
+            "Add it to toolheads or fix the scanner config.",
+            device_id, target_field, target,
+        )
+
+
 def _validate_scanners(config: dict) -> None:
-    """Validates the scanners config entries."""
+    """Validates the scanners config entries. Exits on any invalid config."""
     scanners = config.get("scanners", {})
     if not isinstance(scanners, dict) or not scanners:
-        logger.error(
+        _config_error(
             "No scanners configured (or 'scanners' is not a mapping). "
             "Add a 'scanners' section to %s. See config.example.afc.yaml for examples.",
             CONFIG_PATH,
         )
-        sys.exit(1)
 
-    # Build the set of valid targets from toolheads (if provided)
-    # or derive from scanner entries
     toolheads_list = config.get("toolheads")
 
     for device_id, scanner_cfg in scanners.items():
         if not isinstance(scanner_cfg, dict):
-            logger.error("Scanner '%s' must be a mapping with 'action' key.", device_id)
-            sys.exit(1)
+            _config_error("Scanner '%s' must be a mapping with 'action' key.", device_id)
 
         action = scanner_cfg.get("action")
         if action not in VALID_ACTIONS:
-            logger.error(
-                "Scanner '%s' has invalid action '%s' — must be one of: %s",
-                device_id, action, ", ".join(VALID_ACTIONS),
-            )
-            sys.exit(1)
+            _config_error("Scanner '%s' has invalid action '%s' — must be one of: %s",
+                          device_id, action, ", ".join(VALID_ACTIONS))
 
         if action == "afc_lane":
-            lane = scanner_cfg.get("lane")
-            if not lane:
-                logger.error("Scanner '%s' with action 'afc_lane' requires a 'lane' field.", device_id)
-                sys.exit(1)
-            if "toolhead" in scanner_cfg:
-                logger.error(
-                    "Scanner '%s' has action 'afc_lane' but also has a 'toolhead' field — remove it.",
-                    device_id,
-                )
-                sys.exit(1)
-            if toolheads_list and lane not in toolheads_list:
-                logger.error(
-                    "Scanner '%s' maps to lane '%s' which is not in toolheads list. "
-                    "Add it to toolheads or fix the scanner config.",
-                    device_id, lane,
-                )
-                sys.exit(1)
+            _validate_targeted_scanner(device_id, scanner_cfg, action, "lane", "toolhead", toolheads_list)
 
         elif action == "toolhead":
-            toolhead = scanner_cfg.get("toolhead")
-            if not toolhead:
-                logger.error("Scanner '%s' with action 'toolhead' requires a 'toolhead' field.", device_id)
-                sys.exit(1)
-            if "lane" in scanner_cfg:
-                logger.error(
-                    "Scanner '%s' has action 'toolhead' but also has a 'lane' field — remove it.",
-                    device_id,
-                )
-                sys.exit(1)
-            if toolheads_list and toolhead not in toolheads_list:
-                logger.error(
-                    "Scanner '%s' maps to toolhead '%s' which is not in toolheads list. "
-                    "Add it to toolheads or fix the scanner config.",
-                    device_id, toolhead,
-                )
-                sys.exit(1)
+            _validate_targeted_scanner(device_id, scanner_cfg, action, "toolhead", "lane", toolheads_list)
 
         elif action in ("afc_stage", "toolhead_stage"):
+            # Shared scanners have no target — lane/toolhead fields are invalid
             if "lane" in scanner_cfg or "toolhead" in scanner_cfg:
-                logger.error(
+                _config_error(
                     "Scanner '%s' has action '%s' but has a 'lane' or 'toolhead' field — "
                     "%s is a shared scanner with no target. Remove the extra field.",
                     device_id, action, action,
                 )
-                sys.exit(1)
 
 
 def _derive_toolheads(config: dict) -> list[str]:
