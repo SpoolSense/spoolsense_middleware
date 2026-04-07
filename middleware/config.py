@@ -201,23 +201,18 @@ def has_toolhead_stage_scanners(config: dict) -> bool:
 def load_config() -> dict:
     """Load and validate configuration from ~/SpoolSense/config.yaml."""
     if not os.path.exists(CONFIG_PATH):
-        logger.error(f"Config file not found: {CONFIG_PATH}")
         logger.error("Copy the template:  cp config.example.yaml ~/SpoolSense/config.yaml")
-        sys.exit(1)
+        _config_error("Config file not found: %s", CONFIG_PATH)
 
     try:
         with open(CONFIG_PATH, "r") as f:
             user_config = yaml.safe_load(f) or {}
     except Exception as e:
-        logger.error(f"Failed to read/parse {CONFIG_PATH}: {e}")
-        sys.exit(1)
+        _config_error("Failed to read/parse %s: %s", CONFIG_PATH, e)
 
     if not isinstance(user_config, dict):
-        logger.error(
-            f"{CONFIG_PATH} must be a YAML mapping (key: value pairs), "
-            f"but got {type(user_config).__name__}. Check your config file."
-        )
-        sys.exit(1)
+        _config_error("%s must be a YAML mapping (key: value pairs), but got %s",
+                      CONFIG_PATH, type(user_config).__name__)
 
     mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
     config = {**DEFAULTS, **user_config}
@@ -233,8 +228,7 @@ def load_config() -> dict:
         missing.append("moonraker_url")
 
     if missing:
-        logger.error(f"Missing required values in {CONFIG_PATH}: {', '.join(missing)}")
-        sys.exit(1)
+        _config_error("Missing required values in %s: %s", CONFIG_PATH, ", ".join(missing))
 
     # spoolman_url is optional — missing means tag-only mode
     if config["spoolman_url"]:
@@ -256,30 +250,28 @@ def load_config() -> dict:
         if config["toolheads"]:
             logger.info(f"Derived toolheads from scanners: {config['toolheads']}")
 
-    # Validate scanners
     _validate_scanners(config)
+    _validate_mobile(config)
 
-    # Mobile REST API defaults
+    return config
+
+
+def _validate_mobile(config: dict) -> None:
+    """Set defaults for the mobile REST API config and validate."""
     mobile = config.setdefault("mobile", {})
     mobile.setdefault("enabled", False)
     mobile.setdefault("action", "afc_stage")
     mobile.setdefault("port", 5001)
+
     mobile_action = mobile["action"]
     if mobile_action not in ("afc_stage", "toolhead_stage", "toolhead"):
-        logger.error(
-            "mobile.action must be afc_stage, toolhead_stage, or toolhead (got %s)",
-            mobile_action,
-        )
-        sys.exit(1)
+        _config_error("mobile.action must be afc_stage, toolhead_stage, or toolhead (got %s)", mobile_action)
     if mobile_action == "toolhead" and not mobile.get("toolhead"):
-        logger.error("mobile.action 'toolhead' requires a 'toolhead' field (e.g. T0)")
-        sys.exit(1)
+        _config_error("mobile.action 'toolhead' requires a 'toolhead' field (e.g. T0)")
+
     mobile_port = mobile["port"]
     if not isinstance(mobile_port, int) or mobile_port < 1 or mobile_port > 65535:
-        logger.error("mobile.port must be an integer 1-65535 (got %s)", mobile_port)
-        sys.exit(1)
-
-    return config
+        _config_error("mobile.port must be an integer 1-65535 (got %s)", mobile_port)
 
 
 def discover_klipper_var_path() -> str | None:
