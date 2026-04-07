@@ -1,3 +1,10 @@
+"""
+app_state.py — Shared mutable process state.
+
+All runtime state lives here: config, caches, locks, sync service references.
+Every other module reads/writes state via `import app_state`. Multi-thread
+access to shared fields is protected by state_lock.
+"""
 from __future__ import annotations
 
 import threading

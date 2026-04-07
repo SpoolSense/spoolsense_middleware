@@ -1,3 +1,10 @@
+"""
+config.py — Configuration loading and validation.
+
+Loads ~/SpoolSense/config.yaml, merges with defaults, validates scanners
+and mobile config, migrates legacy formats, derives toolheads from scanner
+entries. Exits on any invalid config — the middleware does not limp along.
+"""
 from __future__ import annotations
 
 import logging

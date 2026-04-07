@@ -1,3 +1,10 @@
+"""
+spoolman_cache.py — In-memory spool cache for UID-only tag lookups.
+
+Caches all Spoolman spools indexed by NFC UID (extra.nfc_id). Used by the
+UID-only path in mqtt_handler when a plain NTAG is scanned. Auto-refreshes
+on cache miss and periodically via TTL.
+"""
 from __future__ import annotations
 
 import logging

@@ -1,3 +1,10 @@
+"""
+parser.py — OpenTag3D JSON → ScanEvent parser.
+
+Converts an OpenTag3D Web API JSON payload into a normalized ScanEvent.
+OpenTag3D uses different field names than spoolsense_scanner (e.g.
+spool_weight_nominal, opentag_version).
+"""
 from datetime import datetime, timezone
 
 from state.models import ScanEvent

@@ -1,3 +1,9 @@
+"""
+moonraker_db.py — Moonraker database namespace access.
+
+Reads and writes spool assignments from Moonraker's key-value database
+(lane_data namespace). Used for slicer integration (Orca Slicer tool colors).
+"""
 import requests
 import logging
 

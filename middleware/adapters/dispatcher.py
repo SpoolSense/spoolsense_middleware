@@ -1,3 +1,10 @@
+"""
+dispatcher.py — Tag format detection and routing.
+
+Auto-detects the tag payload format (spoolsense_scanner vs OpenTag3D) from
+JSON keys and routes to the correct parser. Always returns a normalized
+ScanEvent regardless of source format.
+"""
 import logging
 
 logger = logging.getLogger(__name__)

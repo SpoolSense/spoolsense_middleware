@@ -1,3 +1,10 @@
+"""
+models.py — Data models for scan events and spool info.
+
+ScanEvent is the normalized output from all tag parsers — every tag format
+(spoolsense_scanner, OpenTag3D, mobile) produces one of these.
+SpoolInfo carries resolved Spoolman data after enrichment.
+"""
 from dataclasses import dataclass, asdict, field
 from typing import Any, Literal, Optional
 

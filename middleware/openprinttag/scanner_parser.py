@@ -1,3 +1,10 @@
+"""
+scanner_parser.py — spoolsense_scanner JSON → ScanEvent parser.
+
+Converts the MQTT JSON payload from SpoolSense scanner firmware into a
+normalized ScanEvent. Handles present/absent, tag_data_valid, blank,
+UID-only, and full rich-tag payloads.
+"""
 import logging
 from datetime import datetime, timezone
 
