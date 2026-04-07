@@ -125,6 +125,13 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                 if activate_spool(spool_id, action, target):
                     if target:
                         app_state.active_spools[target] = spool_id
+                        # Record for UPDATE_TAG deduction tracking
+                        if remaining is not None:
+                            device_id_for_tracking = _extract_scanner_device_id(topic)
+                            with app_state.state_lock:
+                                app_state.active_spool_weights[target] = remaining
+                                app_state.active_spool_uids[target] = uid
+                                app_state.active_spool_devices[target] = device_id_for_tracking or ""
                     if action in ("afc_lane", "toolhead"):
                         publish_lock(target, "lock")
                     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
@@ -155,8 +162,16 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
         # --- Activation path (always runs) ---
         _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
 
-        # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
+        # --- Record initial weight for UPDATE_TAG deduction tracking ---
+        target = _get_scanner_target(scanner_cfg)
         device_id = _extract_scanner_device_id(topic)
+        if target and scan.uid and scan.remaining_weight_g is not None:
+            with app_state.state_lock:
+                app_state.active_spool_weights[target] = scan.remaining_weight_g
+                app_state.active_spool_uids[target] = scan.uid.lower()
+                app_state.active_spool_devices[target] = device_id or ""
+
+        # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
 
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:

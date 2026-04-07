@@ -69,3 +69,10 @@ pending_spool: dict | None = None
 # Protected by state_lock.
 WRITE_COOLDOWN_SECONDS: int = 10
 tag_write_timestamps: dict[str, float] = {}
+
+# Filament usage tracking — used by UPDATE_TAG to calculate deductions.
+# Records the initial tag weight, UID, and scanner device_id per target
+# at scan time. Protected by state_lock.
+active_spool_weights: dict[str, float] = {}
+active_spool_uids: dict[str, str] = {}
+active_spool_devices: dict[str, str] = {}
