@@ -1,3 +1,4 @@
+"""Tests for filament_usage.py — UPDATE_TAG handler, per-tool deduction, AFC weight delta, mm-to-grams conversion."""
 from __future__ import annotations
 
 import os

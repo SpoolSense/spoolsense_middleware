@@ -7,7 +7,7 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "middleware"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 
 class TestMoonrakerWebsocket(unittest.TestCase):

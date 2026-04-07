@@ -1,3 +1,4 @@
+"""Tests for mqtt_handler.py — topic parsing, scanner resolution, tag routing."""
 from __future__ import annotations
 
 import os

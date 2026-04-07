@@ -1,3 +1,4 @@
+"""Tests for config.py — scanner validation, legacy migration, toolhead derivation."""
 from __future__ import annotations
 
 import os
