@@ -37,51 +37,74 @@ RETRY_BASE: float = 2.0
 RETRY_MAX: float = 30.0
 
 
-def _sync_lane_state(data: dict) -> None:
-    """
-    Processes the AFC status response and updates lock/clear state.
+# ── AFC response parsing ─────────────────────────────────────────────────────
 
-    This is the same logic as the old sync_from_afc_file(), but reads
-    from parsed JSON (API response) instead of a file on disk.
-
-    The AFC status response nests lane data under unit names:
-        result.status:.AFC.<unit_name>.<lane_name>
-
-    We skip entries named "system" (per-unit and top-level) and "Tools".
-    """
-    # Navigate the response structure.
-    # AFC has a quirk: the key is "status:" with a trailing colon.
-    afc_data: dict | None = None
+def _extract_afc_data(data: dict) -> dict | None:
+    """Navigate AFC's response structure to get the unit/lane dict.
+    AFC has a quirk: the status key has a trailing colon ('status:')."""
     status_block = data.get("status:") or data.get("status")
     if isinstance(status_block, dict):
         afc_data = status_block.get("AFC")
-    if not isinstance(afc_data, dict):
-        # Maybe the response was already unwrapped (e.g., direct AFC block)
-        afc_data = data.get("AFC", data)
+        if isinstance(afc_data, dict):
+            return afc_data
+    # Maybe already unwrapped (e.g., direct AFC block)
+    return data.get("AFC", data) if isinstance(data, dict) else None
 
-    skip_keys = {"system", "Tools"}
+
+_SKIP_KEYS = {"system", "Tools"}
+
+
+# ── Lane action publishing ───────────────────────────────────────────────────
+
+def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | None,
+                          newly_loaded: bool, source: str) -> None:
+    """Publish lock/clear state and push pending tag data. Shared by poll and websocket paths."""
+    if action == "lock":
+        logger.info(f"AFC {source}: {lane_name} has spool, locking")
+        publish_lock(lane_name, "lock")
+    elif action == "clear":
+        logger.info(f"AFC {source}: {lane_name} empty, clearing")
+        publish_lock(lane_name, "clear")
+
+    if newly_loaded and pending:
+        logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
+        _send_afc_lane_data(
+            lane_name,
+            pending.get("color_hex", ""),
+            pending.get("material", ""),
+            pending.get("remaining_g"),
+        )
+
+
+# ── Full sync (HTTP polling) ────────────────────────────────────────────────
+
+def _sync_lane_state(data: dict) -> None:
+    """Process the full AFC status response — iterates all units and lanes."""
+    afc_data = _extract_afc_data(data)
+    if not isinstance(afc_data, dict):
+        return
 
     for unit_name, unit_data in afc_data.items():
-        if unit_name in skip_keys or not isinstance(unit_data, dict):
+        if unit_name in _SKIP_KEYS or not isinstance(unit_data, dict):
             continue
 
         for lane_name, lane_data in unit_data.items():
             if lane_name == "system" or not isinstance(lane_data, dict):
                 continue
 
-            spool_id = lane_data.get("spool_id")
-            status = lane_data.get("status")
+            spool_id       = lane_data.get("spool_id")
+            status         = lane_data.get("status")
+            lane_is_loaded = lane_data.get("load", False)
 
             # Compute state change under lock, then publish outside it
-            action: str | None = None
+            action: str | None   = None
             pending: dict | None = None
-            newly_loaded: bool = False
-            lane_is_loaded: bool = lane_data.get("load", False)
+            newly_loaded: bool   = False
 
             with app_state.state_lock:
                 was_loaded = app_state.lane_load_states.get(lane_name, False)
-                is_locked = app_state.lane_locks.get(lane_name, False)
-                app_state.lane_statuses[lane_name] = status
+                is_locked  = app_state.lane_locks.get(lane_name, False)
+                app_state.lane_statuses[lane_name]    = status
                 app_state.lane_load_states[lane_name] = lane_is_loaded
 
                 if spool_id is not None:
@@ -89,7 +112,7 @@ def _sync_lane_state(data: dict) -> None:
                         action = "lock"
                     app_state.active_spools[lane_name] = spool_id
                 elif lane_is_loaded and not was_loaded and app_state.pending_spool:
-                    # Lane transitioned from unloaded → loaded with pending afc_stage data
+                    # Lane transitioned unloaded → loaded with pending afc_stage data
                     newly_loaded = True
                     pending = app_state.pending_spool
                     app_state.pending_spool = None
@@ -98,42 +121,23 @@ def _sync_lane_state(data: dict) -> None:
                         action = "clear"
                     app_state.active_spools[lane_name] = None
 
-            # Publish lock/clear outside the lock to avoid holding it during I/O
-            if action == "lock":
-                logger.info(f"AFC Sync: {lane_name} has spool {spool_id}, locking")
-                publish_lock(lane_name, "lock")
-            elif action == "clear":
-                logger.info(f"AFC Sync: {lane_name} empty, clearing")
-                publish_lock(lane_name, "clear")
+            _publish_lane_actions(lane_name, action, pending, newly_loaded, "Sync")
 
-            # Push pending afc_stage tag data to the newly loaded lane
-            if newly_loaded and pending:
-                logger.info(f"AFC Sync: {lane_name} just loaded — sending cached tag data")
-                _send_afc_lane_data(
-                    lane_name,
-                    pending.get("color_hex", ""),
-                    pending.get("material", ""),
-                    pending.get("remaining_g"),
-                )
 
+# ── Single lane sync (websocket) ────────────────────────────────────────────
 
 def _sync_lane_state_single(lane_name: str, data: dict) -> None:
-    """
-    Process a single lane's state update from websocket delta.
-
-    Unlike _sync_lane_state() which processes the full AFC response,
-    this handles one lane at a time from websocket push notifications.
-    """
-    spool_id = data.get("spool_id")
+    """Process a single lane's state update from a websocket delta."""
+    spool_id   = data.get("spool_id")
     load_state = data.get("load")
 
-    action = None
-    newly_loaded = False
-    pending = None
+    action: str | None   = None
+    pending: dict | None = None
+    newly_loaded: bool   = False
 
     with app_state.state_lock:
         prev_spool = app_state.active_spools.get(lane_name)
-        prev_load = app_state.lane_load_states.get(lane_name, False)
+        prev_load  = app_state.lane_load_states.get(lane_name, False)
 
         # Update spool tracking
         if spool_id is not None:
@@ -153,33 +157,17 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
                 newly_loaded = True
             app_state.lane_load_states[lane_name] = load_state
 
-        # Check for pending afc_stage data
+        # Consume pending afc_stage data on load transition
         if newly_loaded and app_state.pending_spool:
             pending = app_state.pending_spool
             app_state.pending_spool = None
 
-        # Update lane status
+        # Update lane status if present in delta
         status = data.get("status")
         if status is not None:
             app_state.lane_statuses[lane_name] = status
 
-    # Publish lock/clear outside the lock
-    if action == "lock":
-        logger.info(f"AFC WS: {lane_name} has spool {spool_id}, locking")
-        publish_lock(lane_name, "lock")
-    elif action == "clear":
-        logger.info(f"AFC WS: {lane_name} empty, clearing")
-        publish_lock(lane_name, "clear")
-
-    # Push pending tag data to newly loaded lane
-    if newly_loaded and pending:
-        logger.info(f"AFC WS: {lane_name} just loaded — sending cached tag data")
-        _send_afc_lane_data(
-            lane_name,
-            pending.get("color_hex", ""),
-            pending.get("material", ""),
-            pending.get("remaining_g"),
-        )
+    _publish_lane_actions(lane_name, action, pending, newly_loaded, "WS")
 
 
 def _fetch_afc_status() -> dict | None:
