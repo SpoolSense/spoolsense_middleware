@@ -1,3 +1,13 @@
+"""
+mqtt_handler.py — MQTT callbacks and tag processing pipeline.
+
+on_connect()  — subscribes to scanner topics, syncs klipper vars, re-publishes AFC lock state
+on_message()  — resolves scanner from topic, checks lock, routes to _handle_rich_tag()
+
+Tag processing splits into two paths:
+  Rich tag (OpenPrintTag/OpenTag3D) → dispatcher → Spoolman enrichment → activation → writeback
+  UID-only (plain NTAG)            → Spoolman lookup by NFC ID → activation
+"""
 from __future__ import annotations
 
 import json
@@ -7,7 +17,7 @@ from typing import TYPE_CHECKING
 import paho.mqtt.client as mqtt
 
 import app_state
-from activation import activate_spool, publish_lock, _activate_from_scan  # activate_spool used for UID-only path
+from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
