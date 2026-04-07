@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.5.8"
+__version__ = "1.5.9"
 """
 SpoolSense NFC Middleware
 =========================
@@ -24,7 +24,6 @@ Klipper variables are synced via file watcher for toolhead scanners.
 Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.*.yaml.
 """
 
-import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -46,15 +45,13 @@ from toolhead_status import ToolheadStatusSync
 from var_watcher import start_klipper_watcher
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
-# Configure logging — stdout + rotating file
-LOG_FORMAT = '%(asctime)s %(levelname)s %(message)s'
-LOG_FILE = os.path.expanduser('~/SpoolSense/middleware/spoolsense.log')
-LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB
-LOG_BACKUP_COUNT = 3
+# ── Logging ──────────────────────────────────────────────────────────────────
+LOG_FORMAT       = '%(asctime)s %(levelname)s %(message)s'
+LOG_FILE         = os.path.expanduser('~/SpoolSense/middleware/spoolsense.log')
+LOG_MAX_BYTES    = 5 * 1024 * 1024                                              # 5MB per log file
+LOG_BACKUP_COUNT = 3                                                            # keep 3 rotated copies
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-
-# Add rotating file handler
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 _file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
 _file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -64,9 +61,13 @@ logging.getLogger().addHandler(_file_handler)
 logger = logging.getLogger(__name__)
 
 
+# ── Shutdown ─────────────────────────────────────────────────────────────────
+
 def on_shutdown(signum: int, frame: object) -> None:
-    """Runs when you hit Ctrl+C or stop the service. Cleans up locks and disconnects."""
+    """Ctrl+C or systemd stop. Tears down sync services, clears locks, disconnects."""
     logger.info("Shutting down...")
+
+    # Stop background threads in reverse startup order
     if app_state.publisher_manager:
         app_state.publisher_manager.shutdown()
     if app_state.moonraker_ws:
@@ -77,97 +78,52 @@ def on_shutdown(signum: int, frame: object) -> None:
         app_state.toolchanger_status_sync.stop()
     if app_state.toolhead_status_sync:
         app_state.toolhead_status_sync.stop()
+    if app_state.watcher:
+        app_state.watcher.stop()
+
+    # Tell subscribers we're going offline, then release all scanner locks
     if app_state.mqtt_client:
         app_state.mqtt_client.publish("spoolsense/middleware/online", "false", qos=1, retain=True)
-        # Clear locks for scanners that use them (afc_lane and toolhead)
-        scanners = app_state.cfg.get("scanners", {})
-        for scanner_cfg in scanners.values():
+        for scanner_cfg in app_state.cfg.get("scanners", {}).values():
             target = scanner_cfg.get("lane") or scanner_cfg.get("toolhead")
             if target:
                 publish_lock(target, "clear")
         app_state.mqtt_client.disconnect()
-    if app_state.watcher:
-        app_state.watcher.stop()
+
     sys.exit(0)
 
 
-def main() -> None:
-    """
-    Application entry point. All runtime startup logic lives here.
+# ── Startup helpers ──────────────────────────────────────────────────────────
 
-    CLI flags:
-        --check-config   Validate config and print a summary, then exit.
-    """
-    import argparse
-
-    parser = argparse.ArgumentParser(description="SpoolSense NFC Middleware")
-    parser.add_argument(
-        "--check-config",
-        action="store_true",
-        help="Validate config and print a summary, then exit.",
-    )
-    args = parser.parse_args()
-
-    app_state.cfg = load_config()
-
-    # Initialize publisher_manager early so check-config can reference it if needed
-    app_state.publisher_manager = PublisherManager()
-    app_state.publisher_manager.register(KlipperPublisher(app_state.cfg))
-
-    if args.check_config:
-        scanners = app_state.cfg.get("scanners", {})
-        print(f"Config OK: {CONFIG_PATH}")
-        print(f"  scanners         : {len(scanners)} configured")
-        for device_id, cfg in scanners.items():
-            target = cfg.get("lane") or cfg.get("toolhead") or "(shared)"
-            print(f"    {device_id}: {cfg['action']} → {target}")
-        if app_state.cfg.get("toolheads"):
-            print(f"  toolheads        : {', '.join(app_state.cfg['toolheads'])}")
-        print(f"  spoolman_url     : {app_state.cfg['spoolman_url'] or 'not set (tag-only mode)'}")
-        print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
-        print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
-        print(f"  afc_sync         : {'Moonraker API polling' if has_afc_scanners(app_state.cfg) else 'n/a'}")
-        print(f"  macro_assign     : {'ASSIGN_SPOOL macro polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
-        print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
-        print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
-        print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
-        mobile = app_state.cfg.get("mobile", {})
-        print(f"  mobile_api       : {'enabled on port ' + str(mobile.get('port', 5001)) if mobile.get('enabled') else 'disabled'}")
-        if mobile.get("enabled"):
-            print(f"  mobile_action    : {mobile.get('action', 'afc_stage')}")
-        sys.exit(0)
-
-    # Fail early if dispatcher is unavailable
-    if not app_state.DISPATCHER_AVAILABLE:
-        logger.error(
-            "Rich-tag dispatcher is required but not available "
-            "(adapters/ directory not found). The middleware will not start."
-        )
-        sys.exit(1)
-
-    # SpoolmanClient for rich-data tag sync
-    if app_state.DISPATCHER_AVAILABLE and app_state.cfg["spoolman_url"]:
-        from spoolman.client import SpoolmanClient
-        app_state.spoolman_client = SpoolmanClient(app_state.cfg["spoolman_url"])
-
-    # Hook up shutdown signals
-    signal.signal(signal.SIGTERM, on_shutdown)
-    signal.signal(signal.SIGINT, on_shutdown)
-
-    # Setup MQTT
-    app_state.mqtt_client = mqtt.Client()
-    if app_state.cfg["mqtt"].get("username"):
-        app_state.mqtt_client.username_pw_set(
-            app_state.cfg["mqtt"]["username"],
-            app_state.cfg["mqtt"].get("password"),
-        )
-
-    app_state.mqtt_client.on_connect = on_connect
-    app_state.mqtt_client.on_message = on_message
-    app_state.mqtt_client.will_set("spoolsense/middleware/online", "false", qos=1, retain=True)
-
-    # Startup logging
+def _print_config_summary() -> None:
+    """Prints a human-readable config dump for --check-config. No MQTT connection needed."""
     scanners = app_state.cfg.get("scanners", {})
+    mobile   = app_state.cfg.get("mobile", {})
+
+    print(f"Config OK: {CONFIG_PATH}")
+    print(f"  scanners         : {len(scanners)} configured")
+    for device_id, cfg in scanners.items():
+        target = cfg.get("lane") or cfg.get("toolhead") or "(shared)"
+        print(f"    {device_id}: {cfg['action']} → {target}")
+    if app_state.cfg.get("toolheads"):
+        print(f"  toolheads        : {', '.join(app_state.cfg['toolheads'])}")
+    print(f"  spoolman_url     : {app_state.cfg['spoolman_url'] or 'not set (tag-only mode)'}")
+    print(f"  moonraker_url    : {app_state.cfg['moonraker_url']}")
+    print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
+    print(f"  afc_sync         : {'Moonraker API polling' if has_afc_scanners(app_state.cfg) else 'n/a'}")
+    print(f"  macro_assign     : {'ASSIGN_SPOOL macro polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
+    print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
+    print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
+    print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
+    print(f"  mobile_api       : {'enabled on port ' + str(mobile.get('port', 5001)) if mobile.get('enabled') else 'disabled'}")
+    if mobile.get("enabled"):
+        print(f"  mobile_action    : {mobile.get('action', 'afc_stage')}")
+
+
+def _log_startup() -> None:
+    """Logs what services are active so the user knows what's running."""
+    scanners = app_state.cfg.get("scanners", {})
+
     logger.info(f"Starting SpoolSense Middleware v{__version__}")
     logger.info(f"Spoolman: {app_state.cfg['spoolman_url'] or 'disabled (tag-only mode)'}")
     logger.info(f"Moonraker: {app_state.cfg['moonraker_url']}")
@@ -185,84 +141,176 @@ def main() -> None:
         logger.info("Toolhead status: Moonraker spool eject polling")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 
-    # Discover AFC lane names for websocket subscription
-    lane_names = []
-    if has_afc_scanners(app_state.cfg):
-        try:
-            moonraker_url = app_state.cfg.get("moonraker_url", "")
-            if moonraker_url:
-                import requests as req
-                resp = req.get(f"{moonraker_url}/printer/objects/list", timeout=5)
-                if resp.ok:
-                    objects = resp.json().get("result", {}).get("objects", [])
-                    lane_names = [
-                        o.replace("AFC_stepper ", "")
-                        for o in objects
-                        if o.startswith("AFC_stepper ")
-                    ]
-                    if lane_names:
-                        logger.info(f"Discovered AFC lanes: {lane_names}")
-        except Exception:
-            logger.warning("Could not discover AFC lanes from Moonraker")
 
-    # Try websocket mode, fall back to HTTP polling
-    use_ws = False
-    if WEBSOCKET_AVAILABLE and app_state.cfg.get("moonraker_url"):
-        moonraker_url = app_state.cfg["moonraker_url"]
-        ws_url = moonraker_url.replace("http://", "ws://").replace("https://", "wss://")
-        if not ws_url.endswith("/websocket"):
-            ws_url = ws_url.rstrip("/") + "/websocket"
-        app_state.moonraker_ws = MoonrakerWebsocket(ws_url)
-        app_state.moonraker_ws.set_lane_names(lane_names)
-        use_ws = True
-        logger.info(f"Moonraker websocket: {ws_url}")
-    elif not WEBSOCKET_AVAILABLE:
+def _setup_mqtt() -> None:
+    """Wire up the MQTT client with credentials and callbacks."""
+    app_state.mqtt_client = mqtt.Client()
+
+    # Credentials are optional — anonymous connections work for most setups
+    if app_state.cfg["mqtt"].get("username"):
+        app_state.mqtt_client.username_pw_set(
+            app_state.cfg["mqtt"]["username"],
+            app_state.cfg["mqtt"].get("password"),
+        )
+
+    app_state.mqtt_client.on_connect  = on_connect                              # subscribes to scanner topics, syncs klipper vars
+    app_state.mqtt_client.on_message  = on_message                              # dispatches tag payloads to activation pipeline
+    app_state.mqtt_client.will_set(                                             # LWT — tells subscribers we're offline if we crash
+        "spoolsense/middleware/online", "false", qos=1, retain=True
+    )
+
+
+def _setup_spoolman() -> None:
+    """Connect to Spoolman for spool lookups, creation, and weight sync. Skipped if no URL configured."""
+    if not app_state.cfg["spoolman_url"]:
+        return
+    from spoolman.client import SpoolmanClient
+    app_state.spoolman_client = SpoolmanClient(app_state.cfg["spoolman_url"])
+
+
+def _discover_afc_lanes() -> list[str]:
+    """Ask Moonraker for AFC_stepper objects so we know which lanes to subscribe to via websocket."""
+    if not has_afc_scanners(app_state.cfg):
+        return []
+
+    moonraker_url = app_state.cfg.get("moonraker_url", "")
+    if not moonraker_url:
+        return []
+
+    try:
+        import requests as req
+        resp = req.get(f"{moonraker_url}/printer/objects/list", timeout=5)
+        if not resp.ok:
+            return []
+        objects = resp.json().get("result", {}).get("objects", [])
+        lanes = [o.replace("AFC_stepper ", "") for o in objects if o.startswith("AFC_stepper ")]
+        if lanes:
+            logger.info(f"Discovered AFC lanes: {lanes}")
+        return lanes
+    except Exception:
+        logger.warning("Could not discover AFC lanes from Moonraker")
+        return []
+
+
+def _setup_websocket(lane_names: list[str]) -> bool:
+    """Try to connect to Moonraker via websocket for real-time updates. Falls back to HTTP polling."""
+    if not WEBSOCKET_AVAILABLE:
         logger.info("Moonraker: using HTTP polling (websocket-client not installed)")
+        return False
 
-    # Start sync services
-    if has_afc_scanners(app_state.cfg):
+    moonraker_url = app_state.cfg.get("moonraker_url")
+    if not moonraker_url:
+        return False
+
+    # Convert http:// to ws:// for the websocket endpoint
+    ws_url = moonraker_url.replace("http://", "ws://").replace("https://", "wss://")
+    if not ws_url.endswith("/websocket"):
+        ws_url = ws_url.rstrip("/") + "/websocket"
+
+    app_state.moonraker_ws = MoonrakerWebsocket(ws_url)
+    app_state.moonraker_ws.set_lane_names(lane_names)                           # needed for AFC_stepper subscriptions
+    logger.info(f"Moonraker websocket: {ws_url}")
+    return True
+
+
+def _start_sync_services(use_ws: bool) -> None:
+    """Start all background sync threads. Each service handles its own websocket vs polling decision."""
+    cfg = app_state.cfg
+
+    # AFC lane state — detects spool load/eject events via Moonraker
+    if has_afc_scanners(cfg):
         app_state.afc_status_sync = AfcStatusSync()
         if use_ws:
             app_state.moonraker_ws.on_lane_update = app_state.afc_status_sync.on_ws_lane_update
         app_state.afc_status_sync.start(use_ws=use_ws)
 
-    if has_toolhead_stage_scanners(app_state.cfg) or (
-        has_afc_scanners(app_state.cfg) and app_state.cfg.get("publish_lane_data", False)
+    # ASSIGN_SPOOL macro — lets users assign scanned spools to tools via Klipper console.
+    # Also needed when publish_lane_data is on with AFC (lane_data writes on tool assignment)
+    if has_toolhead_stage_scanners(cfg) or (
+        has_afc_scanners(cfg) and cfg.get("publish_lane_data", False)
     ):
         app_state.toolchanger_status_sync = ToolchangerStatusSync()
         if use_ws:
             app_state.moonraker_ws.on_assign_spool = app_state.toolchanger_status_sync.on_ws_assign_spool
         app_state.toolchanger_status_sync.start(use_ws=use_ws)
 
-    # Start websocket connection after callbacks are wired
+    # Wire all websocket callbacks before starting the connection
     if use_ws:
         app_state.moonraker_ws.start()
 
-    if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
+    # Toolhead spool eject detection — watches for spool_id changes on tool macros
+    if has_toolhead_scanners(cfg) or has_toolhead_stage_scanners(cfg):
         app_state.toolhead_status_sync = ToolheadStatusSync()
         app_state.toolhead_status_sync.start()
 
-    if has_toolhead_scanners(app_state.cfg):
+    # Klipper variables file watcher — syncs spool IDs from save_variables.cfg on manual changes
+    if has_toolhead_scanners(cfg):
         app_state.watcher = start_klipper_watcher()
 
-    # Start REST API for mobile app (if enabled)
+
+def _start_rest_api() -> None:
+    """Spin up the FastAPI server on a daemon thread for mobile app scanning."""
     mobile_cfg = app_state.cfg.get("mobile", {})
-    if mobile_cfg.get("enabled"):
-        import uvicorn
-        from rest_api import app as rest_app
-
-        rest_port = mobile_cfg.get("port", 5001)
-
-        def _run_rest_api():
-            uvicorn.run(rest_app, host="0.0.0.0", port=rest_port, log_level="warning")
-
-        rest_thread = threading.Thread(target=_run_rest_api, name="rest-api", daemon=True)
-        rest_thread.start()
-        logger.info(f"REST API: http://0.0.0.0:{rest_port} (mobile scanning enabled)")
-    else:
+    if not mobile_cfg.get("enabled"):
         logger.info("REST API: disabled (mobile.enabled = false)")
+        return
 
-    # Start the MQTT loop
+    import uvicorn
+    from rest_api import app as rest_app
+
+    rest_port = mobile_cfg.get("port", 5001)
+
+    def _run():
+        uvicorn.run(rest_app, host="0.0.0.0", port=rest_port, log_level="warning")
+
+    rest_thread = threading.Thread(target=_run, name="rest-api", daemon=True)
+    rest_thread.start()
+    logger.info(f"REST API: http://0.0.0.0:{rest_port} (mobile scanning enabled)")
+
+
+# ── Entry point ──────────────────────────────────────────────────────────────
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="SpoolSense NFC Middleware")
+    parser.add_argument("--check-config", action="store_true",
+                        help="Validate config and print a summary, then exit.")
+    args = parser.parse_args()
+
+    # Load and validate config — exits on invalid config (strict validation)
+    app_state.cfg = load_config()
+
+    # Publishers handle output to printer platforms (only Klipper today)
+    app_state.publisher_manager = PublisherManager()
+    app_state.publisher_manager.register(KlipperPublisher(app_state.cfg))
+
+    if args.check_config:
+        _print_config_summary()
+        sys.exit(0)
+
+    # Dispatcher parses tag payloads — without it we can't process scans
+    if not app_state.DISPATCHER_AVAILABLE:
+        logger.error("Rich-tag dispatcher not available (adapters/ not found). Cannot start.")
+        sys.exit(1)
+
+    _setup_spoolman()                                                           # optional — runs in tag-only mode without it
+
+    # Clean shutdown on SIGTERM (systemd) and SIGINT (Ctrl+C)
+    signal.signal(signal.SIGTERM, on_shutdown)
+    signal.signal(signal.SIGINT, on_shutdown)
+
+    _setup_mqtt()
+    _log_startup()
+
+    # Discover AFC lanes from Moonraker, set up websocket if available
+    lane_names = _discover_afc_lanes()
+    use_ws     = _setup_websocket(lane_names)
+
+    _start_sync_services(use_ws)                                                # AFC, toolchanger, toolhead status
+    _start_rest_api()                                                           # mobile app scanning (if enabled)
+
+    # Block on the MQTT loop — everything else runs in background threads
     try:
         app_state.mqtt_client.connect(
             app_state.cfg["mqtt"]["broker"], app_state.cfg["mqtt"]["port"], 60
