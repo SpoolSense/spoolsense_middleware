@@ -10,7 +10,6 @@ from activation import activate_spool, publish_lock, _activate_from_scan  # acti
 from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
-from var_watcher import sync_from_klipper_vars, start_klipper_watcher
 
 if app_state.DISPATCHER_AVAILABLE:
     from adapters.dispatcher import detect_and_parse
@@ -20,13 +19,10 @@ if app_state.DISPATCHER_AVAILABLE:
 logger = logging.getLogger(__name__)
 
 
-def _extract_scanner_device_id(topic: str) -> str | None:
-    """
-    Extracts the scanner deviceId from a spoolsense_scanner MQTT topic.
+# ── Topic parsing ────────────────────────────────────────────────────────────
 
-    Expected topic shape: spoolsense/<deviceId>/tag/state
-    Returns the deviceId string, or None if the topic does not match.
-    """
+def _extract_scanner_device_id(topic: str) -> str | None:
+    """Extract deviceId from topic shape: spoolsense/<deviceId>/tag/state"""
     prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
     parts = topic.split("/") if topic else []
     if len(parts) == 4 and parts[0] == prefix and parts[2] == "tag" and parts[3] == "state":
@@ -35,30 +31,100 @@ def _extract_scanner_device_id(topic: str) -> str | None:
 
 
 def _resolve_scanner_from_topic(topic: str) -> dict | None:
-    """
-    Resolves the full scanner config from an MQTT topic.
-
-    Extracts the device_id from the topic, looks it up in the scanners config,
-    and returns the scanner config dict (with action, lane/toolhead, etc.).
-    Returns None if the topic can't be mapped to a scanner.
-    """
+    """Look up the scanner config dict from an MQTT topic. Returns None if unmapped."""
     scanners = app_state.cfg.get("scanners", {})
-
     device_id = _extract_scanner_device_id(topic)
     if device_id is not None:
         scanner_cfg = scanners.get(device_id)
         if scanner_cfg:
             return scanner_cfg
         logger.warning(f"Scanner device '{device_id}' not found in scanners config")
-        return None
-
     return None
 
 
 def _get_scanner_target(scanner_cfg: dict) -> str | None:
-    """Returns the target (lane or toolhead name) from a scanner config, or None for afc_stage."""
+    """Returns the target (lane or toolhead name), or None for shared scanners (afc_stage/toolhead_stage)."""
     return scanner_cfg.get("lane") or scanner_cfg.get("toolhead")
 
+
+# ── UPDATE_TAG tracking ─────────────────────────────────────────────────────
+
+def _record_spool_tracking(
+    target: str, uid: str, device_id: str,
+    remaining: float | None,
+    diameter_mm: float | None = None,
+    density: float | None = None,
+) -> None:
+    """Store initial weight, UID, device, and filament properties for UPDATE_TAG deduction tracking."""
+    if not target or not uid or remaining is None:
+        return
+    with app_state.state_lock:
+        app_state.active_spool_weights[target]   = remaining
+        app_state.active_spool_uids[target]      = uid
+        app_state.active_spool_devices[target]    = device_id or ""
+        app_state.active_spool_diameters[target]  = diameter_mm or 1.75
+        app_state.active_spool_densities[target]  = density or 1.24
+
+
+# ── UID-only tag handling ────────────────────────────────────────────────────
+
+def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic: str) -> None:
+    """UID-only tag (e.g. NTAG215) — no filament data on tag, look up spool in Spoolman via NFC ID."""
+    target_id = _get_scanner_target(scanner_cfg) or _extract_scanner_device_id(topic) or "unknown"
+    logger.info(f"UID-only tag on {target_id}: {uid} — looking up in Spoolman")
+
+    spool = find_spool_by_nfc(uid)
+    if not spool:
+        logger.warning(f"No spool found in Spoolman for UID: {uid}")
+        return
+
+    spool_id  = spool["id"]
+    filament  = spool.get("filament", {})
+    name      = filament.get("name", "Unknown")
+    color_hex = (filament.get("color_hex") or "FFFFFF").lstrip("#").upper()
+    remaining = spool.get("remaining_weight")
+    material  = filament.get("material", "Unknown")
+    logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
+
+    # Push color to scanner LED — UID-only tags have no color on the tag itself
+    device_id = _extract_scanner_device_id(topic)
+    display_color = display_spoolcolor(color_hex)
+    if device_id and display_color:
+        prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
+        client.publish(f"{prefix}/{device_id}/cmd/set_color", display_color)
+        logger.info(f"Sent color #{display_color} to scanner {device_id} LED")
+
+    action = scanner_cfg["action"]
+    target = _get_scanner_target(scanner_cfg)
+
+    # Shared scanners — cache for later assignment, don't activate yet
+    if action in ("toolhead_stage", "afc_stage"):
+        with app_state.state_lock:
+            app_state.pending_spool = {
+                "color_hex": color_hex,
+                "material": material,
+                "remaining_g": remaining,
+                "spoolman_id": spool_id,
+            }
+        logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
+        return
+
+    # Dedicated scanners — activate immediately
+    if not activate_spool(spool_id, action, target):
+        return
+
+    if target:
+        app_state.active_spools[target] = spool_id
+        _record_spool_tracking(target, uid, device_id or "", remaining)
+
+    if action in ("afc_lane", "toolhead"):
+        publish_lock(target, "lock")
+
+    if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
+        logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {target_id}")
+
+
+# ── Rich-tag handling ────────────────────────────────────────────────────────
 
 def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topic: str) -> None:
     """
@@ -66,117 +132,51 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
 
     Routes through the dispatcher to parse the tag data into a ScanEvent.
     Spoolman sync is best-effort — if it fails, activation continues from
-    tag data alone. The two concerns are kept separate:
-
-      - Activation path  : always runs from scan data
-      - Enrichment path  : Spoolman sync, weight update, spool ID tracking
+    tag data alone.
     """
     target = _get_scanner_target(scanner_cfg)
-    action = scanner_cfg["action"]
-    # For dispatcher, use target as the target_id (or device_id for afc_stage)
     target_id = target or _extract_scanner_device_id(topic) or "unknown"
 
     try:
         scan = detect_and_parse(payload, target_id, topic)
         logger.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
 
-        # Guard: scanner may report present=False or invalid data
         if not scan.present:
             logger.debug(f"Scanner reported no tag present on {target_id}")
             return
 
-        # UID-only ISO14443A tag (e.g. NTAG215) — no embedded filament data,
-        # but we can still look the spool up in Spoolman via extra.nfc_id.
+        # UID-only path — separate handler to keep nesting shallow
         if not scan.tag_data_valid and not scan.blank and scan.uid:
-            uid = scan.uid.lower()
-            logger.info(f"UID-only tag on {target_id}: {uid} — looking up in Spoolman")
-            spool = find_spool_by_nfc(uid)
-            if spool:
-                spool_id = spool["id"]
-                filament = spool.get("filament", {})
-                name = filament.get("name", "Unknown")
-                color_hex = (filament.get("color_hex") or "FFFFFF").lstrip("#").upper()
-                remaining = spool.get("remaining_weight")
-                material = filament.get("material", "Unknown")
-                logger.info(f"Found spool for UID {uid}: {name} (ID: {spool_id})")
-
-                # Send color to scanner LED — UID-only tags have no color on the tag,
-                # so the scanner LED won't change unless we tell it the color from Spoolman
-                device_id = _extract_scanner_device_id(topic)
-                display_color = display_spoolcolor(color_hex)
-                if device_id and display_color:
-                    color_topic = f"{app_state.cfg.get('scanner_topic_prefix', 'spoolsense')}/{device_id}/cmd/set_color"
-                    client.publish(color_topic, display_color)
-                    logger.info(f"Sent color #{display_color} to scanner {device_id} LED")
-
-                # toolhead_stage/afc_stage: cache for later assignment via macro or lane load
-                if action in ("toolhead_stage", "afc_stage"):
-                    with app_state.state_lock:
-                        app_state.pending_spool = {
-                            "color_hex": color_hex,
-                            "material": material,
-                            "remaining_g": remaining,
-                            "spoolman_id": spool_id,
-                        }
-                    logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
-                    return
-
-                # Direct activation for afc_lane, toolhead, single
-                if activate_spool(spool_id, action, target):
-                    if target:
-                        app_state.active_spools[target] = spool_id
-                        # Record for UPDATE_TAG deduction tracking
-                        if remaining is not None:
-                            device_id_for_tracking = _extract_scanner_device_id(topic)
-                            with app_state.state_lock:
-                                app_state.active_spool_weights[target] = remaining
-                                app_state.active_spool_uids[target] = uid
-                                app_state.active_spool_devices[target] = device_id_for_tracking or ""
-                                app_state.active_spool_diameters[target] = 1.75
-                                app_state.active_spool_densities[target] = 1.24
-                    if action in ("afc_lane", "toolhead"):
-                        publish_lock(target, "lock")
-                    if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
-                        logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {target_id}")
-            else:
-                logger.warning(f"No spool found in Spoolman for UID: {uid}")
+            _handle_uid_only_tag(client, scanner_cfg, scan.uid.lower(), topic)
             return
 
         if not scan.tag_data_valid:
             logger.warning(f"Scanner reported invalid tag data on {target_id}")
             return
 
-        # --- Enrichment path (best-effort) ---
+        # --- Enrichment path (best-effort Spoolman sync) ---
         spool_info = None
-        if app_state.spoolman_client is None:
-            logger.debug("Spoolman not configured — skipping enrichment, running tag-only activation")
-        else:
+        if app_state.spoolman_client is not None:
             try:
                 spool_info = app_state.spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
             except Exception:
                 logger.exception(
                     "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
                     "uid=%s topic=%s",
-                    scan.uid,
-                    topic,
+                    scan.uid, topic,
                 )
 
-        # --- Activation path (always runs) ---
+        # --- Activation path (always runs from scan data) ---
         _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
 
-        # --- Record initial weight for UPDATE_TAG deduction tracking ---
-        target = _get_scanner_target(scanner_cfg)
+        # --- Record for UPDATE_TAG deduction tracking ---
         device_id = _extract_scanner_device_id(topic)
-        if target and scan.uid and scan.remaining_weight_g is not None:
-            with app_state.state_lock:
-                app_state.active_spool_weights[target] = scan.remaining_weight_g
-                app_state.active_spool_uids[target] = scan.uid.lower()
-                app_state.active_spool_devices[target] = device_id or ""
-                app_state.active_spool_diameters[target] = scan.diameter_mm or 1.75
-                app_state.active_spool_densities[target] = scan.density or 1.24
+        _record_spool_tracking(
+            target, scan.uid.lower() if scan.uid else None, device_id or "",
+            scan.remaining_weight_g, scan.diameter_mm, scan.density,
+        )
 
-        # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
-
+        # --- Tag writeback (stale-tag reconciliation) ---
         write_plan = build_write_plan(scan, spool_info, device_id=device_id)
         if write_plan:
             if app_state.cfg.get("tag_writeback_enabled"):
@@ -184,10 +184,7 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
             else:
                 logger.info(
                     "[tag writeback disabled] would write: tag=%s device=%s payload=%s reason=%s",
-                    write_plan.uid,
-                    write_plan.device_id,
-                    write_plan.payload,
-                    write_plan.reason,
+                    write_plan.uid, write_plan.device_id, write_plan.payload, write_plan.reason,
                 )
 
     except NotImplementedError as e:
@@ -198,77 +195,64 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
         logger.error(f"Rich tag processing error: {e}")
 
 
+# ── MQTT callbacks ───────────────────────────────────────────────────────────
+
 def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> None:
-    """Fires when we successfully connect to the MQTT broker."""
-    if rc == 0:
-        logger.info("Connected to MQTT broker")
-
-        if not app_state.DISPATCHER_AVAILABLE:
-            logger.error(
-                "Rich-tag dispatcher is required but not available "
-                "(adapters/ directory not found). Cannot process scanner payloads."
-            )
-            client.disconnect()
-            return
-
-        scanners = app_state.cfg.get("scanners", {})
-        if not scanners:
-            logger.error(
-                "No scanners configured — no MQTT topics to subscribe to. "
-                "Add a 'scanners' section to config.yaml."
-            )
-            client.disconnect()
-            return
-
-        # Subscribe to spoolsense_scanner topics
-        prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
-        for device_id in scanners:
-            topic = f"{prefix}/{device_id}/tag/state"
-            client.subscribe(topic)
-        logger.info(
-            f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}"
-        )
-
-        client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
-        refresh_spool_cache()
-
-        # Klipper var sync for toolhead scanners (AFC sync is handled by afc_status.py)
-        if has_toolhead_scanners(app_state.cfg):
-            app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
-            sync_from_klipper_vars()
-
-            # Restart the Klipper var watcher now that we know the path
-            if app_state.watcher:
-                app_state.watcher.stop()
-                app_state.watcher.join(timeout=2)
-            app_state.watcher = start_klipper_watcher()
-
-        # Re-publish AFC lock state so scanners get current state after reconnect
-        if has_afc_scanners(app_state.cfg):
-            from afc_status import resync_lock_state
-            resync_lock_state()
-    else:
+    """Fires on successful MQTT connection. Subscribes to scanner topics and syncs state."""
+    if rc != 0:
         logger.error(f"MQTT connection failed: {rc}")
+        return
+
+    logger.info("Connected to MQTT broker")
+
+    if not app_state.DISPATCHER_AVAILABLE:
+        logger.error("Rich-tag dispatcher not available — cannot process scanner payloads.")
+        client.disconnect()
+        return
+
+    scanners = app_state.cfg.get("scanners", {})
+    if not scanners:
+        logger.error("No scanners configured — add a 'scanners' section to config.yaml.")
+        client.disconnect()
+        return
+
+    # Subscribe to each scanner's tag/state topic
+    prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
+    for device_id in scanners:
+        client.subscribe(f"{prefix}/{device_id}/tag/state")
+    logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
+
+    client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
+    refresh_spool_cache()
+
+    # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
+    if has_toolhead_scanners(app_state.cfg):
+        app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
+        sync_from_klipper_vars()
+        if app_state.watcher:
+            app_state.watcher.stop()
+            app_state.watcher.join(timeout=2)
+        from var_watcher import start_klipper_watcher
+        app_state.watcher = start_klipper_watcher()
+
+    # Re-publish AFC lock state so scanners know current state after reconnect
+    if has_afc_scanners(app_state.cfg):
+        from afc_status import resync_lock_state
+        resync_lock_state()
 
 
 def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
-    """
-    Fires every time an MQTT message arrives on a subscribed topic.
-
-    Resolves the scanner config from the topic, checks lock state,
-    then routes through the dispatcher for parsing and activation.
-    """
+    """Fires on every MQTT message. Resolves scanner, checks lock, routes to handler."""
     try:
         payload: dict = json.loads(msg.payload.decode())
         topic: str = msg.topic
 
-        # Resolve which scanner this message belongs to
         scanner_cfg = _resolve_scanner_from_topic(topic)
         if not scanner_cfg:
             logger.warning(f"Could not resolve scanner from topic: {topic}")
             return
 
-        # For afc_stage, there's no target to lock — always process
+        # Shared scanners (afc_stage/toolhead_stage) have no target to lock
         target = _get_scanner_target(scanner_cfg)
         if target and app_state.lane_locks.get(target):
             logger.info(f"Ignoring scan on {target} (locked)")
