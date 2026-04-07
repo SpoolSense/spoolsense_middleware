@@ -1,60 +1,100 @@
 # Middleware Developer Guide
 
-This directory contains the SpoolSense middleware — a Python service that bridges NFC tag scans from the SpoolSense Scanner to Klipper, Spoolman, and Home Assistant via MQTT.
+This directory contains the SpoolSense middleware — a Python service that bridges NFC tag scans from SpoolSense scanners to Klipper, Spoolman, and Home Assistant via MQTT.
 
-## Background
+## How It Works
 
-SpoolSense originally used ESPHome with PN532 NFC readers. Each toolhead or lane had its own ESP32 running ESPHome, which published tag UIDs to MQTT. The middleware parsed those UIDs and looked up spools in Spoolman.
+```
+SpoolSense Scanner (ESP32 + PN5180/PN532)
+        ↓ MQTT
+        spoolsense/<device_id>/tag/state
+        ↓
+SpoolSense Middleware (Python on printer host)
+        ↓                    ↓                    ↓
+   Moonraker/Klipper    Spoolman (optional)    Home Assistant
+   (gcode, AFC, vars)   (spool tracking)       (MQTT status)
+```
 
-The project has since moved to a custom firmware ([spoolsense_scanner](https://github.com/SpoolSense/spoolsense_scanner)) running on ESP32 with a PN5180 NFC reader. The scanner reads full tag data (not just UIDs), supports multiple tag formats (OpenPrintTag, TigerTag, OpenTag3D), publishes rich JSON payloads to MQTT, and handles its own Spoolman sync. This is a more capable and reliable approach than ESPHome.
-
-The middleware still plays a key role — it receives scan events from the scanner, manages spool assignments, controls Klipper (SET_ACTIVE_SPOOL, SET_SPOOL_ID), handles tag writeback, and provides the scan-lock-clear lifecycle for AFC setups.
+The scanner reads NFC tags (OpenPrintTag, OpenTag3D, TigerTag, UID-only), publishes rich JSON payloads to MQTT. The middleware receives them, resolves which scanner sent the data, looks up or creates the spool in Spoolman, activates it in Klipper via Moonraker, and manages lock state for multi-scanner setups.
 
 ## Directory Structure
 
 ```
 middleware/
-├── spoolsense.py              # Main entry point — MQTT client, scan handlers, AFC file watcher
-├── spoolsense.service         # systemd service file
-├── config.example.*.yaml      # Config templates for each mode (single, toolchanger, AFC)
+├── spoolsense.py              # Entry point — startup wiring, signal handlers
+├── app_state.py               # Shared mutable state (config, caches, locks)
+├── config.py                  # Config loading, validation, legacy migration
+├── mqtt_handler.py            # MQTT callbacks — tag parsing, activation pipeline
+├── activation.py              # Spool activation orchestrator — lock, cache, route
 │
-├── adapters/
-│   └── dispatcher.py          # Auto-detects tag format and routes to the correct parser
+├── publishers/
+│   ├── base.py                # SpoolEvent dataclass, Publisher ABC, Action enum
+│   └── klipper.py             # KlipperPublisher — gcode commands, Moonraker REST
+├── publisher_manager.py       # Fan-out dispatcher — primary + secondary publishers
 │
-├── openprinttag/
-│   ├── scanner_parser.py      # Parses spoolsense_scanner MQTT payloads into ScanEvents
-│   ├── parser.py              # [unused] Direct CBOR parser — from the ESPHome era
-│   └── color_map.py           # [unused] Color name to hex lookup
-│
-├── opentag3d/
-│   └── parser.py              # Parses OpenTag3D Web API payloads into ScanEvents
+├── afc_status.py              # AFC lane state sync via Moonraker (websocket/polling)
+├── toolchanger_status.py      # ASSIGN_SPOOL macro polling for toolhead_stage
+├── toolhead_status.py         # Toolhead spool eject detection
+├── filament_usage.py          # UPDATE_TAG macro — filament deduction tracking
+├── moonraker_ws.py            # Moonraker websocket — real-time AFC and macro events
+├── var_watcher.py             # Klipper save_variables file watcher (toolhead modes)
 │
 ├── spoolman/
-│   └── client.py              # Spoolman API client — vendor/filament/spool CRUD, NFC UID cache
+│   └── client.py              # SpoolmanClient — spool CRUD, NFC UID lookup, weight sync
+├── spoolman_cache.py          # In-memory UID→spool cache for UID-only tag lookups
+│
+├── adapters/
+│   └── dispatcher.py          # Tag format auto-detection and parser routing
+├── openprinttag/
+│   └── scanner_parser.py      # spoolsense_scanner JSON → ScanEvent
+├── opentag3d/
+│   └── parser.py              # OpenTag3D JSON → ScanEvent
 │
 ├── state/
-│   ├── models.py              # Core data models: ScanEvent, SpoolInfo, SpoolAssignment
-│   └── moonraker_db.py        # Moonraker database persistence for spool state
+│   ├── models.py              # ScanEvent, SpoolInfo, SpoolAssignment dataclasses
+│   └── moonraker_db.py        # Moonraker database access for lane_data
 │
-└── tag_sync/
-    ├── policy.py              # Write decision logic — determines when to write back to tags
-    └── scanner_writer.py      # Publishes write commands to scanner via MQTT
+├── tag_sync/
+│   ├── policy.py              # Tag writeback decision logic (stale weight detection)
+│   └── scanner_writer.py      # MQTT write commands to scanner firmware
+│
+├── rest_api.py                # FastAPI REST server for SpoolSense Mobile app
+├── klipper/
+│   └── spoolsense.cfg         # Klipper macros (ASSIGN_SPOOL, UPDATE_TAG)
+│
+├── config.example.single.yaml
+├── config.example.toolchanger.yaml
+├── config.example.afc.yaml
+├── spoolsense.service         # systemd service file
+├── requirements.txt
+└── tests/                     # unittest + mocks (one file per module)
 ```
 
-## Dead Code
+## Scanner Actions
 
-Some modules contain code from the ESPHome era that is no longer actively used but remains in the codebase:
+Each scanner in `config.yaml` has an `action` that determines how scans are routed:
 
-- `openprinttag/parser.py` — Direct CBOR parser for OpenPrintTag spec payloads. Was intended for a custom ESPHome component that never shipped. The scanner firmware handles OpenPrintTag parsing natively.
-- `openprinttag/color_map.py` — Color name to hex lookup table. Not imported anywhere.
-- `opentag3d/parser.py` — Parses OpenTag3D "Web API" format payloads. The scanner sends OpenTag3D data through the standard scanner payload format instead.
-- `adapters/dispatcher.py` — Has format detection branches for `opentag3d` and `openprinttag` direct formats that never trigger in practice. All scanner data arrives as `spoolsense_scanner` format.
+| Action | What it does | Locks scanner? |
+|--------|-------------|----------------|
+| `afc_stage` | Caches tag data, waits for AFC lane load | No |
+| `afc_lane` | Assigns spool to a specific AFC lane | Yes |
+| `toolhead_stage` | Caches tag data, waits for ASSIGN_SPOOL macro | No |
+| `toolhead` | Activates spool on a specific toolhead | Yes |
 
-This dead code is harmless and will be cleaned up in a future release.
+## Background Services
+
+The middleware runs several background threads:
+
+- **AfcStatusSync** — monitors AFC lane state via Moonraker websocket (primary) or HTTP polling (fallback). Detects spool load/eject events.
+- **ToolchangerStatusSync** — watches the ASSIGN_SPOOL Klipper macro for manual tool assignment.
+- **FilamentUsageSync** — watches the UPDATE_TAG Klipper macro for filament deduction after each print.
+- **ToolheadStatusSync** — polls Moonraker for spool eject detection on toolhead macros.
+- **MoonrakerWebsocket** — single websocket connection to Moonraker for real-time AFC stepper and macro variable updates.
+- **VarWatcher** — watchdog file watcher on Klipper's `save_variables.cfg` for toolhead/single modes.
 
 ## Config
 
-The middleware loads settings from `~/SpoolSense/config.yaml`. See the `config.example.*.yaml` files for documented templates:
+Settings are loaded from `~/SpoolSense/config.yaml`. See the `config.example.*.yaml` files for documented templates:
 
 - `config.example.single.yaml` — Single toolhead
 - `config.example.toolchanger.yaml` — Multi-toolhead toolchanger
@@ -73,3 +113,15 @@ python3 middleware/spoolsense.py --check-config
 sudo systemctl start spoolsense
 journalctl -u spoolsense -f
 ```
+
+## Testing
+
+```bash
+# Full test suite
+pytest middleware/tests/ -v
+
+# Single file
+pytest middleware/tests/test_activation.py -v
+```
+
+Tests use `unittest.TestCase` with `unittest.mock`. One test file per module.
