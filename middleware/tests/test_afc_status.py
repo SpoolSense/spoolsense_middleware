@@ -1,3 +1,4 @@
+"""Tests for afc_status.py — AFC lane state sync, lock/clear publishing, resync on reconnect."""
 from __future__ import annotations
 
 import os

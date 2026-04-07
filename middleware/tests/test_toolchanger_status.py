@@ -1,3 +1,4 @@
+"""Tests for toolchanger_status.py — ASSIGN_SPOOL macro polling and tool assignment."""
 from __future__ import annotations
 
 import os

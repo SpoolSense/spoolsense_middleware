@@ -1,3 +1,4 @@
+"""Tests for activation.py — spool activation, lock management, publisher routing."""
 from __future__ import annotations
 
 import os
@@ -16,11 +17,8 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 sys.modules.setdefault("watchdog.events", MagicMock())
 
 import app_state  # noqa: E402
-from activation import (  # noqa: E402
-    activate_spool,
-    _validate_color_hex,
-    _validate_material,
-)
+from activation import activate_spool  # noqa: E402
+from publishers.klipper import _validate_color_hex, _validate_material  # noqa: E402
 
 
 def _setup_app_state(moonraker_url="http://moonraker:7125"):
