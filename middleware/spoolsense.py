@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.5.9"
+__version__ = "1.6.0"
 """
 SpoolSense NFC Middleware
 =========================
@@ -42,6 +42,7 @@ from publisher_manager import PublisherManager
 from publishers.klipper import KlipperPublisher
 from toolchanger_status import ToolchangerStatusSync
 from toolhead_status import ToolheadStatusSync
+from filament_usage import FilamentUsageSync
 from var_watcher import start_klipper_watcher
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
@@ -76,6 +77,8 @@ def on_shutdown(signum: int, frame: object) -> None:
         app_state.afc_status_sync.stop()
     if app_state.toolchanger_status_sync:
         app_state.toolchanger_status_sync.stop()
+    if app_state.filament_usage_sync:
+        app_state.filament_usage_sync.stop()
     if app_state.toolhead_status_sync:
         app_state.toolhead_status_sync.stop()
     if app_state.watcher:
@@ -139,6 +142,7 @@ def _log_startup() -> None:
         logger.info("Klipper sync: file watcher")
     if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
         logger.info("Toolhead status: Moonraker spool eject polling")
+    logger.info(f"Filament usage: UPDATE_TAG macro tracking enabled")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 
 
@@ -233,6 +237,12 @@ def _start_sync_services(use_ws: bool) -> None:
         if use_ws:
             app_state.moonraker_ws.on_assign_spool = app_state.toolchanger_status_sync.on_ws_assign_spool
         app_state.toolchanger_status_sync.start(use_ws=use_ws)
+
+    # UPDATE_TAG macro — calculates filament usage after each print, sends deduction to scanner
+    app_state.filament_usage_sync = FilamentUsageSync()
+    if use_ws:
+        app_state.moonraker_ws.on_update_tag = app_state.filament_usage_sync.on_ws_update_tag
+    app_state.filament_usage_sync.start(use_ws=use_ws)
 
     # Wire all websocket callbacks before starting the connection
     if use_ws:

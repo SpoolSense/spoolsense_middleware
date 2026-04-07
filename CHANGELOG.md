@@ -4,6 +4,14 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.6.0] - 2026-04-06
+
+### Added
+
+- **Filament usage deduction via UPDATE_TAG macro** — add `UPDATE_TAG` to your PRINT_END macro for automatic filament tracking. After each print, the middleware grabs per-tool usage from the last completed job (toolchanger/single) or reads AFC lane weights directly. Deductions are sent to the scanner and written to the NFC tag (OpenPrintTag/OpenTag3D) on next scan. UID-only/TigerTag/OpenSpool tags are a no-op — Moonraker handles Spoolman sync. (#51)
+
+---
+
 ## [1.5.9] - 2026-04-05
 
 ### Fixed
