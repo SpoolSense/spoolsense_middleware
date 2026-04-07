@@ -55,8 +55,10 @@ def _fetch_last_job_weights() -> list[float] | None:
             return None
 
         job = jobs[0]
-        if job.get("status") != "completed":
-            logger.debug("UPDATE_TAG: last job status is '%s', not completed", job.get("status"))
+        # Count any job that actually extruded filament, regardless of status
+        # (cancelled/failed prints still use filament)
+        if job.get("filament_used", 0) <= 0:
+            logger.debug("UPDATE_TAG: last job used no filament, skipping")
             return None
 
         weights = job.get("metadata", {}).get("filament_weights", [])
@@ -214,14 +216,105 @@ def _handle_afc() -> None:
             app_state.active_spool_weights[lane] = current_weight
 
 
+def _fetch_tool_filament_used() -> dict[str, float] | None:
+    """
+    Query per-tool filament_used from klipper-toolchanger tool objects.
+
+    Returns dict like {"T0": 1250.5, "T1": 830.2} in mm, or None if
+    the tool objects don't expose filament_used (mod not installed).
+    """
+    moonraker = app_state.cfg.get("moonraker_url", "")
+    if not moonraker:
+        return None
+
+    # Build query for all active tools
+    with app_state.state_lock:
+        tool_names = list(app_state.active_spool_uids.keys())
+
+    if not tool_names:
+        return None
+
+    # Query tool objects — e.g. ?tool%20T0&tool%20T1
+    query_parts = "&".join(f"tool%20{t}" for t in tool_names)
+    try:
+        response = requests.get(
+            f"{moonraker}/printer/objects/query?{query_parts}",
+            timeout=5,
+        )
+        response.raise_for_status()
+        status = response.json().get("result", {}).get("status", {})
+
+        result: dict[str, float] = {}
+        for tool_name in tool_names:
+            tool_data = status.get(f"tool {tool_name}", {})
+            filament = tool_data.get("filament_used")
+            if filament is None:
+                # Tool object doesn't have filament_used — mod not installed
+                return None
+            result[tool_name] = float(filament)
+
+        return result if result else None
+
+    except requests.ConnectionError:
+        logger.debug("UPDATE_TAG: Moonraker not reachable for tool query")
+        return None
+    except Exception:
+        logger.exception("UPDATE_TAG: failed to fetch tool filament_used")
+        return None
+
+
+def _mm_to_grams(mm: float, diameter_mm: float, density_g_cm3: float) -> float:
+    """Convert filament length in mm to weight in grams."""
+    import math
+    radius_mm = diameter_mm / 2.0
+    volume_mm3 = math.pi * radius_mm * radius_mm * mm
+    return volume_mm3 * density_g_cm3 / 1000.0
+
+
 def _handle_toolchanger() -> None:
-    """Handle UPDATE_TAG for toolchanger/single — deduction from last job weights."""
-    weights = _fetch_last_job_weights()
-    if not weights:
-        logger.info("UPDATE_TAG: no completed job found — skipping")
+    """
+    Handle UPDATE_TAG for toolchanger/single.
+
+    Primary: read per-tool filament_used from klipper-toolchanger tool objects
+    (requires per-tool tracking mod). Values are in mm, converted to grams.
+
+    Fallback: read filament_weights from last completed job's slicer metadata
+    (always available, but slicer estimate only — inaccurate for cancelled prints).
+    """
+    # Try per-tool tracking first (klipper-toolchanger mod)
+    tool_usage = _fetch_tool_filament_used()
+
+    if tool_usage is not None:
+        logger.info("UPDATE_TAG: using per-tool filament_used from toolchanger")
+        with app_state.state_lock:
+            uids = dict(app_state.active_spool_uids)
+            devices = dict(app_state.active_spool_devices)
+            diameters = dict(app_state.active_spool_diameters)
+            densities = dict(app_state.active_spool_densities)
+
+        for tool_name, usage_mm in tool_usage.items():
+            if usage_mm <= 0:
+                continue
+
+            uid = uids.get(tool_name)
+            device_id = devices.get(tool_name)
+            if not uid or not device_id:
+                logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
+                continue
+
+            diameter = diameters.get(tool_name, 1.75)
+            density = densities.get(tool_name, 1.24)
+            usage_g = _mm_to_grams(usage_mm, diameter, density)
+            _publish_deduction(device_id, uid, usage_g)
         return
 
-    # Snapshot state under lock
+    # Fallback: slicer estimate from print history
+    logger.info("UPDATE_TAG: per-tool tracking not available, falling back to slicer estimates")
+    weights = _fetch_last_job_weights()
+    if not weights:
+        logger.info("UPDATE_TAG: no job with filament usage found — skipping")
+        return
+
     with app_state.state_lock:
         uids = dict(app_state.active_spool_uids)
         devices = dict(app_state.active_spool_devices)

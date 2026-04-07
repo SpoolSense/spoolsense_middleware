@@ -73,8 +73,10 @@ WRITE_COOLDOWN_SECONDS: int = 10
 tag_write_timestamps: dict[str, float] = {}
 
 # Filament usage tracking — used by UPDATE_TAG to calculate deductions.
-# Records the initial tag weight, UID, and scanner device_id per target
-# at scan time. Protected by state_lock.
+# Records the initial tag weight, UID, scanner device_id, and filament
+# properties per target at scan time. Protected by state_lock.
 active_spool_weights: dict[str, float] = {}
 active_spool_uids: dict[str, str] = {}
 active_spool_devices: dict[str, str] = {}
+active_spool_diameters: dict[str, float] = {}   # mm, default 1.75
+active_spool_densities: dict[str, float] = {}   # g/cm³, default 1.24

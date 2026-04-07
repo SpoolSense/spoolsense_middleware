@@ -132,6 +132,8 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                                 app_state.active_spool_weights[target] = remaining
                                 app_state.active_spool_uids[target] = uid
                                 app_state.active_spool_devices[target] = device_id_for_tracking or ""
+                                app_state.active_spool_diameters[target] = 1.75
+                                app_state.active_spool_densities[target] = 1.24
                     if action in ("afc_lane", "toolhead"):
                         publish_lock(target, "lock")
                     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
@@ -170,6 +172,8 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
                 app_state.active_spool_weights[target] = scan.remaining_weight_g
                 app_state.active_spool_uids[target] = scan.uid.lower()
                 app_state.active_spool_devices[target] = device_id or ""
+                app_state.active_spool_diameters[target] = scan.diameter_mm or 1.75
+                app_state.active_spool_densities[target] = scan.density or 1.24
 
         # --- Tag writeback (Phase 1: scan-time stale-tag reconciliation) ---
 
