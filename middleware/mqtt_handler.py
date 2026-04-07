@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
 
@@ -10,6 +11,10 @@ from activation import activate_spool, publish_lock, _activate_from_scan  # acti
 from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
+
+if TYPE_CHECKING:
+    from spoolman.client import SpoolInfo
+    from state.models import ScanEvent
 
 if app_state.DISPATCHER_AVAILABLE:
     from adapters.dispatcher import detect_and_parse
@@ -126,6 +131,36 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
 
 # ── Rich-tag handling ────────────────────────────────────────────────────────
 
+def _enrich_from_spoolman(scan: ScanEvent, topic: str) -> SpoolInfo | None:
+    """Best-effort Spoolman sync — returns SpoolInfo or None if unavailable/failed."""
+    if app_state.spoolman_client is None:
+        return None
+    try:
+        return app_state.spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
+    except Exception:
+        logger.exception(
+            "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
+            "uid=%s topic=%s",
+            scan.uid, topic,
+        )
+        return None
+
+
+def _handle_tag_writeback(scan: ScanEvent, spool_info: SpoolInfo | None,
+                          device_id: str | None, client: mqtt.Client) -> None:
+    """Check if tag weight is stale and write updated data back to the scanner."""
+    write_plan = build_write_plan(scan, spool_info, device_id=device_id)
+    if not write_plan:
+        return
+    if app_state.cfg.get("tag_writeback_enabled"):
+        scanner_writer.execute(write_plan, client)
+    else:
+        logger.info(
+            "[tag writeback disabled] would write: tag=%s device=%s payload=%s reason=%s",
+            write_plan.uid, write_plan.device_id, write_plan.payload, write_plan.reason,
+        )
+
+
 def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topic: str) -> None:
     """
     Handles a rich-data NFC tag (OpenTag3D or spoolsense_scanner).
@@ -141,51 +176,34 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
         scan = detect_and_parse(payload, target_id, topic)
         logger.info(f"Rich tag parsed: {scan.source} — {scan.brand_name} {scan.material_type} (UID: {scan.uid})")
 
+        # Guard: no tag on scanner
         if not scan.present:
             logger.debug(f"Scanner reported no tag present on {target_id}")
             return
 
-        # UID-only path — separate handler to keep nesting shallow
+        # UID-only path — plain NTAG with no embedded data, look up in Spoolman
         if not scan.tag_data_valid and not scan.blank and scan.uid:
             _handle_uid_only_tag(client, scanner_cfg, scan.uid.lower(), topic)
             return
 
+        # Invalid tag data — nothing we can do
         if not scan.tag_data_valid:
             logger.warning(f"Scanner reported invalid tag data on {target_id}")
             return
 
-        # --- Enrichment path (best-effort Spoolman sync) ---
-        spool_info = None
-        if app_state.spoolman_client is not None:
-            try:
-                spool_info = app_state.spoolman_client.sync_spool_from_scan(scan, prefer_tag=True)
-            except Exception:
-                logger.exception(
-                    "Spoolman sync failed for rich tag scan; continuing with tag-only activation. "
-                    "uid=%s topic=%s",
-                    scan.uid, topic,
-                )
-
-        # --- Activation path (always runs from scan data) ---
+        # Enrich from Spoolman (best-effort), then activate
+        spool_info = _enrich_from_spoolman(scan, topic)
         _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
 
-        # --- Record for UPDATE_TAG deduction tracking ---
+        # Record initial weight for UPDATE_TAG filament deduction
         device_id = _extract_scanner_device_id(topic)
         _record_spool_tracking(
             target, scan.uid.lower() if scan.uid else None, device_id or "",
             scan.remaining_weight_g, scan.diameter_mm, scan.density,
         )
 
-        # --- Tag writeback (stale-tag reconciliation) ---
-        write_plan = build_write_plan(scan, spool_info, device_id=device_id)
-        if write_plan:
-            if app_state.cfg.get("tag_writeback_enabled"):
-                scanner_writer.execute(write_plan, client)
-            else:
-                logger.info(
-                    "[tag writeback disabled] would write: tag=%s device=%s payload=%s reason=%s",
-                    write_plan.uid, write_plan.device_id, write_plan.payload, write_plan.reason,
-                )
+        # Write updated weight back to tag if stale
+        _handle_tag_writeback(scan, spool_info, device_id, client)
 
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")
