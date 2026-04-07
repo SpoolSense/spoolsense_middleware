@@ -75,56 +75,29 @@ def _fetch_last_job_weights() -> list[float] | None:
 
 
 def _fetch_afc_lane_weights() -> dict[str, float] | None:
-    """
-    Fetch current per-lane weight from AFC status.
+    """Fetch current per-lane weight from AFC status. Returns {"lane1": 550.0, ...} or None."""
+    from afc_status import _extract_afc_data, _fetch_afc_status, _SKIP_KEYS
 
-    Returns dict like {"lane1": 550.0, "lane2": 720.0}, or None on error.
-    """
-    moonraker = app_state.cfg.get("moonraker_url", "")
-    if not moonraker:
+    data = _fetch_afc_status()
+    if data is None:
         return None
 
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/afc/status",
-            timeout=5,
-        )
-        response.raise_for_status()
-        result = response.json()
+    afc_data = _extract_afc_data(data)
+    if not isinstance(afc_data, dict):
+        return None
 
-        # Unwrap Moonraker envelope
-        if isinstance(result, dict) and "result" in result:
-            result = result["result"]
-
-        # Navigate AFC status structure: status: -> AFC -> unit -> lane
-        status_block = result.get("status:") or result.get("status")
-        if not isinstance(status_block, dict):
-            return None
-        afc_data = status_block.get("AFC")
-        if not isinstance(afc_data, dict):
-            return None
-
-        skip_keys = {"system", "Tools"}
-        weights: dict[str, float] = {}
-
-        for unit_name, unit_data in afc_data.items():
-            if unit_name in skip_keys or not isinstance(unit_data, dict):
+    weights: dict[str, float] = {}
+    for unit_name, unit_data in afc_data.items():
+        if unit_name in _SKIP_KEYS or not isinstance(unit_data, dict):
+            continue
+        for lane_name, lane_data in unit_data.items():
+            if lane_name == "system" or not isinstance(lane_data, dict):
                 continue
-            for lane_name, lane_data in unit_data.items():
-                if lane_name == "system" or not isinstance(lane_data, dict):
-                    continue
-                weight = lane_data.get("weight")
-                if isinstance(weight, (int, float)):
-                    weights[lane_name] = float(weight)
+            weight = lane_data.get("weight")
+            if isinstance(weight, (int, float)):
+                weights[lane_name] = float(weight)
 
-        return weights if weights else None
-
-    except requests.ConnectionError:
-        logger.debug("UPDATE_TAG: Moonraker not reachable for AFC status")
-        return None
-    except Exception:
-        logger.exception("UPDATE_TAG: failed to fetch AFC lane weights")
-        return None
+    return weights if weights else None
 
 
 def _clear_pending() -> None:
