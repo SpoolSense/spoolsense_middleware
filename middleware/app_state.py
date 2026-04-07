@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from publisher_manager import PublisherManager
     from toolchanger_status import ToolchangerStatusSync
     from toolhead_status import ToolheadStatusSync
+    from filament_usage import FilamentUsageSync
 
 # Dispatcher availability — set at import time
 try:
@@ -32,6 +33,7 @@ watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
 toolchanger_status_sync: ToolchangerStatusSync | None = None
 toolhead_status_sync: ToolheadStatusSync | None = None
+filament_usage_sync: FilamentUsageSync | None = None
 publisher_manager: PublisherManager | None = None
 moonraker_ws: MoonrakerWebsocket | None = None
 
