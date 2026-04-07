@@ -1,3 +1,10 @@
+"""
+client.py — SpoolmanClient for spool sync and management.
+
+Handles NFC UID → spool lookup, spool creation (vendor + filament + spool),
+weight updates via PATCH, and tag data enrichment. All Spoolman REST API
+calls live here.
+"""
 import logging
 import time
 from typing import Optional
