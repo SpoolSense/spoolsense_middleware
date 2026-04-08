@@ -230,30 +230,34 @@ def _load_deductions() -> None:
             data = json.load(f)
         if isinstance(data, dict):
             with app_state.state_lock:
-                app_state.pending_mobile_deductions = {k: float(v) for k, v in data.items()}
+                app_state.pending_mobile_deductions = {k.lower(): float(v) for k, v in data.items()}
             logger.info(f"Loaded {len(data)} pending mobile deductions from disk")
     except Exception:
         logger.exception("Failed to load deductions file")
 
 
 def _save_deductions() -> None:
-    """Persist pending deductions to disk so they survive middleware restarts."""
+    """Persist pending deductions to disk so they survive middleware restarts.
+    Uses atomic write (temp file + rename) to prevent corruption on crash."""
     with app_state.state_lock:
         snapshot = dict(app_state.pending_mobile_deductions)
     try:
-        with open(app_state.DEDUCTIONS_FILE, "w") as f:
+        tmp_path = app_state.DEDUCTIONS_FILE + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(snapshot, f)
+        os.replace(tmp_path, app_state.DEDUCTIONS_FILE)
     except Exception:
         logger.exception("Failed to save deductions file")
 
 
 def store_mobile_deduction(uid: str, grams: float) -> None:
     """Store a pending deduction for a mobile-scanned spool. Accumulates if entry exists."""
+    uid_lower = uid.lower()
     with app_state.state_lock:
-        current = app_state.pending_mobile_deductions.get(uid, 0.0)
-        app_state.pending_mobile_deductions[uid] = current + grams
+        current = app_state.pending_mobile_deductions.get(uid_lower, 0.0)
+        app_state.pending_mobile_deductions[uid_lower] = current + grams
     _save_deductions()
-    logger.info(f"Mobile deduction: stored {grams:.1f}g for {uid} (total: {current + grams:.1f}g)")
+    logger.info(f"Mobile deduction: stored {grams:.1f}g for {uid_lower} (total: {current + grams:.1f}g)")
 
 
 # ── Deduction endpoints ─────────────────────────────────────────────────────
