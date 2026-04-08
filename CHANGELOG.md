@@ -4,6 +4,14 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.6.1] - 2026-04-07
+
+### Added
+
+- **Tag format gating for UPDATE_TAG** — the middleware now reads the `tag_format` field from the scanner's MQTT payload and only sends filament deductions for tags that support weight writes (OpenPrintTag, OpenTag3D). TigerTag, OpenSpool, and UID-only tags are skipped — their tracking is handled by Spoolman/Moonraker. (#54)
+
+---
+
 ## [1.6.0] - 2026-04-06
 
 ### Added
