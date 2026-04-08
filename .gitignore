@@ -15,6 +15,12 @@ __pycache__/
 .env
 venv/
 
+# MCP server config (local dev tooling)
+.mcp.json
+
+# Ollama suggestions (local dev notes)
+ollama_suggestions.md
+
 # OS
 .DS_Store
 Thumbs.db
