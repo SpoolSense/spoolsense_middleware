@@ -226,7 +226,7 @@ def _load_deductions() -> None:
     if not os.path.exists(app_state.DEDUCTIONS_FILE):
         return
     try:
-        with open(app_state.DEDUCTIONS_FILE, "r") as f:
+        with open(app_state.DEDUCTIONS_FILE) as f:
             data = json.load(f)
         if isinstance(data, dict):
             with app_state.state_lock:

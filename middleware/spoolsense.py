@@ -266,10 +266,7 @@ def _start_rest_api() -> None:
         return
 
     import uvicorn
-    from rest_api import app as rest_app, _load_deductions
-
-    # Load any pending mobile deductions from disk
-    _load_deductions()
+    from rest_api import app as rest_app
 
     rest_port = mobile_cfg.get("port", 5001)
 
@@ -319,6 +316,10 @@ def main() -> None:
     # Discover AFC lanes from Moonraker, set up websocket if available
     lane_names = _discover_afc_lanes()
     use_ws     = _setup_websocket(lane_names)
+
+    # Load pending mobile deductions before sync services start — avoids race with UPDATE_TAG
+    from rest_api import _load_deductions
+    _load_deductions()
 
     _start_sync_services(use_ws)                                                # AFC, toolchanger, toolhead status
     _start_rest_api()                                                           # mobile app scanning (if enabled)
