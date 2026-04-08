@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 """
 SpoolSense NFC Middleware
 =========================
