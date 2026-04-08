@@ -69,8 +69,9 @@ def _record_spool_tracking(
     remaining: float | None,
     diameter_mm: float | None = None,
     density: float | None = None,
+    tag_format: str | None = None,
 ) -> None:
-    """Store initial weight, UID, device, and filament properties for UPDATE_TAG deduction tracking."""
+    """Store initial weight, UID, device, filament properties, and tag format for UPDATE_TAG deduction tracking."""
     if not target or not uid or remaining is None:
         return
     with app_state.state_lock:
@@ -79,6 +80,7 @@ def _record_spool_tracking(
         app_state.active_spool_devices[target]    = device_id or ""
         app_state.active_spool_diameters[target]  = diameter_mm or 1.75
         app_state.active_spool_densities[target]  = density or 1.24
+        app_state.active_spool_formats[target]    = tag_format or "unknown"
 
 
 # ── UID-only tag handling ────────────────────────────────────────────────────
@@ -130,7 +132,8 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
 
     if target:
         app_state.active_spools[target] = spool_id
-        _record_spool_tracking(target, uid, device_id or "", remaining)
+        _record_spool_tracking(target, uid, device_id or "", remaining,
+                               tag_format="uid_only")
 
     if action in ("afc_lane", "toolhead"):
         publish_lock(target, "lock")
@@ -207,9 +210,12 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
 
         # Record initial weight for UPDATE_TAG filament deduction
         device_id = _extract_scanner_device_id(topic)
+        # tag_format comes from the scanner payload — tells us if this tag supports weight writes
+        tag_format = payload.get("tag_format", "unknown")
         _record_spool_tracking(
             target, scan.uid.lower() if scan.uid else None, device_id or "",
             scan.remaining_weight_g, scan.diameter_mm, scan.density,
+            tag_format=tag_format,
         )
 
         # Write updated weight back to tag if stale

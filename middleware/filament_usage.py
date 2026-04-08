@@ -117,6 +117,16 @@ def _clear_pending() -> None:
         logger.exception("UPDATE_TAG: failed to clear pending variable")
 
 
+# Only these tag formats support writing weight back to the tag
+_WRITABLE_FORMATS = {"openprinttag", "opentag3d"}
+
+
+def _is_writable_tag(target: str) -> bool:
+    """Check if the tag on this target supports weight writes."""
+    fmt = app_state.active_spool_formats.get(target, "unknown")
+    return fmt in _WRITABLE_FORMATS
+
+
 def _publish_deduction(device_id: str, uid: str, deduct_g: float) -> None:
     """Publish a deduction command to the scanner via MQTT."""
     if not app_state.mqtt_client:
@@ -180,6 +190,10 @@ def _handle_afc() -> None:
         device_id = devices.get(lane)
         if not uid or not device_id:
             logger.debug(f"UPDATE_TAG: no UID or device for {lane}, skipping")
+            continue
+
+        if not _is_writable_tag(lane):
+            logger.debug(f"UPDATE_TAG: {lane} tag format is not writable, skipping deduction")
             continue
 
         _publish_deduction(device_id, uid, deduction)
@@ -275,6 +289,11 @@ def _handle_toolchanger() -> None:
                 logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
                 continue
 
+            # Only send deductions for tags that can store weight updates
+            if not _is_writable_tag(tool_name):
+                logger.debug(f"UPDATE_TAG: {tool_name} tag format is not writable, skipping deduction")
+                continue
+
             diameter = diameters.get(tool_name, 1.75)
             density = densities.get(tool_name, 1.24)
             usage_g = _mm_to_grams(usage_mm, diameter, density)
@@ -302,6 +321,10 @@ def _handle_toolchanger() -> None:
 
         if not uid or not device_id:
             logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
+            continue
+
+        if not _is_writable_tag(tool_name):
+            logger.debug(f"UPDATE_TAG: {tool_name} tag format is not writable, skipping deduction")
             continue
 
         _publish_deduction(device_id, uid, weight)

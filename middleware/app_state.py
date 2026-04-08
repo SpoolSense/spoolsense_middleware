@@ -87,3 +87,4 @@ active_spool_uids: dict[str, str] = {}
 active_spool_devices: dict[str, str] = {}
 active_spool_diameters: dict[str, float] = {}   # mm, default 1.75
 active_spool_densities: dict[str, float] = {}   # g/cm³, default 1.24
+active_spool_formats: dict[str, str] = {}       # tag format — "openprinttag", "tigertag", etc.
