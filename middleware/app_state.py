@@ -7,6 +7,7 @@ access to shared fields is protected by state_lock.
 """
 from __future__ import annotations
 
+import os
 import threading
 
 import paho.mqtt.client as mqtt
@@ -88,3 +89,9 @@ active_spool_devices: dict[str, str] = {}
 active_spool_diameters: dict[str, float] = {}   # mm, default 1.75
 active_spool_densities: dict[str, float] = {}   # g/cm³, default 1.24
 active_spool_formats: dict[str, str] = {}       # tag format — "openprinttag", "tigertag", etc.
+
+# Pending deductions for mobile-scanned spools (no scanner to receive MQTT).
+# Maps UID → grams pending. Persisted to ~/SpoolSense/deductions.json.
+# Protected by state_lock.
+pending_mobile_deductions: dict[str, float] = {}
+DEDUCTIONS_FILE: str = os.path.expanduser("~/SpoolSense/deductions.json")

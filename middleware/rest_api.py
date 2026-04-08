@@ -6,7 +6,9 @@ existing detect_and_parse → _activate_from_scan pipeline.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +17,7 @@ from pydantic import BaseModel
 import app_state
 from adapters.dispatcher import detect_and_parse
 from activation import _activate_from_scan
+from mqtt_handler import _record_spool_tracking, _get_scanner_target
 from publishers.klipper import _send_gcode
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,7 @@ class MobileScanRequest(BaseModel):
     present: bool = True
     tag_data_valid: bool = False
     blank: bool = False
+    tag_format: str | None = None                   # "openprinttag", "opentag3d", "tigertag", etc.
     material_type: str | None = None
     material_name: str | None = None
     manufacturer: str | None = None
@@ -36,6 +40,8 @@ class MobileScanRequest(BaseModel):
     remaining_g: float | None = None
     initial_weight_g: float | None = None
     spoolman_id: int | None = None
+    density: float | None = None
+    diameter_mm: float | None = None
 
 
 class AssignToolRequest(BaseModel):
@@ -150,6 +156,16 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
 
     _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
 
+    # Record for UPDATE_TAG deduction tracking — device_id="" signals mobile-scanned
+    target = _get_scanner_target(scanner_cfg)
+    if target and scan.uid:
+        _record_spool_tracking(
+            target, scan.uid.lower(), "",                               # empty device_id = mobile
+            scan.remaining_weight_g, scan.diameter_mm,
+            getattr(scan, "density", None),
+            tag_format=req.tag_format or "unknown",
+        )
+
     spool_id = spool_info.spoolman_id if spool_info else scan.scanner_spoolman_id
     return ApiResponse(
         success=True,
@@ -201,3 +217,75 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         toolhead=toolhead,
         spool_id=pending.get("spoolman_id"),
     )
+
+
+# ── Deduction persistence ───────────────────────────────────────────────────
+
+def _load_deductions() -> None:
+    """Load pending deductions from disk into app_state on startup."""
+    if not os.path.exists(app_state.DEDUCTIONS_FILE):
+        return
+    try:
+        with open(app_state.DEDUCTIONS_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            with app_state.state_lock:
+                app_state.pending_mobile_deductions = {k.lower(): float(v) for k, v in data.items()}
+            logger.info(f"Loaded {len(data)} pending mobile deductions from disk")
+    except Exception:
+        logger.exception("Failed to load deductions file")
+
+
+def _save_deductions() -> None:
+    """Persist pending deductions to disk so they survive middleware restarts.
+    Uses atomic write (temp file + rename) to prevent corruption on crash."""
+    with app_state.state_lock:
+        snapshot = dict(app_state.pending_mobile_deductions)
+    try:
+        tmp_path = app_state.DEDUCTIONS_FILE + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(snapshot, f)
+        os.replace(tmp_path, app_state.DEDUCTIONS_FILE)
+    except Exception:
+        logger.exception("Failed to save deductions file")
+
+
+def store_mobile_deduction(uid: str, grams: float) -> None:
+    """Store a pending deduction for a mobile-scanned spool. Accumulates if entry exists."""
+    uid_lower = uid.lower()
+    with app_state.state_lock:
+        current = app_state.pending_mobile_deductions.get(uid_lower, 0.0)
+        app_state.pending_mobile_deductions[uid_lower] = current + grams
+    _save_deductions()
+    logger.info(f"Mobile deduction: stored {grams:.1f}g for {uid_lower} (total: {current + grams:.1f}g)")
+
+
+# ── Deduction endpoints ─────────────────────────────────────────────────────
+
+class DeductionResponse(BaseModel):
+    pending_g: float
+
+
+class DeductionConfirmResponse(BaseModel):
+    success: bool
+    cleared_g: float
+
+
+@app.get("/api/deductions/{uid}", response_model=DeductionResponse)
+def get_deduction(uid: str) -> DeductionResponse:
+    """Return pending deduction for a UID. Returns 0 if none."""
+    with app_state.state_lock:
+        pending = app_state.pending_mobile_deductions.get(uid.lower(), 0.0)
+    return DeductionResponse(pending_g=pending)
+
+
+@app.post("/api/deductions/{uid}/applied", response_model=DeductionConfirmResponse)
+def confirm_deduction(uid: str) -> DeductionConfirmResponse:
+    """Clear a pending deduction after the mobile app confirms the tag write succeeded."""
+    uid_lower = uid.lower()
+    with app_state.state_lock:
+        cleared = app_state.pending_mobile_deductions.pop(uid_lower, 0.0)
+    if cleared > 0:
+        _save_deductions()
+        logger.info(f"Mobile deduction: cleared {cleared:.1f}g for {uid_lower}")
+    return DeductionConfirmResponse(success=True, cleared_g=cleared)

@@ -188,15 +188,19 @@ def _handle_afc() -> None:
 
         uid = uids.get(lane)
         device_id = devices.get(lane)
-        if not uid or not device_id:
-            logger.debug(f"UPDATE_TAG: no UID or device for {lane}, skipping")
+        if not uid:
+            logger.debug(f"UPDATE_TAG: no UID for {lane}, skipping")
             continue
 
         if not _is_writable_tag(lane):
             logger.debug(f"UPDATE_TAG: {lane} tag format is not writable, skipping deduction")
             continue
 
-        _publish_deduction(device_id, uid, deduction)
+        if not device_id:
+            from rest_api import store_mobile_deduction
+            store_mobile_deduction(uid, deduction)
+        else:
+            _publish_deduction(device_id, uid, deduction)
 
         # Update initial weight so next UPDATE_TAG only deducts the delta
         with app_state.state_lock:
@@ -285,7 +289,7 @@ def _handle_toolchanger() -> None:
 
             uid = uids.get(tool_name)
             device_id = devices.get(tool_name)
-            if not uid or not device_id:
+            if not uid:
                 logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
                 continue
 
@@ -297,7 +301,13 @@ def _handle_toolchanger() -> None:
             diameter = diameters.get(tool_name, 1.75)
             density = densities.get(tool_name, 1.24)
             usage_g = _mm_to_grams(usage_mm, diameter, density)
-            _publish_deduction(device_id, uid, usage_g)
+
+            # Mobile-scanned spools have no scanner device — store for REST retrieval
+            if not device_id:
+                from rest_api import store_mobile_deduction
+                store_mobile_deduction(uid, usage_g)
+            else:
+                _publish_deduction(device_id, uid, usage_g)
         return
 
     # Fallback: slicer estimate from print history
@@ -319,7 +329,7 @@ def _handle_toolchanger() -> None:
         uid = uids.get(tool_name)
         device_id = devices.get(tool_name)
 
-        if not uid or not device_id:
+        if not uid:
             logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
             continue
 
@@ -327,7 +337,11 @@ def _handle_toolchanger() -> None:
             logger.debug(f"UPDATE_TAG: {tool_name} tag format is not writable, skipping deduction")
             continue
 
-        _publish_deduction(device_id, uid, weight)
+        if not device_id:
+            from rest_api import store_mobile_deduction
+            store_mobile_deduction(uid, weight)
+        else:
+            _publish_deduction(device_id, uid, weight)
 
 
 def _fetch_pending() -> int | None:
