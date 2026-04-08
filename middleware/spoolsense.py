@@ -266,7 +266,10 @@ def _start_rest_api() -> None:
         return
 
     import uvicorn
-    from rest_api import app as rest_app
+    from rest_api import app as rest_app, _load_deductions
+
+    # Load any pending mobile deductions from disk
+    _load_deductions()
 
     rest_port = mobile_cfg.get("port", 5001)
 
