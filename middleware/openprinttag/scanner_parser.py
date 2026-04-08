@@ -45,8 +45,7 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
         blank            → blank
 
     Fields NOT published by this firmware (exist in tag CBOR but not in MQTT payload):
-        diameter, density, remaining_m, temp_min, temp_max, bed_temp,
-        uuid, format_version, type
+        remaining_m, uuid, format_version, type
     """
     raw_color = payload.get("color")
     color_hex = raw_color.lstrip("#").upper() if raw_color else None
@@ -89,5 +88,11 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
         color_hex=color_hex,
         full_weight_g=payload.get("initial_weight_g"),
         remaining_weight_g=payload.get("remaining_g"),
+        nozzle_temp_min=payload.get("min_print_temp"),
+        nozzle_temp_max=payload.get("max_print_temp"),
+        bed_temp_min=payload.get("min_bed_temp"),
+        bed_temp_max=payload.get("max_bed_temp"),
+        diameter_mm=payload.get("diameter_mm"),
+        density=payload.get("density"),
         raw=payload,
     )
