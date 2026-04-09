@@ -41,8 +41,10 @@ def refresh_spool_cache() -> bool:
         return False
     try:
         logger.info("Refreshing Spoolman cache...")
+        # Only index active spools — archived spools with the same nfc_id
+        # would overwrite the active entry and cause lookup failures (#49)
         response = requests.get(
-            f"{app_state.cfg['spoolman_url']}/api/v1/spool", timeout=5
+            f"{app_state.cfg['spoolman_url']}/api/v1/spool?archived=false", timeout=5
         )
         response.raise_for_status()
         spools = response.json()

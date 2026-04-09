@@ -1,9 +1,10 @@
 """
-client.py — SpoolmanClient for spool sync and management.
+client.py — SpoolmanClient for spool lookup and enrichment.
 
-Handles NFC UID → spool lookup, spool creation (vendor + filament + spool),
-weight updates via PATCH, and tag data enrichment. All Spoolman REST API
-calls live here.
+Read-only interface to Spoolman. Looks up spools by NFC UID and enriches
+tag data with Spoolman's color, material, and weight info. Does NOT create
+or modify spools — the scanner handles all Spoolman writes, and Moonraker
+handles filament usage tracking via sync_rate.
 """
 import logging
 import time
@@ -15,7 +16,7 @@ from state.models import SpoolInfo
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL = 3600  # Seconds before forcing a full Spoolman re-sync
+CACHE_TTL = 3600  # seconds before forcing a full Spoolman re-sync
 
 
 class SpoolmanClient:
@@ -24,10 +25,12 @@ class SpoolmanClient:
         self.cache = {}
         self._last_refresh = 0
 
-    def _fetch_all_spools(self):
-        """Pulls all spools to find NFC UIDs stored in the 'extra' fields."""
+    def _fetch_all_spools(self) -> None:
+        """Pulls all active (non-archived) spools to build the NFC UID lookup cache."""
         try:
-            response = requests.get(f"{self.base_url}/api/v1/spool", timeout=5)
+            # Only index active spools — archived spools with the same nfc_id
+            # would overwrite the active entry and cause lookup failures (#49)
+            response = requests.get(f"{self.base_url}/api/v1/spool?archived=false", timeout=5)
             response.raise_for_status()
             self.cache = {}
             for spool in response.json():
@@ -55,17 +58,10 @@ class SpoolmanClient:
 
     def sync_spool_from_scan(self, scan, prefer_tag: bool = True) -> Optional[SpoolInfo]:
         """
-        Bridge between the new ScanEvent model and Spoolman sync.
+        Look up the scanned spool in Spoolman and enrich tag data.
 
-        Takes a ScanEvent from the dispatcher, converts it to a SpoolInfo,
-        then runs the standard sync_spool merge logic.
-
-        Args:
-            scan: A ScanEvent from the dispatcher.
-            prefer_tag: If True, tag weight wins. Spoolman color always wins if set.
-
-        Returns:
-            SpoolInfo with spoolman_id populated, or None if sync failed.
+        Returns SpoolInfo with spoolman_id and enriched fields, or None if the
+        spool isn't in Spoolman yet (scanner will create it on its side).
         """
         tag_spool = SpoolInfo(
             spool_uid=scan.uid,
@@ -86,53 +82,34 @@ class SpoolmanClient:
         )
 
         if not tag_spool.spool_uid:
-            logger.warning("ScanEvent has no UID — cannot sync with Spoolman")
+            logger.warning("ScanEvent has no UID — cannot look up in Spoolman")
             return None
 
-        return self.sync_spool(tag_spool, prefer_tag=prefer_tag)
-
-    def sync_spool(self, tag_spool: SpoolInfo, prefer_tag: bool = True) -> SpoolInfo:
-        """
-        The Merger: Takes a parsed SpoolInfo from a tag, checks Spoolman, and syncs them.
-
-        If the spool is not in Spoolman yet, it creates a new entry and writes the
-        NFC UID back so future scans find it.
-
-        If the spool already exists:
-          prefer_tag=True  — Tag data wins for weight/material. But Spoolman's
-                             color_hex always takes priority if set, since a human
-                             likely chose it deliberately (vs our best-guess
-                             conversion from a color name like "Galaxy Black").
-          prefer_tag=False — Spoolman data wins for everything.
-
-        Always returns a SpoolInfo with spoolman_id populated.
-        """
         existing = self.find_by_nfc(tag_spool.spool_uid)
 
         if not existing:
-            logger.info(f"NFC {tag_spool.spool_uid} not in Spoolman. Creating new spool...")
-            return self._create_spool_from_tag(tag_spool)
+            # Spool not in Spoolman yet — scanner handles creation.
+            # Return None so activation runs in tag-only mode.
+            logger.info(f"NFC {tag_spool.spool_uid} not in Spoolman — running tag-only (scanner creates)")
+            return None
 
+        # Enrich tag data with Spoolman's stored values
         spoolman_id = existing["id"]
         filament = existing.get("filament", {})
         tag_spool.spoolman_id = spoolman_id
 
-        # Spoolman's color always wins if it has one set — a human chose it
-        # deliberately, and it's likely more accurate than our color name → hex guess
+        # Spoolman's color always wins if set — a human chose it deliberately
         spoolman_color = filament.get("color_hex")
         if spoolman_color:
             logger.info(f"Using Spoolman color #{spoolman_color} over tag color '{tag_spool.color_name or tag_spool.color_hex}'")
             tag_spool.color_hex = spoolman_color
 
         if prefer_tag:
-            # Tag is the source of truth for weight. Push tag weight to Spoolman.
-            logger.info(f"Updating Spoolman ID {spoolman_id} with fresh tag data...")
-            nominal_g = filament.get("weight")
-            self._update_spoolman_weight(spoolman_id, tag_spool.remaining_weight_g, nominal_g)
+            # Tag weight is source of truth — don't write to Spoolman,
+            # just use the tag value. Moonraker handles weight sync.
             tag_spool.source = "merged (tag preferred)"
         else:
-            # Spoolman is the source of truth. Pull its data into SpoolInfo.
-            logger.info(f"Using existing Spoolman data for ID {spoolman_id}.")
+            # Spoolman data wins for everything
             tag_spool.remaining_weight_g = existing.get("remaining_weight", tag_spool.remaining_weight_g)
             if spoolman_color is not None:
                 tag_spool.color_hex = spoolman_color
@@ -145,247 +122,3 @@ class SpoolmanClient:
             tag_spool.source = "merged (spoolman preferred)"
 
         return tag_spool
-
-    def _create_spool_from_tag(self, tag_spool: SpoolInfo) -> SpoolInfo:
-        """
-        Creates a vendor (if needed), filament (if needed), and spool in Spoolman
-        based on tag data, then writes the NFC UID back so future scans find it.
-
-        Deduplication strategy:
-          - Vendor: matched case-insensitively by name. Created if not found.
-          - Filament: matched by vendor_id + material + color_hex + name (all four
-            must match). Created if not found.
-          - Spool: always created fresh — a new physical spool is a new Spoolman entry.
-        """
-        # --- Vendor ---
-        vendor_name = tag_spool.brand or "Unknown"
-        vendor = self._get_vendor_by_name(vendor_name)
-        if vendor is None:
-            logger.info(f"Vendor '{vendor_name}' not found in Spoolman — creating.")
-            vendor = self._create_vendor(vendor_name)
-        vendor_id = vendor["id"]
-
-        # --- Filament ---
-        filament = self._get_filament(
-            vendor_id=vendor_id,
-            material=tag_spool.material_type or "",
-            color_hex=tag_spool.color_hex or "",
-            name=tag_spool.material_name,
-        )
-        if filament is None:
-            logger.info(f"No matching filament found for vendor {vendor_id} / "
-                        f"{tag_spool.material_type} / {tag_spool.color_hex} — creating.")
-            filament = self._create_filament(
-                vendor_id=vendor_id,
-                material=tag_spool.material_type or "",
-                color_hex=tag_spool.color_hex or "",
-                name=tag_spool.material_name,
-                diameter=tag_spool.diameter_mm,
-                density=getattr(tag_spool, "density", None),
-            )
-        filament_id = filament["id"]
-
-        # --- Spool ---
-        spool = self._create_spool(
-            filament_id=filament_id,
-            weight=tag_spool.full_weight_g,
-        )
-        tag_spool.spoolman_id = spool["id"]
-        tag_spool.source = "created"
-
-        # Write NFC UID back so the cache finds it on the next scan
-        self._write_nfc_id(tag_spool.spoolman_id, tag_spool.spool_uid)
-        logger.info(f"Created Spoolman spool {tag_spool.spoolman_id} for UID {tag_spool.spool_uid} "
-                    f"({vendor_name} {tag_spool.material_type} / filament {filament_id})")
-        return tag_spool
-
-    def _get_vendor_by_name(self, name: str) -> Optional[dict]:
-        """
-        Returns the first Spoolman vendor whose name matches case-insensitively,
-        or None if not found.
-        """
-        try:
-            response = requests.get(f"{self.base_url}/api/v1/vendor", timeout=5)
-            response.raise_for_status()
-            name_lower = name.lower()
-            for vendor in response.json():
-                if vendor.get("name", "").lower() == name_lower:
-                    return vendor
-            return None
-        except Exception as e:
-            logger.error(f"Failed to fetch vendors from Spoolman: {e}")
-            raise
-
-    def _create_vendor(self, name: str) -> dict:
-        """
-        Creates a new vendor in Spoolman and returns the created object.
-        """
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/v1/vendor",
-                json={"name": name},
-                timeout=5,
-            )
-            response.raise_for_status()
-            vendor = response.json()
-            logger.info(f"Created Spoolman vendor '{name}' (id={vendor['id']})")
-            return vendor
-        except Exception as e:
-            logger.error(f"Failed to create vendor '{name}' in Spoolman: {e}")
-            raise
-
-    def _get_filament(
-        self,
-        vendor_id: int,
-        material: str,
-        color_hex: str,
-        name: Optional[str] = None,
-    ) -> Optional[dict]:
-        """
-        Returns the first Spoolman filament matching all four criteria:
-            vendor_id + material + color_hex + name
-        Returns None if no match is found.
-
-        Matching is normalized before comparison to avoid duplicates from formatting noise:
-          - vendor_id: exact integer match
-          - material:  strip() only — case is meaningful (PLA != pla)
-          - color_hex: strip(), lstrip("#"), lower() — 1A1A2E matches 1a1a2e
-          - name:      strip(), casefold(), empty string normalized to None
-
-        A filament with the same vendor/material/color but a different name is still a miss
-        — treat as user error and create a new entry rather than silently merging.
-        """
-        target_material = (material or "").strip()
-        target_color = (color_hex or "").strip().lstrip("#").lower()
-        target_name = (name or "").strip().casefold() or None
-
-        try:
-            response = requests.get(
-                f"{self.base_url}/api/v1/filament",
-                params={"vendor_id": vendor_id},
-                timeout=5,
-            )
-            response.raise_for_status()
-            for filament in response.json():
-                filament_material = (filament.get("material") or "").strip()
-                filament_color = (filament.get("color_hex") or "").strip().lstrip("#").lower()
-                filament_name = (filament.get("name") or "").strip().casefold() or None
-                if (
-                    filament.get("vendor", {}).get("id") == vendor_id
-                    and filament_material == target_material
-                    and filament_color == target_color
-                    and filament_name == target_name
-                ):
-                    return filament
-            return None
-        except Exception as e:
-            logger.error(f"Failed to fetch filaments from Spoolman: {e}")
-            raise
-
-    def _create_filament(
-        self,
-        vendor_id: int,
-        material: str,
-        color_hex: str,
-        name: Optional[str] = None,
-        diameter: Optional[float] = None,
-        density: Optional[float] = None,
-    ) -> dict:
-        """
-        Creates a new filament in Spoolman and returns the created object.
-        Only includes optional fields (name, diameter, density) when provided.
-        """
-        normalized_material = (material or "").strip()
-        normalized_color_hex = (color_hex or "").strip().lstrip("#").lower()
-        normalized_name = (name or "").strip() or None
-
-        payload: dict = {
-            "vendor_id": vendor_id,
-            "material": normalized_material,
-            "color_hex": normalized_color_hex,
-        }
-        if normalized_name is not None:
-            payload["name"] = normalized_name
-        if diameter is not None:
-            payload["diameter"] = diameter
-        if density is not None:
-            payload["density"] = density
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/v1/filament",
-                json=payload,
-                timeout=5,
-            )
-            response.raise_for_status()
-            filament = response.json()
-            logger.info(f"Created Spoolman filament '{name or material}' (id={filament['id']}, "
-                        f"vendor={vendor_id}, color={color_hex})")
-            return filament
-        except Exception as e:
-            logger.error(f"Failed to create filament in Spoolman: {e}")
-            raise
-
-    def _create_spool(self, filament_id: int, weight: Optional[float] = None) -> dict:
-        """
-        Creates a new spool in Spoolman linked to the given filament_id.
-        weight is the nominal full weight in grams — stored as Spoolman's
-        initial_weight. Omitted if not provided.
-        """
-        payload: dict = {"filament_id": filament_id}
-        if weight is not None:
-            payload["initial_weight"] = weight
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/v1/spool",
-                json=payload,
-                timeout=5,
-            )
-            response.raise_for_status()
-            spool = response.json()
-            logger.info(f"Created Spoolman spool (id={spool['id']}, filament={filament_id})")
-            return spool
-        except Exception as e:
-            logger.error(f"Failed to create spool in Spoolman: {e}")
-            raise
-
-    def _update_spoolman_weight(self, spoolman_id: int, remaining_g: Optional[float], nominal_g: Optional[float]):
-        """
-        Updates the consumed weight in Spoolman.
-
-        Spoolman stores 'used_weight', not 'remaining_weight', so we calculate:
-            used_weight = nominal_g (filament["weight"]) - remaining_g
-        Both values are required — if either is missing we skip the update.
-        """
-        if remaining_g is None or nominal_g is None:
-            logger.debug(f"Skipping weight update for spool {spoolman_id}: missing remaining or nominal weight.")
-            return
-        used_weight = max(0.0, nominal_g - remaining_g)
-        try:
-            requests.patch(
-                f"{self.base_url}/api/v1/spool/{spoolman_id}",
-                json={"used_weight": used_weight},
-                timeout=5
-            ).raise_for_status()
-            logger.info(f"Spoolman spool {spoolman_id}: used_weight set to {used_weight:.1f}g")
-        except Exception as e:
-            logger.warning(f"Failed to update weight for spool {spoolman_id}: {e}")
-
-    def _write_nfc_id(self, spoolman_id: int, nfc_uid: str):
-        """
-        Writes the NFC UID into Spoolman's extra fields so the spool can be found
-        by NFC lookup on future scans.
-        """
-        try:
-            requests.patch(
-                f"{self.base_url}/api/v1/spool/{spoolman_id}",
-                json={"extra": {"nfc_id": nfc_uid.lower()}},
-                timeout=5
-            ).raise_for_status()
-            logger.info(f"Wrote NFC UID {nfc_uid} to Spoolman spool {spoolman_id}.")
-            # Update the local cache so we don't need a full refresh
-            self.cache[nfc_uid.lower()] = {"id": spoolman_id}
-        except Exception as e:
-            logger.error(f"Failed to write NFC UID to Spoolman spool {spoolman_id}: {e}")
-            raise
