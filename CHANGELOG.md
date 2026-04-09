@@ -4,6 +4,23 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.6.2] - 2026-04-09
+
+### Added
+
+- **Mobile filament deduction endpoints** — REST API for mobile-only users to retrieve and apply pending filament deductions. `GET /api/deductions/{uid}` returns pending grams, `POST /api/deductions/{uid}/applied` clears after tag write. Deductions persist to disk across middleware restarts. (#56)
+- **tag_format and density/diameter in scan payloads** — scanner parser now extracts `density`, `diameter_mm`, and temperature fields from MQTT payloads into ScanEvent. Mobile scan requests accept `tag_format` field.
+
+### Fixed
+
+- **Websocket reconnect after Klipper restart** — middleware now handles Moonraker's `notify_klippy_ready` event to re-subscribe to printer objects. Previously, restarting Klipper silently broke ASSIGN_SPOOL and UPDATE_TAG until the middleware was manually restarted. (#53)
+- **ScanEvent field names** — corrected `nozzle_temp_min` to `nozzle_temp_min_c` (and other temp fields) in scanner parser to match ScanEvent dataclass
+- **Deduction UID casing** — UIDs are now lowercased consistently on store and load to prevent lookup mismatches
+- **Atomic deduction file writes** — `deductions.json` uses temp file + rename to prevent corruption on crash
+- **Race condition** — pending deductions loaded from disk before sync services start to prevent overwrites
+
+---
+
 ## [1.6.1] - 2026-04-07
 
 ### Added

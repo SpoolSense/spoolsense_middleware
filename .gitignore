@@ -15,9 +15,19 @@ __pycache__/
 .env
 venv/
 
+# MCP server config (local dev tooling)
+.mcp.json
+
+# mex scaffold (local AI context, not tracked)
+.mex/
+
+# Ollama suggestions (local dev notes)
+ollama_suggestions.md
+
 # OS
 .DS_Store
 Thumbs.db
 README.backup.md
 ENHANCEMENTS.md
 middleware/docs/superpowers/
+.cocoindex_code/

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.6.1"
+__version__ = "1.6.2"
 """
 SpoolSense NFC Middleware
 =========================
@@ -316,6 +316,10 @@ def main() -> None:
     # Discover AFC lanes from Moonraker, set up websocket if available
     lane_names = _discover_afc_lanes()
     use_ws     = _setup_websocket(lane_names)
+
+    # Load pending mobile deductions before sync services start — avoids race with UPDATE_TAG
+    from rest_api import _load_deductions
+    _load_deductions()
 
     _start_sync_services(use_ws)                                                # AFC, toolchanger, toolhead status
     _start_rest_api()                                                           # mobile app scanning (if enabled)
