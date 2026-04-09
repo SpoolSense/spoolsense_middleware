@@ -156,6 +156,14 @@ class MoonrakerWebsocket:
             if params and isinstance(params[0], dict):
                 self._dispatch_status(params[0])
 
+        # Klipper restarted — re-subscribe to get fresh object state
+        elif method == "notify_klippy_ready":
+            logger.info("MoonrakerWebsocket: Klipper ready — re-subscribing to printer objects")
+            self._on_open(ws)
+
+        elif method == "notify_klippy_disconnected":
+            logger.warning("MoonrakerWebsocket: Klipper disconnected — waiting for reconnect")
+
     def _on_close(self, ws, close_status_code, close_msg) -> None:
         logger.info(f"MoonrakerWebsocket: connection closed ({close_status_code})")
 
