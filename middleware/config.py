@@ -144,8 +144,6 @@ def _validate_scanners(config: dict) -> None:
             _validate_targeted_scanner(device_id, scanner_cfg, action, "lane", "toolhead", toolheads_list)
 
         elif action == "toolhead":
-            # Single-toolhead users shouldn't need to specify toolhead: "T0"
-            scanner_cfg.setdefault("toolhead", "T0")
             _validate_targeted_scanner(device_id, scanner_cfg, action, "toolhead", "lane", toolheads_list)
 
         elif action in ("afc_stage", "toolhead_stage"):
@@ -252,6 +250,11 @@ def load_config() -> dict:
 
     # Migrate legacy config if needed
     config = _migrate_legacy_config(config)
+
+    # Apply scanner defaults before derivation and validation
+    for scanner_cfg in config.get("scanners", {}).values():
+        if scanner_cfg.get("action") == "toolhead":
+            scanner_cfg.setdefault("toolhead", "T0")  # single-toolhead users don't need to specify
 
     # Derive toolheads from scanner entries if not explicitly provided
     if not config.get("toolheads"):
