@@ -4,6 +4,23 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.6.3] - 2026-04-09
+
+### Added
+
+- **Default toolhead to T0** — single-toolhead users no longer need to specify `toolhead: "T0"` in their scanner config. Defaults automatically when `action: "toolhead"` is set without a toolhead field. (#44)
+
+### Changed
+
+- **SpoolmanClient is now read-only** — middleware no longer creates vendors, filaments, spools, or writes NFC UIDs to Spoolman. The scanner handles all Spoolman writes, and Moonraker handles filament usage tracking. Eliminates duplicate spool creation between scanner and middleware. (#49, #22)
+
+### Fixed
+
+- **Archived spools excluded from cache** — Spoolman spool cache now fetches with `?archived=false` to prevent archived spools from overwriting active entries with the same NFC UID. (#49)
+- **Websocket reconnect after Klipper restart** — middleware now handles Moonraker's `notify_klippy_ready` event to re-subscribe to printer objects after Klipper restarts. (#53)
+
+---
+
 ## [1.6.2] - 2026-04-09
 
 ### Added

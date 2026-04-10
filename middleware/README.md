@@ -15,7 +15,7 @@ SpoolSense Middleware (Python on printer host)
    (gcode, AFC, vars)   (spool tracking)       (MQTT status)
 ```
 
-The scanner reads NFC tags (OpenPrintTag, OpenTag3D, TigerTag, UID-only), publishes rich JSON payloads to MQTT. The middleware receives them, resolves which scanner sent the data, looks up or creates the spool in Spoolman, activates it in Klipper via Moonraker, and manages lock state for multi-scanner setups.
+The scanner reads NFC tags (OpenPrintTag, OpenTag3D, TigerTag, UID-only), publishes rich JSON payloads to MQTT. The middleware receives scan events, resolves which scanner sent the data, enriches them with Spoolman data (color, material, weight), and activates the spool in Klipper via Moonraker — setting gcode variables, persisting spool IDs, and managing lock state for multi-scanner setups. It also monitors AFC lane state, handles tool assignment via the ASSIGN_SPOOL macro, tracks filament usage via the UPDATE_TAG macro, and serves the SpoolSense Mobile app via REST API.
 
 ## Directory Structure
 
@@ -40,7 +40,7 @@ middleware/
 ├── var_watcher.py             # Klipper save_variables file watcher (toolhead modes)
 │
 ├── spoolman/
-│   └── client.py              # SpoolmanClient — spool CRUD, NFC UID lookup, weight sync
+│   └── client.py              # SpoolmanClient — read-only spool lookup and tag enrichment
 ├── spoolman_cache.py          # In-memory UID→spool cache for UID-only tag lookups
 │
 ├── adapters/
