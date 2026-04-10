@@ -251,6 +251,11 @@ def load_config() -> dict:
     # Migrate legacy config if needed
     config = _migrate_legacy_config(config)
 
+    # Apply scanner defaults before derivation and validation
+    for scanner_cfg in config.get("scanners", {}).values():
+        if isinstance(scanner_cfg, dict) and scanner_cfg.get("action") == "toolhead":
+            scanner_cfg.setdefault("toolhead", "T0")  # single-toolhead users don't need to specify
+
     # Derive toolheads from scanner entries if not explicitly provided
     if not config.get("toolheads"):
         config["toolheads"] = _derive_toolheads(config)
