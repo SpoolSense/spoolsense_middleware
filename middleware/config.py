@@ -144,6 +144,8 @@ def _validate_scanners(config: dict) -> None:
             _validate_targeted_scanner(device_id, scanner_cfg, action, "lane", "toolhead", toolheads_list)
 
         elif action == "toolhead":
+            # Single-toolhead users shouldn't need to specify toolhead: "T0"
+            scanner_cfg.setdefault("toolhead", "T0")
             _validate_targeted_scanner(device_id, scanner_cfg, action, "toolhead", "lane", toolheads_list)
 
         elif action in ("afc_stage", "toolhead_stage"):

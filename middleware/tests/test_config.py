@@ -44,6 +44,12 @@ class TestValidateScanners(unittest.TestCase):
     def test_valid_toolhead(self):
         self._ok({"scanners": {"abc123": {"action": "toolhead", "toolhead": "T0"}}})
 
+    def test_toolhead_defaults_to_t0(self):
+        # Single-toolhead users shouldn't need to specify toolhead: "T0" (#44)
+        config = {"scanners": {"abc123": {"action": "toolhead"}}}
+        self._ok(config)
+        self.assertEqual(config["scanners"]["abc123"]["toolhead"], "T0")
+
     def test_valid_toolhead_stage(self):
         self._ok({"scanners": {"abc123": {"action": "toolhead_stage"}}})
 
