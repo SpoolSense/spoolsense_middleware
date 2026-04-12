@@ -67,13 +67,31 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         publish_lock(lane_name, "clear")
 
     if newly_loaded and pending:
-        logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
-        _send_afc_lane_data(
-            lane_name,
-            pending.get("color_hex", ""),
-            pending.get("material", ""),
-            pending.get("remaining_g"),
-        )
+        spoolman_id = pending.get("spoolman_id")
+        if spoolman_id is not None:
+            # Spoolman path — tell AFC the spool ID so it pulls data from Spoolman directly.
+            # This survives AFC's own load sequence which resets SET_COLOR/SET_MATERIAL/SET_WEIGHT.
+            logger.info(f"AFC {source}: {lane_name} just loaded — sending spool ID {spoolman_id}")
+            moonraker = app_state.cfg.get("moonraker_url", "")
+            if moonraker:
+                try:
+                    requests.post(
+                        f"{moonraker}/printer/gcode/script",
+                        json={"script": f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}"},
+                        timeout=5,
+                    ).raise_for_status()
+                    logger.info(f"AFC {source}: SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
+                except Exception:
+                    logger.exception(f"AFC {source}: failed to set spool ID on {lane_name}")
+        else:
+            # Tag-only path — no Spoolman, send color/material/weight directly
+            logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
+            _send_afc_lane_data(
+                lane_name,
+                pending.get("color_hex", ""),
+                pending.get("material", ""),
+                pending.get("remaining_g"),
+            )
 
 
 # ── Full sync (HTTP polling) ────────────────────────────────────────────────
