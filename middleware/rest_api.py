@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -43,16 +43,16 @@ class MobileScanRequest(BaseModel):
     present: bool = True
     tag_data_valid: bool = False
     blank: bool = False
-    tag_format: str | None = None                   # "openprinttag", "opentag3d", "tigertag", etc.
-    material_type: str | None = None
-    material_name: str | None = None
-    manufacturer: str | None = None
-    color: str | None = None
-    remaining_g: float | None = None
-    initial_weight_g: float | None = None
-    spoolman_id: int | None = None
-    density: float | None = None
-    diameter_mm: float | None = None
+    tag_format: Optional[str] = None                # "openprinttag", "opentag3d", "tigertag", etc.
+    material_type: Optional[str] = None
+    material_name: Optional[str] = None
+    manufacturer: Optional[str] = None
+    color: Optional[str] = None
+    remaining_g: Optional[float] = None
+    initial_weight_g: Optional[float] = None
+    spoolman_id: Optional[int] = None
+    density: Optional[float] = None
+    diameter_mm: Optional[float] = None
 
 
 class AssignToolRequest(BaseModel):
@@ -62,11 +62,11 @@ class AssignToolRequest(BaseModel):
 class ApiResponse(BaseModel):
     success: bool
     message: str
-    pending: bool | None = None
-    replaced: bool | None = None
-    action: str | None = None
-    toolhead: str | None = None
-    spool_id: int | None = None
+    pending: Optional[bool] = None
+    replaced: Optional[bool] = None
+    action: Optional[str] = None
+    toolhead: Optional[str] = None
+    spool_id: Optional[int] = None
 
 
 # --- Endpoints ---

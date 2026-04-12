@@ -16,6 +16,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 
 class Action(str, Enum):
@@ -62,16 +63,16 @@ class SpoolEvent:
                         data comes from tag fields alone).
     """
 
-    spool_id: int | None
+    spool_id: Optional[int]
     action: Action
     target: str
-    color: str | None
-    material: str | None
-    weight: float | None
-    nozzle_temp_min: int | None
-    nozzle_temp_max: int | None
-    bed_temp_min: int | None
-    bed_temp_max: int | None
+    color: Optional[str]
+    material: Optional[str]
+    weight: Optional[float]
+    nozzle_temp_min: Optional[int]
+    nozzle_temp_max: Optional[int]
+    bed_temp_min: Optional[int]
+    bed_temp_max: Optional[int]
     scanner_id: str
     tag_only: bool
 

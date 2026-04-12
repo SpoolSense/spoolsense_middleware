@@ -5,10 +5,12 @@ Decides whether a tag write should occur and what should be written.
 Uses app_state for per-UID write cooldown tracking (issue #21).
 """
 
+from __future__ import annotations
+
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Dict, Literal, Optional
 import app_state
 
 logger = logging.getLogger(__name__)
@@ -20,8 +22,8 @@ class TagWritePlan:
                                                         # (spoolsense/<deviceId>/...)
     uid: str                                            # NFC tag UID to target
     command: Literal["update_remaining", "write_tag"]   # Allowed write commands
-    payload: dict[str, Any]                             # Command payload
-    reason: str | None = None                           # Optional — logged when the write is dispatched
+    payload: Dict[str, Any]                              # Command payload
+    reason: Optional[str] = None                        # Optional — logged when the write is dispatched
 
 
 def should_write_remaining(
