@@ -54,24 +54,39 @@ def _extract_afc_data(data: dict) -> dict | None:
 _SKIP_KEYS = {"system", "Tools"}
 
 
-def _send_spool_id_to_lane(lane_name: str, spoolman_id: int, source: str) -> None:
-    """Send SET_SPOOL_ID to AFC so it pulls spool data from Spoolman directly.
+def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
+    """Send spool data to an AFC lane after a short delay.
 
-    Called on a 2-second delay after a lane load transition to let AFC's own
+    Called via threading.Timer 2s after a lane load transition to let AFC's own
     load sequence finish first — if sent too early, AFC overwrites the data
     during its load process.
-    """
-    moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
-        logger.warning("AFC %s: cannot send SET_SPOOL_ID — no moonraker_url configured", source)
-        return
 
-    try:
-        from publishers.klipper import _send_gcode
-        _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
-        logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
-    except Exception:
-        logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
+    Two paths:
+      - Spoolman: SET_SPOOL_ID so AFC pulls data from Spoolman directly
+      - Tag-only: SET_COLOR / SET_MATERIAL / SET_WEIGHT with values from the tag
+    Always sends direct lane data as a fallback (AFC may not have Spoolman configured).
+    """
+    spoolman_id = pending.get("spoolman_id")
+
+    # Always send color/material/weight directly — works whether or not AFC has Spoolman
+    _send_afc_lane_data(
+        lane_name,
+        pending.get("color_hex", ""),
+        pending.get("material", ""),
+        pending.get("remaining_g"),
+    )
+    logger.info("AFC %s: sent lane data to %s (color/material/weight)", source, lane_name)
+
+    # Also send SET_SPOOL_ID if available — AFC uses this to link the spool in Spoolman
+    if spoolman_id is not None:
+        moonraker_url = app_state.cfg.get("moonraker_url", "")
+        if moonraker_url:
+            try:
+                from publishers.klipper import _send_gcode
+                _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
+                logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
+            except Exception:
+                logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
 
 
 # ── Lane action publishing ───────────────────────────────────────────────────
@@ -87,22 +102,10 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         publish_lock(lane_name, "clear")
 
     if newly_loaded and pending:
-        spoolman_id = pending.get("spoolman_id")
-        if spoolman_id is not None:
-            # Spoolman path — tell AFC the spool ID so it pulls data from Spoolman directly.
-            # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
-            # AFC overwrites material/weight during its load process.
-            logger.info(f"AFC {source}: {lane_name} just loaded — scheduling spool ID {spoolman_id} (2s delay)")
-            threading.Timer(2.0, _send_spool_id_to_lane, args=(lane_name, spoolman_id, source)).start()
-        else:
-            # Tag-only path — no Spoolman, send color/material/weight directly
-            logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
-            _send_afc_lane_data(
-                lane_name,
-                pending.get("color_hex", ""),
-                pending.get("material", ""),
-                pending.get("remaining_g"),
-            )
+        # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
+        # AFC overwrites material/weight during its load process.
+        logger.info(f"AFC {source}: {lane_name} just loaded — scheduling lane data (2s delay)")
+        threading.Timer(2.0, _send_lane_data_delayed, args=(lane_name, pending, source)).start()
 
 
 # ── Full sync (HTTP polling) ────────────────────────────────────────────────
