@@ -54,6 +54,26 @@ def _extract_afc_data(data: dict) -> dict | None:
 _SKIP_KEYS = {"system", "Tools"}
 
 
+def _send_spool_id_to_lane(lane_name: str, spoolman_id: int, source: str) -> None:
+    """Send SET_SPOOL_ID to AFC so it pulls spool data from Spoolman directly.
+
+    Called on a 2-second delay after a lane load transition to let AFC's own
+    load sequence finish first — if sent too early, AFC overwrites the data
+    during its load process.
+    """
+    moonraker_url = app_state.cfg.get("moonraker_url", "")
+    if not moonraker_url:
+        logger.warning("AFC %s: cannot send SET_SPOOL_ID — no moonraker_url configured", source)
+        return
+
+    try:
+        from publishers.klipper import _send_gcode
+        _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
+        logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
+    except Exception:
+        logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
+
+
 # ── Lane action publishing ───────────────────────────────────────────────────
 
 def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | None,
@@ -70,19 +90,10 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         spoolman_id = pending.get("spoolman_id")
         if spoolman_id is not None:
             # Spoolman path — tell AFC the spool ID so it pulls data from Spoolman directly.
-            # This survives AFC's own load sequence which resets SET_COLOR/SET_MATERIAL/SET_WEIGHT.
-            logger.info(f"AFC {source}: {lane_name} just loaded — sending spool ID {spoolman_id}")
-            moonraker = app_state.cfg.get("moonraker_url", "")
-            if moonraker:
-                try:
-                    requests.post(
-                        f"{moonraker}/printer/gcode/script",
-                        json={"script": f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}"},
-                        timeout=5,
-                    ).raise_for_status()
-                    logger.info(f"AFC {source}: SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
-                except Exception:
-                    logger.exception(f"AFC {source}: failed to set spool ID on {lane_name}")
+            # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
+            # AFC overwrites material/weight during its load process.
+            logger.info(f"AFC {source}: {lane_name} just loaded — scheduling spool ID {spoolman_id} (2s delay)")
+            threading.Timer(2.0, _send_spool_id_to_lane, args=(lane_name, spoolman_id, source)).start()
         else:
             # Tag-only path — no Spoolman, send color/material/weight directly
             logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
