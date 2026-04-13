@@ -79,8 +79,9 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
                 logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
 
             # Wait for AFC's async Spoolman lookup to complete before sending
-            # direct values — otherwise AFC overwrites our data after we set it
-            time.sleep(1.0)
+            # direct values — otherwise AFC overwrites our data after we set it.
+            # 3s accounts for network latency when Spoolman is on a remote host.
+            time.sleep(3.0)
 
     # Send color/material/weight directly — overwrites any stale values from
     # AFC's Spoolman lookup and works whether or not AFC has Spoolman configured
