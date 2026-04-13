@@ -67,9 +67,10 @@ class TestMoonrakerWebsocket(unittest.TestCase):
         self.ws.on_lane_update = lambda lane, data: received_lanes.append((lane, data))
         self.ws.on_assign_spool = lambda tool: received_assigns.append(tool)
 
-        self.ws._subscribe_id = 1
+        # Simulate the subscribe response arriving with the correct ID
+        self.ws._subscribe_id = 5
         msg = json.dumps({
-            "id": 1,
+            "id": 5,
             "result": {
                 "status": {
                     "AFC_stepper lane1": {"spool_id": 10, "load": False},
@@ -82,6 +83,84 @@ class TestMoonrakerWebsocket(unittest.TestCase):
 
         self.assertEqual(len(received_lanes), 2)
         self.assertEqual(received_assigns, [""])
+
+    def test_objects_list_response_discovers_lanes_and_subscribes(self):
+        """printer.objects.list response updates lane names and triggers subscription."""
+        sent = []
+        mock_ws = MagicMock()
+        mock_ws.send = lambda msg: sent.append(json.loads(msg))
+
+        self.ws._next_id = 1
+        self.ws._list_id = 2
+        self.ws._next_id = 2  # simulate ID counter at the list call
+
+        msg = json.dumps({
+            "id": 2,
+            "result": {
+                "objects": [
+                    "AFC_stepper lane1",
+                    "AFC_stepper lane2",
+                    "AFC_stepper lane3",
+                    "gcode_macro AFC_RESUME",
+                    "toolhead",
+                ]
+            }
+        })
+        self.ws._on_message(mock_ws, msg)
+
+        # Lane names should be updated
+        self.assertEqual(self.ws._lane_names, ["lane1", "lane2", "lane3"])
+        # A subscribe message should have been sent
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["method"], "printer.objects.subscribe")
+        self.assertIn("AFC_stepper lane1", sent[0]["params"]["objects"])
+        self.assertIn("AFC_stepper lane3", sent[0]["params"]["objects"])
+
+    def test_objects_list_response_no_afc_lanes(self):
+        """printer.objects.list with no AFC lanes still triggers subscribe."""
+        sent = []
+        mock_ws = MagicMock()
+        mock_ws.send = lambda msg: sent.append(json.loads(msg))
+
+        self.ws._next_id = 1
+        self.ws._list_id = 1
+
+        msg = json.dumps({
+            "id": 1,
+            "result": {"objects": ["toolhead", "gcode_macro ASSIGN_SPOOL"]}
+        })
+        self.ws._on_message(mock_ws, msg)
+
+        # Lane names unchanged (empty)
+        self.assertEqual(self.ws._lane_names, [])
+        # Subscribe still sent (for non-AFC objects)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["method"], "printer.objects.subscribe")
+
+    def test_klippy_ready_triggers_rediscovery(self):
+        """notify_klippy_ready sends a new printer.objects.list request."""
+        sent = []
+        mock_ws = MagicMock()
+        mock_ws.send = lambda msg: sent.append(json.loads(msg))
+
+        msg = json.dumps({"method": "notify_klippy_ready"})
+        self.ws._on_message(mock_ws, msg)
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["method"], "printer.objects.list")
+
+    def test_on_open_sends_objects_list(self):
+        """_on_open sends printer.objects.list for lane discovery."""
+        sent = []
+        mock_ws = MagicMock()
+        mock_ws.send = lambda msg: sent.append(json.loads(msg))
+
+        self.ws._consecutive_failures = 3
+        self.ws._on_open(mock_ws)
+
+        self.assertEqual(self.ws._consecutive_failures, 0)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["method"], "printer.objects.list")
 
     def test_non_status_messages_ignored(self):
         """Messages without notify_status_update are silently ignored."""
@@ -101,7 +180,8 @@ class TestMoonrakerWebsocket(unittest.TestCase):
         self.assertIn("AFC_stepper lane2", objects)
         self.assertIn("AFC_stepper lane3", objects)
         self.assertIn("gcode_macro ASSIGN_SPOOL", objects)
-        self.assertEqual(len(objects), 4)
+        self.assertIn("gcode_macro UPDATE_TAG", objects)
+        self.assertEqual(len(objects), 5)
         for v in objects.values():
             self.assertIsNone(v)
 

@@ -86,10 +86,20 @@ class TestSyncLaneState(unittest.TestCase):
             "spoolman_id": None,
         }
         data = _make_afc_data(spool_id=None, load=True)  # now loaded
-        with patch("afc_status._send_afc_lane_data") as mock_send:
-            with patch("afc_status.publish_lock"):
-                _sync_lane_state(data)
-            mock_send.assert_called_once_with("lane1", "FF0000", "PLA", 250.0)
+
+        # _send_afc_lane_data is called via threading.Timer inside _send_lane_data_delayed.
+        # Patch Timer so it fires synchronously (0s delay) to make the test deterministic.
+        def immediate_timer(delay, func, args=(), kwargs=None):
+            func(*args, **(kwargs or {}))
+            t = MagicMock()
+            t.start = MagicMock()
+            return t
+
+        with patch("afc_status.threading.Timer", side_effect=immediate_timer):
+            with patch("afc_status._send_afc_lane_data") as mock_send:
+                with patch("afc_status.publish_lock"):
+                    _sync_lane_state(data)
+                mock_send.assert_called_once_with("lane1", "FF0000", "PLA", 250.0)
         # pending_spool consumed
         assert app_state.pending_spool is None
 
