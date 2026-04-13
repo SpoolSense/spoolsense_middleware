@@ -61,28 +61,12 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
     load sequence finish first — if sent too early, AFC overwrites the data
     during its load process.
 
-    Two paths:
-      - Spoolman: SET_SPOOL_ID so AFC pulls data from Spoolman directly
-      - Tag-only: SET_COLOR / SET_MATERIAL / SET_WEIGHT with values from the tag
-    Always sends direct lane data as a fallback (AFC may not have Spoolman configured).
+    Note: SET_SPOOL_ID is NOT sent here. It's already sent at scan time via
+    SET_NEXT_SPOOL_ID (afc_stage action), which AFC consumes during the load.
+    Sending SET_SPOOL_ID again here would trigger an async Spoolman lookup
+    that overwrites our direct values after they're set.
     """
-    spoolman_id = pending.get("spoolman_id")
-
-    # Send SET_SPOOL_ID first if available — links the spool in AFC/Spoolman.
-    # This goes first because on some AFC versions it resets material/weight,
-    # so our direct commands below will overwrite with correct values.
-    if spoolman_id is not None:
-        moonraker_url = app_state.cfg.get("moonraker_url", "")
-        if moonraker_url:
-            try:
-                from publishers.klipper import _send_gcode
-                _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
-                logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
-            except Exception:
-                logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
-
-    # Always send color/material/weight directly — overwrites any defaults or
-    # stale values from SET_SPOOL_ID, and works whether or not AFC has Spoolman
+    # Send color/material/weight directly — works whether or not AFC has Spoolman
     _send_afc_lane_data(
         lane_name,
         pending.get("color_hex", ""),
