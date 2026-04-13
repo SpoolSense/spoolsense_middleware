@@ -40,7 +40,7 @@ def _validate_color_hex(color_hex: str) -> str | None:
 
 def _validate_material(material: str) -> bool:
     """Return True only if material contains safe characters and is a reasonable length."""
-    return bool(material) and len(material) <= 50 and bool(re.fullmatch(r"[A-Za-z0-9_ -]{1,50}", material))
+    return bool(material) and len(material) <= 50 and bool(re.fullmatch(r"[A-Za-z0-9_ +.-]{1,50}", material))
 
 
 # Black (000000) can't be displayed on an LED — use dim white instead

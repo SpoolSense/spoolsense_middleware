@@ -54,6 +54,46 @@ def _extract_afc_data(data: dict) -> dict | None:
 _SKIP_KEYS = {"system", "Tools"}
 
 
+def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
+    """Send spool data to an AFC lane after a short delay.
+
+    Called via threading.Timer 2s after a lane load transition to let AFC's own
+    load sequence finish first — if sent too early, AFC overwrites the data
+    during its load process.
+
+    Order matters: SET_SPOOL_ID is sent first to link the spool in AFC/Spoolman,
+    then after a 3s pause (for AFC's async Spoolman lookup to finish),
+    SET_COLOR/SET_MATERIAL/SET_WEIGHT overwrite with our known-good values.
+    """
+    spoolman_id = pending.get("spoolman_id")
+
+    # Send SET_SPOOL_ID first — links spool in AFC for Mainsail tooltip display
+    if spoolman_id is not None:
+        moonraker_url = app_state.cfg.get("moonraker_url", "")
+        if moonraker_url:
+            try:
+                from publishers.klipper import _send_gcode
+                _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
+                logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
+            except Exception:
+                logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
+
+            # Wait for AFC's async Spoolman lookup to complete before sending
+            # direct values — otherwise AFC overwrites our data after we set it.
+            # 3s accounts for network latency when Spoolman is on a remote host.
+            time.sleep(3.0)
+
+    # Send color/material/weight directly — overwrites any stale values from
+    # AFC's Spoolman lookup and works whether or not AFC has Spoolman configured
+    _send_afc_lane_data(
+        lane_name,
+        pending.get("color_hex", ""),
+        pending.get("material", ""),
+        pending.get("remaining_g"),
+    )
+    logger.info("AFC %s: sent lane data to %s (color/material/weight)", source, lane_name)
+
+
 # ── Lane action publishing ───────────────────────────────────────────────────
 
 def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | None,
@@ -67,13 +107,10 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         publish_lock(lane_name, "clear")
 
     if newly_loaded and pending:
-        logger.info(f"AFC {source}: {lane_name} just loaded — sending cached tag data")
-        _send_afc_lane_data(
-            lane_name,
-            pending.get("color_hex", ""),
-            pending.get("material", ""),
-            pending.get("remaining_g"),
-        )
+        # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
+        # AFC overwrites material/weight during its load process.
+        logger.info(f"AFC {source}: {lane_name} just loaded — scheduling lane data (2s delay)")
+        threading.Timer(2.0, _send_lane_data_delayed, args=(lane_name, pending, source)).start()
 
 
 # ── Full sync (HTTP polling) ────────────────────────────────────────────────
