@@ -1,17 +1,24 @@
 """
-rest_api.py — FastAPI HTTP server for SpoolSense Mobile.
+rest_api.py — FastAPI HTTP server for SpoolSense Mobile and Web Config Panel.
 
 Runs alongside MQTT in a background thread. Mobile scans reuse the
-existing detect_and_parse → _activate_from_scan pipeline.
+existing detect_and_parse → _activate_from_scan pipeline. Web config
+panel served as static HTML at the root.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-from typing import Any
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Optional
 
+import yaml
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import app_state
@@ -19,10 +26,14 @@ from adapters.dispatcher import detect_and_parse
 from activation import _activate_from_scan
 from mqtt_handler import _record_spool_tracking, _get_scanner_target
 from publishers.klipper import _send_gcode
+from config import CONFIG_PATH
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SpoolSense Middleware", docs_url=None, redoc_url=None)
+
+# Serve the web config panel at the root
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 # --- Request/Response models ---
@@ -32,16 +43,16 @@ class MobileScanRequest(BaseModel):
     present: bool = True
     tag_data_valid: bool = False
     blank: bool = False
-    tag_format: str | None = None                   # "openprinttag", "opentag3d", "tigertag", etc.
-    material_type: str | None = None
-    material_name: str | None = None
-    manufacturer: str | None = None
-    color: str | None = None
-    remaining_g: float | None = None
-    initial_weight_g: float | None = None
-    spoolman_id: int | None = None
-    density: float | None = None
-    diameter_mm: float | None = None
+    tag_format: Optional[str] = None                # "openprinttag", "opentag3d", "tigertag", etc.
+    material_type: Optional[str] = None
+    material_name: Optional[str] = None
+    manufacturer: Optional[str] = None
+    color: Optional[str] = None
+    remaining_g: Optional[float] = None
+    initial_weight_g: Optional[float] = None
+    spoolman_id: Optional[int] = None
+    density: Optional[float] = None
+    diameter_mm: Optional[float] = None
 
 
 class AssignToolRequest(BaseModel):
@@ -51,11 +62,11 @@ class AssignToolRequest(BaseModel):
 class ApiResponse(BaseModel):
     success: bool
     message: str
-    pending: bool | None = None
-    replaced: bool | None = None
-    action: str | None = None
-    toolhead: str | None = None
-    spool_id: int | None = None
+    pending: Optional[bool] = None
+    replaced: Optional[bool] = None
+    action: Optional[str] = None
+    toolhead: Optional[str] = None
+    spool_id: Optional[int] = None
 
 
 # --- Endpoints ---
@@ -289,3 +300,71 @@ def confirm_deduction(uid: str) -> DeductionConfirmResponse:
         _save_deductions()
         logger.info(f"Mobile deduction: cleared {cleared:.1f}g for {uid_lower}")
     return DeductionConfirmResponse(success=True, cleared_g=cleared)
+
+
+# ── Web config panel endpoints ───────────────────────────────────────────────
+
+@app.get("/api/full-config")
+def get_full_config() -> dict[str, Any]:
+    """Return the full middleware config for the web panel."""
+    from spoolsense import __version__
+    cfg = dict(app_state.cfg)
+    cfg["_version"] = __version__
+    return cfg
+
+
+class SaveConfigRequest(BaseModel):
+    moonraker_url: str
+    spoolman_url: str = ""
+    mqtt: dict
+    low_spool_threshold: int = 100
+    scanner_topic_prefix: str = "spoolsense"
+    tag_writeback_enabled: bool = False
+    publish_lane_data: bool = False
+
+
+@app.post("/api/save-config")
+def save_config(req: SaveConfigRequest) -> dict[str, Any]:
+    """Write updated config to config.yaml and restart the middleware."""
+    try:
+        # Read existing config to preserve fields we don't edit (scanners, toolheads, mobile)
+        with open(CONFIG_PATH) as f:
+            existing = yaml.safe_load(f) or {}
+
+        # Update only the fields the web panel controls
+        existing["moonraker_url"] = req.moonraker_url
+        existing["spoolman_url"] = req.spoolman_url
+        existing["mqtt"] = {**existing.get("mqtt", {}), **req.mqtt}
+        existing["low_spool_threshold"] = req.low_spool_threshold
+        existing["scanner_topic_prefix"] = req.scanner_topic_prefix
+        existing["tag_writeback_enabled"] = req.tag_writeback_enabled
+        existing["publish_lane_data"] = req.publish_lane_data
+
+        # Atomic write — temp file + rename
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
+            yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp_path, CONFIG_PATH)
+        logger.info("Web panel: config saved to %s", CONFIG_PATH)
+
+        # Restart the middleware service
+        try:
+            subprocess.Popen(
+                ["sudo", "systemctl", "restart", "spoolsense"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            logger.warning("Web panel: could not restart spoolsense service")
+
+        return {"success": True, "message": "Config saved — restarting"}
+    except Exception as e:
+        logger.exception("Web panel: failed to save config")
+        return {"success": False, "message": str(e)}
+
+
+# ── Serve web panel at root ──────────────────────────────────────────────────
+
+@app.get("/")
+def serve_panel():
+    """Serve the web config panel HTML."""
+    return FileResponse(_STATIC_DIR / "index.html")

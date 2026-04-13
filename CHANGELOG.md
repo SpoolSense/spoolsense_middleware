@@ -4,6 +4,39 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.7.0] - 2026-04-13
+
+### Added
+
+- **Web config panel** — browser-based UI served at `http://<pi-ip>:5001`. View
+  active spools, scanner assignments, and edit core settings (Moonraker URL,
+  Spoolman URL, MQTT, thresholds). Saves config and restarts the service. (#41)
+
+### Fixed
+
+- **AFC lane data not showing in Mainsail after load** — material, weight, and
+  color now display correctly after scanning a tag and loading an AFC lane. Fixes
+  a race against AFC's async Spoolman lookup by sending `SET_SPOOL_ID` first,
+  waiting 3s for AFC's lookup to complete, then overwriting with
+  `SET_COLOR`/`SET_MATERIAL`/`SET_WEIGHT`. (#64)
+- **Boot race — AFC lanes not subscribed after reboot** — the websocket now
+  discovers AFC lanes via `printer.objects.list` on every connect instead of a
+  one-shot HTTP call at startup. If the network isn't ready when spoolsense
+  starts, lanes are discovered automatically once the websocket connects. Also
+  fires on Klipper firmware restart. (#64)
+- **Material names with `+` character rejected** — `ASA+`, `PLA+`, `PLA+2.0`
+  and similar names are now accepted by the material validator. (#64)
+- **Python 3.9 compatibility** — type hint syntax updated to use `Optional[]`
+  for compatibility with Raspberry Pi OS (Python 3.9).
+
+### Thanks
+
+Big thanks to **Rushmere3d** (Discord) for patiently testing and debugging the
+AFC lane data issues across multiple printer configurations — the fixes in this
+release wouldn't have happened without his help.
+
+---
+
 ## [1.6.3] - 2026-04-09
 
 ### Added

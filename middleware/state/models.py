@@ -6,54 +6,54 @@ ScanEvent is the normalized output from all tag parsers — every tag format
 SpoolInfo carries resolved Spoolman data after enrichment.
 """
 from dataclasses import dataclass, asdict, field
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 ScanSource = Literal["legacy_uid", "spoolsense_scanner", "opentag3d", "mobile"]
 
 
-@dataclass(slots=True)
+@dataclass
 class ScanEvent:
     source: ScanSource
     target_id: str
     scanned_at: str
 
     # NFC identity
-    uid: str | None = None           # hardware NFC chip UID — used for Spoolman lookup
-    tag_uuid: str | None = None      # UUID embedded in tag data by OpenPrintTag spec
-    tag_type: str | None = None      # e.g. "OpenPrintTag"
-    tag_format_version: int | None = None
+    uid: Optional[str] = None           # hardware NFC chip UID — used for Spoolman lookup
+    tag_uuid: Optional[str] = None      # UUID embedded in tag data by OpenPrintTag spec
+    tag_type: Optional[str] = None      # e.g. "OpenPrintTag"
+    tag_format_version: Optional[int] = None
 
     present: bool = True
     tag_data_valid: bool = False
-    scanner_spoolman_id: int | None = None  # spoolman_id from scanner payload — hint only, -1 stripped to None
-    blank: bool = False                     # tag is blank/uninitialized
+    scanner_spoolman_id: Optional[int] = None  # spoolman_id from scanner payload — hint only, -1 stripped to None
+    blank: bool = False                        # tag is blank/uninitialized
 
     # Normalized filament fields
-    brand_name: str | None = None
-    material_type: str | None = None
-    material_name: str | None = None
-    color_name: str | None = None
-    color_hex: str | None = None     # derived from color_name via lookup when not provided directly
+    brand_name: Optional[str] = None
+    material_type: Optional[str] = None
+    material_name: Optional[str] = None
+    color_name: Optional[str] = None
+    color_hex: Optional[str] = None     # derived from color_name via lookup when not provided directly
 
-    diameter_mm: float | None = None
-    density: float | None = None
+    diameter_mm: Optional[float] = None
+    density: Optional[float] = None
 
-    nozzle_temp_min_c: int | None = None
-    nozzle_temp_max_c: int | None = None
-    bed_temp_min_c: int | None = None
-    bed_temp_max_c: int | None = None
+    nozzle_temp_min_c: Optional[int] = None
+    nozzle_temp_max_c: Optional[int] = None
+    bed_temp_min_c: Optional[int] = None
+    bed_temp_max_c: Optional[int] = None
 
-    full_weight_g: float | None = None
-    remaining_weight_g: float | None = None
-    remaining_length_mm: float | None = None  # converted from remaining_m × 1000
+    full_weight_g: Optional[float] = None
+    remaining_weight_g: Optional[float] = None
+    remaining_length_mm: Optional[float] = None  # converted from remaining_m × 1000
 
     # Tag provenance
-    tag_written_at: str | None = None    # when tag was written (unix → ISO)
+    tag_written_at: Optional[str] = None    # when tag was written (unix → ISO)
 
     # Original payload — available for debugging and future fields
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 @dataclass
@@ -106,6 +106,6 @@ class SpoolAssignment:
     spool_uid: str
     active: bool
     assigned_at: Optional[str] = None
-    
+
     def to_dict(self):
         return asdict(self)
