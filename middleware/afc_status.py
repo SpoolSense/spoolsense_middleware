@@ -68,16 +68,9 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
     """
     spoolman_id = pending.get("spoolman_id")
 
-    # Always send color/material/weight directly — works whether or not AFC has Spoolman
-    _send_afc_lane_data(
-        lane_name,
-        pending.get("color_hex", ""),
-        pending.get("material", ""),
-        pending.get("remaining_g"),
-    )
-    logger.info("AFC %s: sent lane data to %s (color/material/weight)", source, lane_name)
-
-    # Also send SET_SPOOL_ID if available — AFC uses this to link the spool in Spoolman
+    # Send SET_SPOOL_ID first if available — links the spool in AFC/Spoolman.
+    # This goes first because on some AFC versions it resets material/weight,
+    # so our direct commands below will overwrite with correct values.
     if spoolman_id is not None:
         moonraker_url = app_state.cfg.get("moonraker_url", "")
         if moonraker_url:
@@ -87,6 +80,16 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
                 logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
             except Exception:
                 logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
+
+    # Always send color/material/weight directly — overwrites any defaults or
+    # stale values from SET_SPOOL_ID, and works whether or not AFC has Spoolman
+    _send_afc_lane_data(
+        lane_name,
+        pending.get("color_hex", ""),
+        pending.get("material", ""),
+        pending.get("remaining_g"),
+    )
+    logger.info("AFC %s: sent lane data to %s (color/material/weight)", source, lane_name)
 
 
 # ── Lane action publishing ───────────────────────────────────────────────────
