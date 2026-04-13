@@ -62,7 +62,7 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
     during its load process.
 
     Order matters: SET_SPOOL_ID is sent first to link the spool in AFC/Spoolman,
-    then after a 1s pause (for AFC's async Spoolman lookup to finish),
+    then after a 3s pause (for AFC's async Spoolman lookup to finish),
     SET_COLOR/SET_MATERIAL/SET_WEIGHT overwrite with our known-good values.
     """
     spoolman_id = pending.get("spoolman_id")
