@@ -32,11 +32,12 @@ class SpoolmanClient:
             # would overwrite the active entry and cause lookup failures (#49)
             response = requests.get(f"{self.base_url}/api/v1/spool?archived=false", timeout=5)
             response.raise_for_status()
-            self.cache = {}
+            new_cache = {}
             for spool in response.json():
                 nfc_id = spool.get("extra", {}).get("nfc_id", "").strip('"').lower()
                 if nfc_id:
-                    self.cache[nfc_id] = spool
+                    new_cache[nfc_id] = spool
+            self.cache = new_cache
             self._last_refresh = time.time()
             logger.info(f"Spoolman cache refreshed: {len(self.cache)} spools indexed.")
         except Exception as e:
