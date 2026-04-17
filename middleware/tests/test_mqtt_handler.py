@@ -18,7 +18,6 @@ sys.modules.setdefault("watchdog.events", MagicMock())
 
 # Stub optional heavy dependencies before importing mqtt_handler
 for mod in (
-    "spoolman_cache",
     "var_watcher",
     "adapters",
     "adapters.dispatcher",

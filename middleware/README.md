@@ -40,8 +40,7 @@ middleware/
 ├── var_watcher.py             # Klipper save_variables file watcher (toolhead modes)
 │
 ├── spoolman/
-│   └── client.py              # SpoolmanClient — read-only spool lookup and tag enrichment
-├── spoolman_cache.py          # In-memory UID→spool cache for UID-only tag lookups
+│   └── client.py              # SpoolmanClient — read-only spool lookup, UID cache, tag enrichment
 │
 ├── adapters/
 │   └── dispatcher.py          # Tag format auto-detection and parser routing

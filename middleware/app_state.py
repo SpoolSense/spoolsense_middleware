@@ -45,11 +45,6 @@ filament_usage_sync: FilamentUsageSync | None = None
 publisher_manager: PublisherManager | None = None
 moonraker_ws: MoonrakerWebsocket | None = None
 
-# Spoolman cache
-spool_cache: dict = {}
-last_cache_refresh: float = 0.0
-CACHE_TTL: int = 3600
-
 # Lane state — protected by state_lock for thread-safe access
 # from MQTT callback thread and AFC polling thread
 state_lock: threading.Lock = threading.Lock()

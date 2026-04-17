@@ -19,7 +19,6 @@ import paho.mqtt.client as mqtt
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
-from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
 
 if TYPE_CHECKING:
@@ -90,7 +89,7 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     target_id = _get_scanner_target(scanner_cfg) or _extract_scanner_device_id(topic) or "unknown"
     logger.info(f"UID-only tag on {target_id}: {uid} — looking up in Spoolman")
 
-    spool = find_spool_by_nfc(uid)
+    spool = app_state.spoolman_client.find_by_nfc(uid) if app_state.spoolman_client else None
     if not spool:
         logger.warning(f"No spool found in Spoolman for UID: {uid}")
         return
@@ -257,7 +256,8 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
 
     client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
-    refresh_spool_cache()
+    if app_state.spoolman_client:
+        app_state.spoolman_client.refresh()
 
     # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
     if has_toolhead_scanners(app_state.cfg):
