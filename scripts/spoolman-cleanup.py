@@ -12,7 +12,10 @@ Features:
 - Finds duplicate spools by NFC ID
 - Finds duplicate filaments by vendor + material + color
 - Finds duplicate vendors by name
-- Keeps most recently registered entry in each group
+- Keeps the oldest (original) entry in each group and deletes newer duplicates —
+  preserves references from other Spoolman objects (e.g. spools referencing a
+  filament, filaments referencing a vendor) and from external systems
+  (Klipper save_variables, AFC lane assignments)
 - Color output: green for KEEP, red for DELETE
 - Interactive prompt for each group
 - Dry-run mode to preview changes
@@ -78,7 +81,10 @@ def find_duplicate_vendors(vendors):
     return {k: v for k, v in groups.items() if len(v) > 1}
 
 def sort_by_registered(items):
-    return sorted(items, key=lambda x: x.get('registered', ''), reverse=True)
+    # Oldest first so the group[0] is the original entry we keep.
+    # Deleting the newer duplicates preserves references held by other
+    # Spoolman objects and external systems (Klipper, AFC) (#68).
+    return sorted(items, key=lambda x: x.get('registered', ''))
 
 def format_item(item, entity_type):
     """Format an item for display based on entity type."""
