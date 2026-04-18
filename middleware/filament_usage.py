@@ -149,13 +149,14 @@ def _publish_deduction(device_id: str, uid: str, deduct_g: float) -> None:
 LOW_SPOOL_HYSTERESIS_G: float = 50.0
 
 
-def _publish_low_spool(device_id: str, latched: bool) -> None:
-    """Publish retained low_spool command to the scanner LED."""
+def _publish_low_spool(device_id: str, latched: bool) -> bool:
+    """Publish retained low_spool command to the scanner LED. Returns True on success."""
     if not app_state.mqtt_client:
-        return
+        return False
 
+    prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
     safe_device = device_id.replace("/", "").replace("+", "").replace("#", "")
-    topic = f"spoolsense/{safe_device}/cmd/low_spool"
+    topic = f"{prefix}/{safe_device}/cmd/low_spool"
     payload = "true" if latched else "false"
 
     try:
@@ -165,13 +166,16 @@ def _publish_low_spool(device_id: str, latched: bool) -> None:
                 "low_spool: published %s to %s (device_id=%r)",
                 payload, topic, device_id,
             )
+            return True
         else:
             logger.warning(
                 "low_spool: MQTT publish failed (rc=%d) topic=%s",
                 result.rc, topic,
             )
+            return False
     except Exception:
         logger.exception("low_spool: failed to publish to topic=%s", topic)
+        return False
 
 
 def _check_low_spool(device_id: str, new_weight: float) -> None:
@@ -183,11 +187,11 @@ def _check_low_spool(device_id: str, new_weight: float) -> None:
     latched: bool = app_state.low_spool_latched.get(device_id, False)
 
     if new_weight <= threshold and not latched:
-        _publish_low_spool(device_id, True)
-        app_state.low_spool_latched[device_id] = True
+        if _publish_low_spool(device_id, True):
+            app_state.low_spool_latched[device_id] = True
     elif new_weight > threshold + LOW_SPOOL_HYSTERESIS_G and latched:
-        _publish_low_spool(device_id, False)
-        app_state.low_spool_latched[device_id] = False
+        if _publish_low_spool(device_id, False):
+            app_state.low_spool_latched[device_id] = False
 
 
 def _handle_update_tag() -> None:
@@ -222,6 +226,9 @@ def _handle_afc() -> None:
         devices = dict(app_state.active_spool_devices)
 
     for lane, current_weight in lane_weights.items():
+        device_id = devices.get(lane)
+        _check_low_spool(device_id, current_weight)
+
         initial = initial_weights.get(lane)
         if initial is None:
             continue
@@ -231,7 +238,6 @@ def _handle_afc() -> None:
             continue
 
         uid = uids.get(lane)
-        device_id = devices.get(lane)
         if not uid:
             logger.debug(f"UPDATE_TAG: no UID for {lane}, skipping")
             continue
@@ -249,9 +255,6 @@ def _handle_afc() -> None:
         # Update initial weight so next UPDATE_TAG only deducts the delta
         with app_state.state_lock:
             app_state.active_spool_weights[lane] = current_weight
-
-        if device_id:
-            _check_low_spool(device_id, current_weight)
 
 
 def _fetch_tool_filament_used() -> dict[str, float] | None:

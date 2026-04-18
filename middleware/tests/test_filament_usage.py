@@ -43,8 +43,12 @@ def _reset_app_state():
     app_state.active_spool_devices = {}
     app_state.active_spool_diameters = {}
     app_state.active_spool_densities = {}
+    app_state.active_spool_formats = {}
     app_state.low_spool_latched = {}
     app_state.mqtt_client = MagicMock()
+    mock_result = MagicMock()
+    mock_result.rc = 0
+    app_state.mqtt_client.publish.return_value = mock_result
 
 
 class TestFetchLastJobWeights(unittest.TestCase):
@@ -186,6 +190,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "f3d360"
         app_state.active_spool_diameters["T0"] = 1.75
         app_state.active_spool_densities["T0"] = 1.24
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -201,10 +206,12 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "scanner1"
         app_state.active_spool_diameters["T0"] = 1.75
         app_state.active_spool_densities["T0"] = 1.24
+        app_state.active_spool_formats["T0"] = "openprinttag"
         app_state.active_spool_uids["T2"] = "uid-bbb"
         app_state.active_spool_devices["T2"] = "scanner1"
         app_state.active_spool_diameters["T2"] = 1.75
         app_state.active_spool_densities["T2"] = 1.24
+        app_state.active_spool_formats["T2"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -221,6 +228,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "f3d360"
         app_state.active_spool_diameters["T0"] = 2.85
         app_state.active_spool_densities["T0"] = 1.27
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -257,6 +265,7 @@ class TestHandleToolchangerFallback(unittest.TestCase):
         mock_fetch_job.return_value = [25.5]
         app_state.active_spool_uids["T0"] = "abc123"
         app_state.active_spool_devices["T0"] = "f3d360"
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -272,8 +281,10 @@ class TestHandleToolchangerFallback(unittest.TestCase):
         mock_fetch_job.return_value = [50.0, 0.0, 30.0, 0.0]
         app_state.active_spool_uids["T0"] = "uid-aaa"
         app_state.active_spool_devices["T0"] = "scanner1"
+        app_state.active_spool_formats["T0"] = "openprinttag"
         app_state.active_spool_uids["T2"] = "uid-bbb"
         app_state.active_spool_devices["T2"] = "scanner1"
+        app_state.active_spool_formats["T2"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -328,6 +339,7 @@ class TestHandleAfc(unittest.TestCase):
         app_state.active_spool_weights = {"lane1": 800.0, "lane2": 750.0}
         app_state.active_spool_uids = {"lane1": "uid-aaa", "lane2": "uid-bbb"}
         app_state.active_spool_devices = {"lane1": "scanner1", "lane2": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag", "lane2": "openprinttag"}
 
         _handle_afc()
 
@@ -343,6 +355,7 @@ class TestHandleAfc(unittest.TestCase):
         app_state.active_spool_weights = {"lane1": 800.0}
         app_state.active_spool_uids = {"lane1": "uid-aaa"}
         app_state.active_spool_devices = {"lane1": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag"}
 
         _handle_afc()
 
