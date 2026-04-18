@@ -81,6 +81,12 @@ tag_write_timestamps: dict[str, float] = {}
 active_spool_weights: dict[str, float] = {}
 active_spool_uids: dict[str, str] = {}
 active_spool_devices: dict[str, str] = {}
+
+# Low-spool LED state — tracks whether the low-spool retained MQTT command
+# has been sent to each scanner. Edge-triggered: we only publish on state
+# transitions to avoid flooding the broker. Keyed by device_id (not lane)
+# because the MQTT cmd topic is per-scanner.
+low_spool_latched: dict[str, bool] = {}
 active_spool_diameters: dict[str, float] = {}   # mm, default 1.75
 active_spool_densities: dict[str, float] = {}   # g/cm³, default 1.24
 active_spool_formats: dict[str, str] = {}       # tag format — "openprinttag", "tigertag", etc.
