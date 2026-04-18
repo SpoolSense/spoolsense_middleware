@@ -86,6 +86,10 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
     # Send color/material/weight directly — overwrites any stale values from
     # AFC's Spoolman lookup and works whether or not AFC has Spoolman configured
     moonraker_url = app_state.cfg.get("moonraker_url", "")
+    if not moonraker_url:
+        logger.debug("AFC %s: skipped lane data for %s — moonraker_url not configured", source, lane_name)
+        return
+
     _send_afc_lane_data(
         moonraker_url,
         lane_name,
