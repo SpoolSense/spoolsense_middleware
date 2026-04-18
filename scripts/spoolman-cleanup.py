@@ -84,7 +84,8 @@ def sort_by_registered(items):
     # Oldest first so the group[0] is the original entry we keep.
     # Deleting the newer duplicates preserves references held by other
     # Spoolman objects and external systems (Klipper, AFC) (#68).
-    return sorted(items, key=lambda x: x.get('registered', ''))
+    return sorted(items, key=lambda x: (x.get('registered') is None or x.get('registered') == '',
+                                        x.get('registered') or ''))
 
 def format_item(item, entity_type):
     """Format an item for display based on entity type."""
