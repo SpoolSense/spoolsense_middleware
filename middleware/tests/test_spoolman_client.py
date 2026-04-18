@@ -244,8 +244,9 @@ class TestGetSpoolById(unittest.TestCase):
 
     @patch("requests.get")
     def test_returns_none_on_http_error(self, mock_get):
+        import requests as req
         mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = Exception("404 Not Found")
+        mock_resp.raise_for_status.side_effect = req.HTTPError("404 Not Found")
         mock_get.return_value = mock_resp
         client = SpoolmanClient(BASE_URL)
 

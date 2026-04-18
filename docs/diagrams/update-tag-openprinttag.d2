@@ -1,0 +1,123 @@
+title: |md
+  # UPDATE_TAG Flow — OpenPrintTag / OpenTag3D
+  Tags with writable weight fields
+|
+
+direction: down
+
+User: {shape: person}
+Scanner: Scanner
+Middleware: Middleware
+Klipper: Klipper
+Moonraker: Moonraker
+
+Legend: {
+  near: top-right
+  style.fill: "#FAFAFA"
+  style.stroke: "#CCCCCC"
+
+  s1: " " {style.fill: "#2E86C1"; width: 12; height: 12}
+  l1: Sending data
+  s1 -> l1: {style.stroke: "#2E86C1"; style.stroke-width: 2}
+
+  s2: " " {style.fill: "#27AE60"; width: 12; height: 12}
+  l2: Fetching data
+  s2 -> l2: {style.stroke: "#27AE60"; style.stroke-width: 2}
+
+  s3: " " {style.fill: "#333333"; width: 12; height: 12}
+  l3: User action / internal
+  s3 -> l3: {style.stroke: "#333333"; style.stroke-width: 2}
+}
+
+# --- Print Session ---
+User -> Scanner: 1. Scan spool tag {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> Middleware: 2. MQTT tag/state\n(uid, format, weight) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Middleware -> Middleware: 3. Record scan_time + active_uid {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+User -> Klipper: 4. Print one or more jobs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- UPDATE_TAG Trigger (automatic in PRINT_END) ---
+Klipper -> Klipper: 5. PRINT_END fires\nUPDATE_TAG macro runs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Klipper -> Moonraker: 6. SET_GCODE_VARIABLE\npending=1 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 7. Websocket push\npending=1 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Calculate Usage ---
+Middleware -> Moonraker: 8. GET /server/history/list\nsince scan_time {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 9. Completed jobs +\nfilament_weight_total {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+Middleware -> Middleware: 10. Sum weights = usage_g {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Send Deduction to Scanner ---
+Middleware -> Scanner: 11. MQTT deduct command\ndeduct_g = 25.5 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+deductions_file: deductions.json {shape: document}
+Scanner -> deductions_file: 11b. Persist to file {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+scanner_wait: Scanner waits for\nnext event {shape: diamond}
+deductions_file -> scanner_wait {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+scanner_wait -> future: UID scanned\n→ write to tag {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+scanner_wait -> deductions_file: Another UPDATE_TAG\n→ accumulate grams {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Future Scan (separate section) ---
+future: Later — user scans same spool {
+  direction: right
+  style.fill: "#F0F4F8"
+
+  read: Read tag (800g)\nLookup deductions.json\nFound 25.5g pending
+  write: Subtract 25.5g\nWrite 774.5g to tag\nClear entry {shape: stored_data}
+  done: Normal scan\ncontinues
+
+  read -> write {
+    style.stroke: "#2E86C1"
+    style.stroke-width: 2
+  }
+  write -> done {
+    style.stroke: "#333333"
+    style.stroke-width: 2
+  }
+}
+

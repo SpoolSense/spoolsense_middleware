@@ -53,8 +53,8 @@ class SpoolmanClient:
             response = requests.get(f"{self.base_url}/api/v1/spool/{spool_id}", timeout=5)
             response.raise_for_status()
             return response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch spool {spool_id}: {e}")
+        except requests.RequestException:
+            logger.exception("Failed to fetch spool %s", spool_id)
             return None
 
     def find_by_nfc(self, nfc_uid: str) -> Optional[dict]:

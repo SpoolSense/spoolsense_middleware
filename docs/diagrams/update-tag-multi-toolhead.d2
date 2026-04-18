@@ -1,0 +1,132 @@
+title: |md
+  # UPDATE_TAG Flow — Multi-Toolhead (Toolchanger)
+  OpenPrintTag / OpenTag3D — per-tool deduction from filament_weights
+|
+
+direction: down
+
+User: {shape: person}
+Scanner: Scanner
+Middleware: Middleware
+Klipper: Klipper
+Moonraker: Moonraker
+deductions_file: deductions.json {shape: document}
+
+Legend: {
+  near: top-right
+  style.fill: "#FAFAFA"
+  style.stroke: "#CCCCCC"
+
+  s1: " " {style.fill: "#2E86C1"; width: 12; height: 12}
+  l1: Sending data
+  s1 -> l1: {style.stroke: "#2E86C1"; style.stroke-width: 2}
+
+  s2: " " {style.fill: "#27AE60"; width: 12; height: 12}
+  l2: Fetching data
+  s2 -> l2: {style.stroke: "#27AE60"; style.stroke-width: 2}
+
+  s3: " " {style.fill: "#333333"; width: 12; height: 12}
+  l3: User action / internal
+  s3 -> l3: {style.stroke: "#333333"; style.stroke-width: 2}
+}
+
+# --- Scan spools onto tools ---
+User -> Scanner: 1. Scan spool onto T0 {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> Middleware: 2. MQTT tag/state\n(T0 uid + weight) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+User -> Scanner: 3. Scan spool onto T2 {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> Middleware: 4. MQTT tag/state\n(T2 uid + weight) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Middleware -> Middleware: 5. Tracks active spools\nT0 = uid-aaa, T2 = uid-bbb {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Print ---
+User -> Klipper: 6. Print multi-tool job {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- UPDATE_TAG fires ---
+Klipper -> Klipper: 7. PRINT_END fires\nUPDATE_TAG runs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Klipper -> Moonraker: 8. SET_GCODE_VARIABLE\npending=1 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 9. Websocket push {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Get last job ---
+Middleware -> Moonraker: 10. GET last completed job {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 11. filament_weights\n(50g T0, 30g T2) {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+
+# --- Send per-tool deductions ---
+Middleware -> Scanner: 12a. MQTT deduct\nuid-aaa = 50g {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Middleware -> Scanner: 12b. MQTT deduct\nuid-bbb = 30g {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Scanner -> deductions_file: 13. Persist both deductions {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Wait for next event ---
+scanner_wait: Scanner waits for\nnext event {shape: diamond}
+deductions_file -> scanner_wait {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+scanner_wait -> deductions_file: Another UPDATE_TAG\naccumulate grams {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Future scan writes deduction ---
+future: Later — user scans T0 spool {
+  direction: right
+  style.fill: "#F0F4F8"
+
+  read: Read tag (800g)\nLookup uid-aaa\nFound 50g pending
+  write: Subtract 50g\nWrite 750g to tag {shape: stored_data}
+  done: Clear entry\nNormal scan continues
+
+  read -> write {
+    style.stroke: "#2E86C1"
+    style.stroke-width: 2
+  }
+  write -> done {
+    style.stroke: "#333333"
+    style.stroke-width: 2
+  }
+}
+
+scanner_wait -> future: UID scanned\nwrite to tag {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}

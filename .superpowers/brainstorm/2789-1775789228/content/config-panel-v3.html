@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpoolSense Middleware</title>
+<style>
+:root{
+  --bg:#0b0b0d;--panel:#141519;--panel-2:#1a1c21;--border:#2a2e36;
+  --text:#f4f4f5;--muted:#a1a1aa;--red:#dc2626;--red-2:#ef4444;
+  --green:#22c55e;--blue:#3b82f6;--orange:#f59e0b;--radius:16px;
+  --shadow:0 16px 40px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:Inter,system-ui,-apple-system,sans-serif;background:linear-gradient(180deg,#09090b,#111216);color:var(--text);min-height:100vh}
+.wrap{max-width:860px;margin:0 auto;padding:24px 18px 40px}
+
+nav{display:flex;align-items:center;gap:6px;padding:10px 14px;margin-bottom:20px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);flex-wrap:wrap}
+nav .brand{font-size:15px;font-weight:800;color:var(--text);margin-right:auto;padding:6px 10px}
+nav a{color:var(--muted);text-decoration:none;font-size:13px;font-weight:700;padding:8px 14px;border-radius:10px;cursor:pointer;transition:background .15s,color .15s}
+nav a:hover{background:rgba(255,255,255,.06);color:var(--text)}
+nav a.active{background:rgba(239,68,68,.12);color:var(--red-2)}
+
+.card{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px}
+.card-head{padding:18px 20px;border-bottom:1px solid var(--border)}
+.card-title{margin:0;font-size:22px;font-weight:800;letter-spacing:-.02em}
+.card-subtitle{margin:6px 0 0;color:var(--muted);font-size:14px}
+.card-body{padding:20px}
+
+.status-row{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:8px}
+.status-item{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot.green{background:var(--green)}
+.dot.red{background:var(--red)}
+.dot.orange{background:var(--orange)}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:10px 12px;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border)}
+td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--blue)}
+.badge{display:inline-block;padding:3px 10px;border-radius:8px;font-size:12px;font-weight:700}
+.badge-green{background:rgba(34,197,94,.12);color:var(--green)}
+.badge-muted{background:rgba(161,161,170,.1);color:var(--muted)}
+.swatch{display:inline-block;width:16px;height:16px;border-radius:4px;vertical-align:middle;margin-right:6px;border:1px solid rgba(255,255,255,.1)}
+
+.field{display:grid;gap:7px;margin-bottom:14px}
+.field label{font-size:13px;font-weight:700;color:#e5e7eb}
+.field input,.field select{width:100%;border:1px solid var(--border);border-radius:12px;background:#0f1115;color:var(--text);padding:12px 13px;font-size:14px;outline:none}
+.field input:focus{border-color:var(--blue)}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:600px){.grid-2{grid-template-columns:1fr}}
+.hint{color:var(--muted);font-size:12px}
+
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
+.toggle-label{font-size:14px;font-weight:600}
+.toggle{position:relative;width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;transition:background .2s}
+.toggle.on{background:var(--green)}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;background:white;border-radius:50%;transition:transform .2s}
+.toggle.on::after{transform:translateX(20px)}
+
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.btn-red{background:var(--red);color:white}
+.btn-red:hover{opacity:.85}
+
+.section{display:none}
+.section.active{display:block}
+
+.version{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand">SpoolSense</span>
+    <a class="active" onclick="showTab('status',this)">Status</a>
+    <a onclick="showTab('scanners',this)">Scanners</a>
+    <a onclick="showTab('config',this)">Config</a>
+  </nav>
+
+  <!-- STATUS -->
+  <div id="status" class="section active">
+    <div class="card">
+      <div class="card-head">
+        <h2 class="card-title">System Status</h2>
+      </div>
+      <div class="card-body">
+        <div class="status-row">
+          <div class="status-item"><span class="dot green"></span>MQTT Connected</div>
+          <div class="status-item"><span class="dot green"></span>Moonraker</div>
+          <div class="status-item"><span class="dot green"></span>Spoolman</div>
+          <div class="status-item"><span class="dot green"></span>Klipper Ready</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 class="card-title">Active Spools</h2>
+        <p class="card-subtitle">Currently assigned to tools</p>
+      </div>
+      <div class="card-body">
+        <table>
+          <tr><th>Tool</th><th>Spool</th><th>Material</th><th>Color</th><th>Remaining</th></tr>
+          <tr><td>T0</td><td class="mono">#62</td><td>Sunlu ASA</td><td><span class="swatch" style="background:#FF0000"></span>Red</td><td>800g</td></tr>
+          <tr><td>T2</td><td class="mono">#127</td><td>Generic PLA</td><td><span class="swatch" style="background:#0000FF"></span>Blue</td><td>450g</td></tr>
+          <tr><td>T3</td><td class="mono">#140</td><td>Sunlu ASA</td><td><span class="swatch" style="background:#FF0000"></span>Red</td><td>598g</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 class="card-title">Pending Deductions</h2>
+        <p class="card-subtitle">Waiting for tag scan to apply</p>
+      </div>
+      <div class="card-body">
+        <table>
+          <tr><th>UID</th><th>Grams Pending</th><th>Status</th></tr>
+          <tr><td class="mono">04ECA4AB8F6180</td><td>25.5g</td><td><span class="badge badge-muted">Waiting for scan</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCANNERS -->
+  <div id="scanners" class="section">
+    <div class="card">
+      <div class="card-head">
+        <h2 class="card-title">Scanners</h2>
+        <p class="card-subtitle">3 scanners configured</p>
+      </div>
+      <div class="card-body">
+        <table>
+          <tr><th>Device ID</th><th>Action</th><th>Target</th><th>Status</th></tr>
+          <tr><td class="mono">ecb338</td><td>toolhead_stage</td><td>(shared)</td><td><span class="badge badge-green">Active</span></td></tr>
+          <tr><td class="mono">f3d360</td><td>toolhead_stage</td><td>(shared)</td><td><span class="badge badge-green">Active</span></td></tr>
+          <tr><td class="mono">4d9620</td><td>toolhead_stage</td><td>(shared)</td><td><span class="badge badge-green">Active</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIG -->
+  <div id="config" class="section">
+    <div class="card">
+      <div class="card-head">
+        <h2 class="card-title">Configuration</h2>
+        <p class="card-subtitle">Changes are written to config.yaml and require a restart</p>
+      </div>
+      <div class="card-body">
+        <div class="grid-2">
+          <div class="field">
+            <label>Moonraker URL</label>
+            <input type="text" value="http://localhost">
+          </div>
+          <div class="field">
+            <label>Spoolman URL</label>
+            <input type="text" value="http://192.168.1.32:7912">
+          </div>
+          <div class="field">
+            <label>MQTT Broker</label>
+            <input type="text" value="192.168.1.167">
+          </div>
+          <div class="field">
+            <label>MQTT Port</label>
+            <input type="number" value="1883">
+          </div>
+          <div class="field">
+            <label>Low Spool Threshold (g)</label>
+            <input type="number" value="100">
+            <span class="hint">Warning triggered when spool drops below this weight</span>
+          </div>
+          <div class="field">
+            <label>Scanner Topic Prefix</label>
+            <input type="text" value="spoolsense">
+          </div>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Tag Writeback</span>
+          <div class="toggle" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Publish Lane Data (Slicer Integration)</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <br>
+        <button class="btn btn-red">Save Config & Restart</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="version">SpoolSense Middleware v1.6.3</p>
+</div>
+
+<script>
+function showTab(id, el) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  el.classList.add('active');
+}
+</script>
+</body>
+</html>
