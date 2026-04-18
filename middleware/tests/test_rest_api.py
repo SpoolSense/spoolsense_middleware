@@ -21,7 +21,6 @@ sys.modules.setdefault("watchdog.events", MagicMock())
 
 # Stub heavy optional modules so rest_api.py can be imported in isolation
 for _mod in (
-    "spoolman_cache",
     "var_watcher",
     "tag_sync",
     "tag_sync.policy",

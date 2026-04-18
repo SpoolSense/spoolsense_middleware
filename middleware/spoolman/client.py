@@ -43,6 +43,20 @@ class SpoolmanClient:
         except Exception as e:
             logger.error(f"Failed to fetch Spoolman cache: {e}")
 
+    def refresh(self) -> None:
+        """Public wrapper around _fetch_all_spools for explicit cache priming."""
+        self._fetch_all_spools()
+
+    def get_spool_by_id(self, spool_id: int) -> Optional[dict]:
+        """Fetch a single spool directly from Spoolman by ID. Returns None on failure."""
+        try:
+            response = requests.get(f"{self.base_url}/api/v1/spool/{spool_id}", timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException:
+            logger.exception("Failed to fetch spool %s", spool_id)
+            return None
+
     def find_by_nfc(self, nfc_uid: str) -> Optional[dict]:
         """Looks up a spool by NFC UID, with TTL-based cache and single forced refresh on miss."""
         uid_lower = nfc_uid.lower()

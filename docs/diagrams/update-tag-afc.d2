@@ -1,0 +1,129 @@
+title: |md
+  # UPDATE_TAG Flow — AFC (Box Turtle / Armored Turtle)
+  OpenPrintTag / OpenTag3D — per-lane deduction from AFC weight tracking
+|
+
+direction: down
+
+User: {shape: person}
+Scanner: Scanner
+Middleware: Middleware
+Klipper: Klipper
+Moonraker: Moonraker
+AFC: AFC Plugin
+deductions_file: deductions.json {shape: document}
+
+Legend: {
+  near: top-right
+  style.fill: "#FAFAFA"
+  style.stroke: "#CCCCCC"
+
+  s1: " " {style.fill: "#2E86C1"; width: 12; height: 12}
+  l1: Sending data
+  s1 -> l1: {style.stroke: "#2E86C1"; style.stroke-width: 2}
+
+  s2: " " {style.fill: "#27AE60"; width: 12; height: 12}
+  l2: Fetching data
+  s2 -> l2: {style.stroke: "#27AE60"; style.stroke-width: 2}
+
+  s3: " " {style.fill: "#333333"; width: 12; height: 12}
+  l3: User action / internal
+  s3 -> l3: {style.stroke: "#333333"; style.stroke-width: 2}
+}
+
+# --- Scan spools onto AFC lanes ---
+User -> Scanner: 1. Scan spool tags\nonto AFC lanes {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> Middleware: 2. MQTT tag/state\nper lane (uid + weight) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Middleware -> Middleware: 3. Activate spools on lanes\nRecord initial tag weight per lane {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Print with AFC lane swaps ---
+User -> Klipper: 4. Print job\n(AFC swaps lanes mid-print) {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+AFC -> AFC: 5. Tracks per-lane weight\nin real-time via\nextruder position {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- UPDATE_TAG fires ---
+Klipper -> Klipper: 6. PRINT_END fires\nUPDATE_TAG runs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Klipper -> Moonraker: 7. SET_GCODE_VARIABLE\npending=1 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 8. Websocket push {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Read AFC weights ---
+Middleware -> Moonraker: 9. GET /printer/afc/status\n(current weight per lane) {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 10. Lane weights from AFC\n(lane1=550g, lane3=720g) {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+Middleware -> Middleware: 11. Calculate deductions\nlane1: 800 - 550 = 250g\nlane3: 750 - 720 = 30g {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Send deductions to scanner ---
+Middleware -> Scanner: 12. MQTT deduct per spool UID\nuid-aaa=250g, uid-bbb=30g {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Scanner -> deductions_file: 13. Persist deductions {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Wait for next event ---
+scanner_wait: Scanner waits for\nnext event {shape: diamond}
+deductions_file -> scanner_wait {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+scanner_wait -> deductions_file: Another UPDATE_TAG\naccumulate grams {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Future scan ---
+future: Later — user scans spool {
+  direction: right
+  style.fill: "#F0F4F8"
+
+  read: Read tag (800g)\nLookup UID\nFound 250g pending
+  write: Subtract 250g\nWrite 550g to tag {shape: stored_data}
+  done: Clear entry\nNormal scan continues
+
+  read -> write {
+    style.stroke: "#2E86C1"
+    style.stroke-width: 2
+  }
+  write -> done {
+    style.stroke: "#333333"
+    style.stroke-width: 2
+  }
+}
+
+scanner_wait -> future: UID scanned\nwrite to tag {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
