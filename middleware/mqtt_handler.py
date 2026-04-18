@@ -21,6 +21,7 @@ from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
 from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
+from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
     from spoolman.client import SpoolInfo
@@ -81,6 +82,12 @@ def _record_spool_tracking(
         app_state.active_spool_diameters[target]  = diameter_mm or 1.75
         app_state.active_spool_densities[target]  = density or 1.24
         app_state.active_spool_formats[target]    = tag_format or "unknown"
+
+    # Check low-spool threshold at scan time — if a new spool has plenty of
+    # filament, this also clears any latched low-spool state from the same
+    # device so the LED stops breathing after a spool swap.
+    if device_id:
+        _check_low_spool(device_id, remaining)
 
 
 # ── UID-only tag handling ────────────────────────────────────────────────────

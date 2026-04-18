@@ -146,6 +146,50 @@ def _publish_deduction(device_id: str, uid: str, deduct_g: float) -> None:
         logger.exception("UPDATE_TAG: failed to publish deduction")
 
 
+LOW_SPOOL_HYSTERESIS_G: float = 50.0
+
+
+def _publish_low_spool(device_id: str, latched: bool) -> None:
+    """Publish retained low_spool command to the scanner LED."""
+    if not app_state.mqtt_client:
+        return
+
+    safe_device = device_id.replace("/", "").replace("+", "").replace("#", "")
+    topic = f"spoolsense/{safe_device}/cmd/low_spool"
+    payload = "true" if latched else "false"
+
+    try:
+        result = app_state.mqtt_client.publish(topic, payload, qos=1, retain=True)
+        if result.rc == 0:
+            logger.info(
+                "low_spool: published %s to %s (device_id=%r)",
+                payload, topic, device_id,
+            )
+        else:
+            logger.warning(
+                "low_spool: MQTT publish failed (rc=%d) topic=%s",
+                result.rc, topic,
+            )
+    except Exception:
+        logger.exception("low_spool: failed to publish to topic=%s", topic)
+
+
+def _check_low_spool(device_id: str, new_weight: float) -> None:
+    """Edge-triggered low-spool state machine. Publishes only on state transition."""
+    if not device_id:
+        return
+
+    threshold: float = float(app_state.cfg.get("low_spool_threshold", 100))
+    latched: bool = app_state.low_spool_latched.get(device_id, False)
+
+    if new_weight <= threshold and not latched:
+        _publish_low_spool(device_id, True)
+        app_state.low_spool_latched[device_id] = True
+    elif new_weight > threshold + LOW_SPOOL_HYSTERESIS_G and latched:
+        _publish_low_spool(device_id, False)
+        app_state.low_spool_latched[device_id] = False
+
+
 def _handle_update_tag() -> None:
     """
     Main handler — triggered when UPDATE_TAG macro fires.
@@ -205,6 +249,9 @@ def _handle_afc() -> None:
         # Update initial weight so next UPDATE_TAG only deducts the delta
         with app_state.state_lock:
             app_state.active_spool_weights[lane] = current_weight
+
+        if device_id:
+            _check_low_spool(device_id, current_weight)
 
 
 def _fetch_tool_filament_used() -> dict[str, float] | None:
