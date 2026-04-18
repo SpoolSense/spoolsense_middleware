@@ -99,7 +99,7 @@ class TestSyncLaneState(unittest.TestCase):
             with patch("afc_status._send_afc_lane_data") as mock_send:
                 with patch("afc_status.publish_lock"):
                     _sync_lane_state(data)
-                mock_send.assert_called_once_with("lane1", "FF0000", "PLA", 250.0)
+                mock_send.assert_called_once_with("http://moonraker:7125", "lane1", "FF0000", "PLA", 250.0)
         # pending_spool consumed
         assert app_state.pending_spool is None
 
