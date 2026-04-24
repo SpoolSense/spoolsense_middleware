@@ -269,11 +269,11 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
     if has_toolhead_scanners(app_state.cfg):
         app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
+        from var_watcher import start_klipper_watcher, sync_from_klipper_vars
         sync_from_klipper_vars()
         if app_state.watcher:
             app_state.watcher.stop()
             app_state.watcher.join(timeout=2)
-        from var_watcher import start_klipper_watcher
         app_state.watcher = start_klipper_watcher()
 
     # Re-publish AFC lock state so scanners know current state after reconnect
