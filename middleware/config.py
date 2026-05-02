@@ -303,14 +303,16 @@ def discover_klipper_var_path() -> str | None:
             timeout=5,
         )
         response.raise_for_status()
-        configfile = (
-            response.json()
-            .get("result", {})
-            .get("status", {})
-            .get("configfile", {})
-            .get("settings", {})
-        )
-        filename = configfile.get("save_variables", {}).get("filename")
+        # Defensive walk through the nested response — guard each level with
+        # isinstance(dict) so an unexpected Moonraker response shape returns
+        # None cleanly instead of raising AttributeError. (CodeRabbit #79)
+        cur: object = response.json()
+        for key in ("result", "status", "configfile", "settings", "save_variables", "filename"):
+            if not isinstance(cur, dict):
+                cur = None
+                break
+            cur = cur.get(key)
+        filename = cur if isinstance(cur, str) else None
 
         if not filename:
             logger.warning("No [save_variables] in Klipper config. Klipper sync disabled.")

@@ -353,15 +353,29 @@ def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> 
         target = _get_scanner_target(scanner_cfg)
         if target and app_state.lane_locks.get(target):
             if _should_auto_release_lock(target, payload):
+                # _should_auto_release_lock did network I/O (~2s); re-verify
+                # under state_lock to close the TOCTOU window before writing.
+                # (CodeRabbit #79)
                 incoming_uid = (payload.get("uid") or "").lower()
-                active_uid = app_state.active_spool_uids.get(target, "")
-                logger.info(
-                    f"Lock auto-release on {target}: idle printer, swap "
-                    f"{active_uid or '?'} → {incoming_uid}"
-                )
+                released = False
+                active_uid = ""
                 with app_state.state_lock:
-                    app_state.lane_locks[target] = False
-                # Fall through to normal scan processing
+                    if app_state.lane_locks.get(target):
+                        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+                        if not active_uid or active_uid != incoming_uid:
+                            app_state.lane_locks[target] = False
+                            released = True
+                if released:
+                    logger.info(
+                        f"Lock auto-release on {target}: idle printer, swap "
+                        f"{active_uid or '?'} → {incoming_uid}"
+                    )
+                    # Fall through to normal scan processing
+                else:
+                    logger.debug(
+                        f"Lock auto-release aborted on {target}: state changed mid-check"
+                    )
+                    return
             else:
                 logger.info(
                     f"Ignoring scan on {target} (locked). To unlock: eject the spool "
