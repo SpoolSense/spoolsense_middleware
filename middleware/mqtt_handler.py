@@ -19,8 +19,8 @@ import paho.mqtt.client as mqtt
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
-from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
+from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
     from spoolman.client import SpoolInfo
@@ -82,6 +82,12 @@ def _record_spool_tracking(
         app_state.active_spool_densities[target]  = density or 1.24
         app_state.active_spool_formats[target]    = tag_format or "unknown"
 
+    # Check low-spool threshold at scan time — if a new spool has plenty of
+    # filament, this also clears any latched low-spool state from the same
+    # device so the LED stops breathing after a spool swap.
+    if device_id:
+        _check_low_spool(device_id, remaining)
+
 
 # ── UID-only tag handling ────────────────────────────────────────────────────
 
@@ -90,7 +96,7 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     target_id = _get_scanner_target(scanner_cfg) or _extract_scanner_device_id(topic) or "unknown"
     logger.info(f"UID-only tag on {target_id}: {uid} — looking up in Spoolman")
 
-    spool = find_spool_by_nfc(uid)
+    spool = app_state.spoolman_client.find_by_nfc(uid) if app_state.spoolman_client else None
     if not spool:
         logger.warning(f"No spool found in Spoolman for UID: {uid}")
         return
@@ -257,16 +263,17 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
 
     client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
-    refresh_spool_cache()
+    if app_state.spoolman_client:
+        app_state.spoolman_client.refresh()
 
     # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
     if has_toolhead_scanners(app_state.cfg):
         app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
+        from var_watcher import start_klipper_watcher, sync_from_klipper_vars
         sync_from_klipper_vars()
         if app_state.watcher:
             app_state.watcher.stop()
             app_state.watcher.join(timeout=2)
-        from var_watcher import start_klipper_watcher
         app_state.watcher = start_klipper_watcher()
 
     # Re-publish AFC lock state so scanners know current state after reconnect

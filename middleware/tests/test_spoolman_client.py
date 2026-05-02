@@ -223,6 +223,67 @@ class TestSyncSpoolFromScan(unittest.TestCase):
         self.assertEqual(result.material_type, "PETG")
 
 
+# ── get_spool_by_id ──────────────────────────────────────────────────────────
+
+class TestGetSpoolById(unittest.TestCase):
+
+    def setUp(self):
+        _reset_app_state()
+
+    @patch("requests.get")
+    def test_returns_spool_dict_on_success(self, mock_get):
+        spool = {"id": 42, "filament": {"name": "PLA"}, "extra": {}}
+        mock_get.return_value = _ok_response(spool)
+        client = SpoolmanClient(BASE_URL)
+
+        result = client.get_spool_by_id(42)
+
+        self.assertEqual(result, spool)
+        call_url = mock_get.call_args[0][0]
+        self.assertIn("/api/v1/spool/42", call_url)
+
+    @patch("requests.get")
+    def test_returns_none_on_http_error(self, mock_get):
+        import requests as req
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = req.HTTPError("404 Not Found")
+        mock_get.return_value = mock_resp
+        client = SpoolmanClient(BASE_URL)
+
+        result = client.get_spool_by_id(99)
+
+        self.assertIsNone(result)
+
+    @patch("requests.get")
+    def test_returns_none_on_network_error(self, mock_get):
+        import requests as req
+        mock_get.side_effect = req.ConnectionError("refused")
+        client = SpoolmanClient(BASE_URL)
+
+        result = client.get_spool_by_id(7)
+
+        self.assertIsNone(result)
+
+
+# ── refresh ──────────────────────────────────────────────────────────────────
+
+class TestRefresh(unittest.TestCase):
+
+    def setUp(self):
+        _reset_app_state()
+
+    @patch("requests.get")
+    def test_refresh_primes_cache(self, mock_get):
+        spools = [{"id": 1, "extra": {"nfc_id": '"aabbccdd"'}}]
+        mock_get.return_value = _ok_response(spools)
+        client = SpoolmanClient(BASE_URL)
+
+        client.refresh()
+
+        self.assertEqual(len(client.cache), 1)
+        mock_get.assert_called_once()
+
+
 # ── No writes ────────────────────────────────────────────────────────────────
 
 class TestNoWrites(unittest.TestCase):

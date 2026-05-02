@@ -4,6 +4,42 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.7.1] - 2026-05-02
+
+### Fixed
+
+- **Crash on connect for toolhead-mode installs** — `on_connect()` was missing
+  the `sync_from_klipper_vars` import after a refactor, raising `NameError`
+  on every MQTT connect. Adds a regression test exercising the toolhead path. (#78)
+- **Low-spool LED no longer triggered mid-print** — restored the retained MQTT
+  publish to `cmd/low_spool` that was lost during a refactor. Edge-triggered
+  with 50g hysteresis to prevent flap, and clears latched state on spool swap. (#61)
+- **Cleanup script deleted the original spool** — `scripts/spoolman-cleanup.py`
+  now keeps the oldest entry in each duplicate group and deletes newer
+  duplicates, preserving the spool ID referenced by other Spoolman objects
+  and external systems (Klipper save_variables, AFC lane assignments). (#68)
+- **Spoolman cache wiped on fetch failure** — `SpoolmanClient` now builds the
+  new cache atomically before assignment, so a mid-loop error or network
+  failure no longer leaves the client with an empty cache.
+- **MQTT topic sanitization** — `scanner_writer` strips `/`, `+`, `#` from
+  `device_id` and `uid` before publishing, defensive against crafted payloads.
+
+### Changed
+
+- **Consolidated Spoolman caches** — removed the duplicate `spoolman_cache`
+  module-level cache; all NFC lookups now go through `app_state.spoolman_client`,
+  eliminating a long-standing dual-cache drift hazard. (#66)
+- **Decoupled Klipper publisher helpers from global state** — `_send_afc_lane_data`
+  and `_send_toolhead_tag_data` now take `moonraker` as a parameter, matching
+  the dependency injection pattern already used by `_send_gcode`. (#67)
+
+### Thanks
+
+Big thanks to **PlasticSnake** (Discord) / **@shallqs** (GitHub) for catching the
+toolhead-mode crash on his single-toolhead rig.
+
+---
+
 ## [1.7.0] - 2026-04-13
 
 ### Added

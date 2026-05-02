@@ -1,0 +1,107 @@
+title: |md
+  # Filament Tracking Flow — Bambu Lab AMS
+  Via Home Assistant blueprints (no middleware, no UPDATE_TAG)
+|
+
+direction: down
+
+User: {shape: person}
+Scanner: SpoolSense Scanner
+HA: Home Assistant
+Bambu: Bambu Printer
+AMS: AMS Tray Sensors
+Spoolman: Spoolman {shape: cylinder}
+uid_helper: HA Input Helpers\n(UID + Spoolman ID per tray) {shape: document}
+
+Legend: {
+  near: top-right
+  style.fill: "#FAFAFA"
+  style.stroke: "#CCCCCC"
+
+  s1: " " {style.fill: "#2E86C1"; width: 12; height: 12}
+  l1: Sending data
+  s1 -> l1: {style.stroke: "#2E86C1"; style.stroke-width: 2}
+
+  s2: " " {style.fill: "#27AE60"; width: 12; height: 12}
+  l2: Fetching data
+  s2 -> l2: {style.stroke: "#27AE60"; style.stroke-width: 2}
+
+  s3: " " {style.fill: "#333333"; width: 12; height: 12}
+  l3: User action / internal
+  s3 -> l3: {style.stroke: "#333333"; style.stroke-width: 2}
+}
+
+# --- Scan and load ---
+User -> Scanner: 1. Scan spool tag {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> HA: 2. SpoolSense sensor updates\n(material, color, temps, UID) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+HA -> HA: 3. AMS blueprint triggers\nStarts 300s countdown {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+User -> AMS: 4. User loads filament\ninto AMS tray {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+AMS -> HA: 5. Tray empty=false detected\n(filament loaded) {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+HA -> Bambu: 6. bambu_lab.set_filament\n(material, color+FF, temps) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+HA -> uid_helper: 7. Store UID + Spoolman ID\nfor this tray {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Print ---
+User -> Bambu: 8. Print one or more jobs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Deduction (automatic on print complete/cancel) ---
+deduction: Print finishes or cancels {
+  style.fill: "#F0F4F8"
+  direction: right
+
+  trigger: Bambu event\nprint_finished or\nprint_canceled
+  read_weight: Read per-tray weight\nfrom print_weight sensor
+  lookup: Lookup UID + Spoolman ID\nfrom input helpers
+  deduct: spoolman.use_spool_filament\ndeduct per-tray weight
+
+  trigger -> read_weight {
+    style.stroke: "#27AE60"
+    style.stroke-width: 2
+  }
+  read_weight -> lookup {
+    style.stroke: "#27AE60"
+    style.stroke-width: 2
+  }
+  lookup -> deduct {
+    style.stroke: "#2E86C1"
+    style.stroke-width: 2
+  }
+}
+
+Bambu -> deduction: 9. Deduction blueprint fires {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+deduction -> Spoolman: 10. Weight deducted\nper tray used {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- Note ---
+note: No UPDATE_TAG macro needed\nNo middleware involved\nAll handled by HA blueprints {
+  style.fill: "#FADBD8"
+  near: bottom-center
+}

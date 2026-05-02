@@ -1,0 +1,87 @@
+title: |md
+  # UPDATE_TAG Flow — UID-Only / TigerTag / OpenSpool
+  Tags without writable weight fields
+|
+
+direction: down
+
+User: {shape: person}
+Scanner: Scanner
+Middleware: Middleware
+Klipper: Klipper
+Moonraker: Moonraker
+Spoolman: {shape: cylinder}
+
+Legend: {
+  near: top-right
+  style.fill: "#FAFAFA"
+  style.stroke: "#CCCCCC"
+
+  s1: " " {style.fill: "#2E86C1"; width: 12; height: 12}
+  l1: Sending data
+  s1 -> l1: {style.stroke: "#2E86C1"; style.stroke-width: 2}
+
+  s2: " " {style.fill: "#27AE60"; width: 12; height: 12}
+  l2: Fetching data
+  s2 -> l2: {style.stroke: "#27AE60"; style.stroke-width: 2}
+
+  s3: " " {style.fill: "#333333"; width: 12; height: 12}
+  l3: User action / internal
+  s3 -> l3: {style.stroke: "#333333"; style.stroke-width: 2}
+}
+
+# --- Initial Scan ---
+User -> Scanner: 1. Scan spool tag (UID only) {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Scanner -> Middleware: 2. MQTT tag/state\n(uid, no weight data) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Middleware -> Spoolman: 3. Lookup spool by NFC UID {
+  style.stroke: "#27AE60"
+  style.stroke-width: 2
+}
+
+User -> Klipper: 4. Print one or more jobs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+
+# --- Moonraker handles tracking ---
+Moonraker -> Spoolman: 5. Moonraker syncs filament\nusage in real-time\n(sync_rate in moonraker.conf) {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- PRINT_END fires UPDATE_TAG ---
+Klipper -> Klipper: 6. PRINT_END fires\nUPDATE_TAG macro runs {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}
+Klipper -> Moonraker: 7. SET_GCODE_VARIABLE\npending=1 {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+Moonraker -> Middleware: 8. Websocket push {
+  style.stroke: "#2E86C1"
+  style.stroke-width: 2
+}
+
+# --- No-op ---
+no_op: No action taken {
+  style.fill: "#FADBD8"
+
+  reason1: Tag has no writable weight field
+  reason2: Moonraker already syncs\nusage to Spoolman
+  result: UPDATE_TAG is a no-op\nfor this tag type
+
+  reason1 -> result
+  reason2 -> result
+}
+
+Middleware -> no_op: 9. Middleware detects\nUID-only tag — skip {
+  style.stroke: "#333333"
+  style.stroke-width: 2
+}

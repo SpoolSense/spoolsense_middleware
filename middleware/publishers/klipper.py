@@ -24,7 +24,6 @@ import re
 
 import requests
 
-import app_state
 from publishers.base import Action, Publisher, SpoolEvent
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,7 @@ def _send_gcode(moonraker: str, script: str) -> None:
 
 
 def _send_afc_lane_data(
+    moonraker: str,
     toolhead: str,
     color_hex: str,
     material: str,
@@ -87,7 +87,6 @@ def _send_afc_lane_data(
     and weight from tag data so LEDs and lane info work without Spoolman.
     Each command is independent — if one fails, the others still run.
     """
-    moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker:
         return
 
@@ -119,6 +118,7 @@ def _send_afc_lane_data(
 
 
 def _send_toolhead_tag_data(
+    moonraker: str,
     target: str,
     color_hex: str,
     material: str,
@@ -130,7 +130,6 @@ def _send_toolhead_tag_data(
     Used when Spoolman is not available — provides the toolhead macro with
     color from tag data so slicer integration still works without Spoolman.
     """
-    moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker or not target:
         return
 
@@ -159,11 +158,7 @@ def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
     AFC writes lane_data for its own lanes internally. For direct toolhead
     assignments (T0, T1, etc.), there is no AFC — so we write to the same
     namespace so Orca Slicer and other slicers see the tool's filament info.
-
-    Gated by publish_lane_data config flag (opt-in).
     """
-    if not app_state.cfg.get("publish_lane_data", False):
-        return
     if not moonraker or not event.target:
         return
 
@@ -305,6 +300,7 @@ class KlipperPublisher(Publisher):
             logger.info(f"[afc_lane] Set spool {event.spool_id} on {event.target} via AFC")
         else:
             _send_afc_lane_data(
+                moonraker,
                 event.target,
                 event.color or "",
                 event.material or "",
@@ -354,6 +350,7 @@ class KlipperPublisher(Publisher):
             logger.info(f"[toolhead] Activated spool {event.spool_id} on {event.target}")
         else:
             _send_toolhead_tag_data(
+                moonraker,
                 event.target,
                 event.color or "",
                 event.material or "",
@@ -364,6 +361,7 @@ class KlipperPublisher(Publisher):
         # and other slicers can auto-populate tool info. AFC handles this
         # internally for its lanes; for direct toolhead assignments we must
         # write it ourselves.
-        _publish_toolhead_lane_data(moonraker, event)
+        if self._config.get("publish_lane_data", False):
+            _publish_toolhead_lane_data(moonraker, event)
 
         return True

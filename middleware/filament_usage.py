@@ -146,6 +146,54 @@ def _publish_deduction(device_id: str, uid: str, deduct_g: float) -> None:
         logger.exception("UPDATE_TAG: failed to publish deduction")
 
 
+LOW_SPOOL_HYSTERESIS_G: float = 50.0
+
+
+def _publish_low_spool(device_id: str, latched: bool) -> bool:
+    """Publish retained low_spool command to the scanner LED. Returns True on success."""
+    if not app_state.mqtt_client:
+        return False
+
+    prefix = app_state.cfg.get("scanner_topic_prefix", "spoolsense")
+    safe_device = device_id.replace("/", "").replace("+", "").replace("#", "")
+    topic = f"{prefix}/{safe_device}/cmd/low_spool"
+    payload = "true" if latched else "false"
+
+    try:
+        result = app_state.mqtt_client.publish(topic, payload, qos=1, retain=True)
+        if result.rc == 0:
+            logger.info(
+                "low_spool: published %s to %s (device_id=%r)",
+                payload, topic, device_id,
+            )
+            return True
+        else:
+            logger.warning(
+                "low_spool: MQTT publish failed (rc=%d) topic=%s",
+                result.rc, topic,
+            )
+            return False
+    except Exception:
+        logger.exception("low_spool: failed to publish to topic=%s", topic)
+        return False
+
+
+def _check_low_spool(device_id: str, new_weight: float) -> None:
+    """Edge-triggered low-spool state machine. Publishes only on state transition."""
+    if not device_id:
+        return
+
+    threshold: float = float(app_state.cfg.get("low_spool_threshold", 100))
+    latched: bool = app_state.low_spool_latched.get(device_id, False)
+
+    if new_weight <= threshold and not latched:
+        if _publish_low_spool(device_id, True):
+            app_state.low_spool_latched[device_id] = True
+    elif new_weight > threshold + LOW_SPOOL_HYSTERESIS_G and latched:
+        if _publish_low_spool(device_id, False):
+            app_state.low_spool_latched[device_id] = False
+
+
 def _handle_update_tag() -> None:
     """
     Main handler — triggered when UPDATE_TAG macro fires.
@@ -178,6 +226,9 @@ def _handle_afc() -> None:
         devices = dict(app_state.active_spool_devices)
 
     for lane, current_weight in lane_weights.items():
+        device_id = devices.get(lane)
+        _check_low_spool(device_id, current_weight)
+
         initial = initial_weights.get(lane)
         if initial is None:
             continue
@@ -187,7 +238,6 @@ def _handle_afc() -> None:
             continue
 
         uid = uids.get(lane)
-        device_id = devices.get(lane)
         if not uid:
             logger.debug(f"UPDATE_TAG: no UID for {lane}, skipping")
             continue

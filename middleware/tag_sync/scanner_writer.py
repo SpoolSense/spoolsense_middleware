@@ -54,7 +54,11 @@ def execute(plan: TagWritePlan, mqtt_client) -> None:
         )
         return
 
-    topic = f"spoolsense/{plan.device_id}/cmd/{plan.command}/{plan.uid}"
+    # Sanitize MQTT topic segments — NFC UIDs are normally hex-only, but a
+    # crafted payload containing /, +, or # could break MQTT topic routing.
+    safe_device = plan.device_id.replace("/", "").replace("+", "").replace("#", "")
+    safe_uid = plan.uid.replace("/", "").replace("+", "").replace("#", "")
+    topic = f"spoolsense/{safe_device}/cmd/{plan.command}/{safe_uid}"
     payload = json.dumps(plan.payload)
 
     try:

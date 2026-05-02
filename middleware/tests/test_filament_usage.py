@@ -25,6 +25,9 @@ from filament_usage import (  # noqa: E402
     _handle_update_tag,
     _handle_toolchanger,
     _handle_afc,
+    _publish_low_spool,
+    _check_low_spool,
+    LOW_SPOOL_HYSTERESIS_G,
 )
 
 
@@ -32,6 +35,7 @@ def _reset_app_state():
     app_state.cfg = {
         "moonraker_url": "http://moonraker:7125",
         "scanner_topic_prefix": "spoolsense",
+        "low_spool_threshold": 100,
     }
     app_state.state_lock = threading.Lock()
     app_state.active_spool_weights = {}
@@ -39,7 +43,12 @@ def _reset_app_state():
     app_state.active_spool_devices = {}
     app_state.active_spool_diameters = {}
     app_state.active_spool_densities = {}
+    app_state.active_spool_formats = {}
+    app_state.low_spool_latched = {}
     app_state.mqtt_client = MagicMock()
+    mock_result = MagicMock()
+    mock_result.rc = 0
+    app_state.mqtt_client.publish.return_value = mock_result
 
 
 class TestFetchLastJobWeights(unittest.TestCase):
@@ -181,6 +190,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "f3d360"
         app_state.active_spool_diameters["T0"] = 1.75
         app_state.active_spool_densities["T0"] = 1.24
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -196,10 +206,12 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "scanner1"
         app_state.active_spool_diameters["T0"] = 1.75
         app_state.active_spool_densities["T0"] = 1.24
+        app_state.active_spool_formats["T0"] = "openprinttag"
         app_state.active_spool_uids["T2"] = "uid-bbb"
         app_state.active_spool_devices["T2"] = "scanner1"
         app_state.active_spool_diameters["T2"] = 1.75
         app_state.active_spool_densities["T2"] = 1.24
+        app_state.active_spool_formats["T2"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -216,6 +228,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
         app_state.active_spool_devices["T0"] = "f3d360"
         app_state.active_spool_diameters["T0"] = 2.85
         app_state.active_spool_densities["T0"] = 1.27
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -252,6 +265,7 @@ class TestHandleToolchangerFallback(unittest.TestCase):
         mock_fetch_job.return_value = [25.5]
         app_state.active_spool_uids["T0"] = "abc123"
         app_state.active_spool_devices["T0"] = "f3d360"
+        app_state.active_spool_formats["T0"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -267,8 +281,10 @@ class TestHandleToolchangerFallback(unittest.TestCase):
         mock_fetch_job.return_value = [50.0, 0.0, 30.0, 0.0]
         app_state.active_spool_uids["T0"] = "uid-aaa"
         app_state.active_spool_devices["T0"] = "scanner1"
+        app_state.active_spool_formats["T0"] = "openprinttag"
         app_state.active_spool_uids["T2"] = "uid-bbb"
         app_state.active_spool_devices["T2"] = "scanner1"
+        app_state.active_spool_formats["T2"] = "openprinttag"
 
         _handle_toolchanger()
 
@@ -323,6 +339,7 @@ class TestHandleAfc(unittest.TestCase):
         app_state.active_spool_weights = {"lane1": 800.0, "lane2": 750.0}
         app_state.active_spool_uids = {"lane1": "uid-aaa", "lane2": "uid-bbb"}
         app_state.active_spool_devices = {"lane1": "scanner1", "lane2": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag", "lane2": "openprinttag"}
 
         _handle_afc()
 
@@ -338,6 +355,7 @@ class TestHandleAfc(unittest.TestCase):
         app_state.active_spool_weights = {"lane1": 800.0}
         app_state.active_spool_uids = {"lane1": "uid-aaa"}
         app_state.active_spool_devices = {"lane1": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag"}
 
         _handle_afc()
 
@@ -365,6 +383,147 @@ class TestHandleAfc(unittest.TestCase):
         _handle_afc()
 
         app_state.mqtt_client.publish.assert_not_called()
+
+
+class TestPublishLowSpool(unittest.TestCase):
+    """Tests for _publish_low_spool helper."""
+
+    def setUp(self) -> None:
+        _reset_app_state()
+
+    def test_publishes_true_to_correct_topic(self) -> None:
+        _publish_low_spool("scanner1", True)
+
+        app_state.mqtt_client.publish.assert_called_once()
+        call = app_state.mqtt_client.publish.call_args
+        self.assertEqual(call[0][0], "spoolsense/scanner1/cmd/low_spool")
+        self.assertEqual(call[0][1], "true")
+        self.assertEqual(call[1].get("qos"), 1)
+        self.assertTrue(call[1].get("retain"))
+
+    def test_publishes_false_to_correct_topic(self) -> None:
+        _publish_low_spool("mydevice", False)
+
+        app_state.mqtt_client.publish.assert_called_once()
+        call = app_state.mqtt_client.publish.call_args
+        self.assertEqual(call[0][0], "spoolsense/mydevice/cmd/low_spool")
+        self.assertEqual(call[0][1], "false")
+
+    def test_sanitizes_device_id_slashes_and_wildcards(self) -> None:
+        _publish_low_spool("bad/dev+id#foo", True)
+
+        app_state.mqtt_client.publish.assert_called_once()
+        topic = app_state.mqtt_client.publish.call_args[0][0]
+        self.assertEqual(topic, "spoolsense/baddevidfoo/cmd/low_spool")
+
+    def test_noop_when_mqtt_client_is_none(self) -> None:
+        app_state.mqtt_client = None
+        _publish_low_spool("scanner1", True)
+        # No exception — just silently returns
+
+
+class TestCheckLowSpool(unittest.TestCase):
+    """Tests for _check_low_spool edge-triggered state machine."""
+
+    def setUp(self) -> None:
+        _reset_app_state()
+
+    def test_publishes_true_on_transition_below_threshold(self) -> None:
+        app_state.low_spool_latched = {}
+        _check_low_spool("scanner1", 90.0)  # 90 <= 100 threshold
+
+        app_state.mqtt_client.publish.assert_called_once()
+        self.assertEqual(app_state.mqtt_client.publish.call_args[0][1], "true")
+        self.assertTrue(app_state.low_spool_latched.get("scanner1"))
+
+    def test_publishes_false_on_transition_above_threshold_plus_hysteresis(self) -> None:
+        app_state.low_spool_latched = {"scanner1": True}
+        # threshold=100, hysteresis=50, so must exceed 150
+        _check_low_spool("scanner1", 160.0)
+
+        app_state.mqtt_client.publish.assert_called_once()
+        self.assertEqual(app_state.mqtt_client.publish.call_args[0][1], "false")
+        self.assertFalse(app_state.low_spool_latched.get("scanner1"))
+
+    def test_noop_within_hysteresis_band(self) -> None:
+        app_state.low_spool_latched = {"scanner1": True}
+        # threshold=100, hysteresis=50 → clear requires >150; 130 is in the band
+        _check_low_spool("scanner1", 130.0)
+
+        app_state.mqtt_client.publish.assert_not_called()
+        self.assertTrue(app_state.low_spool_latched.get("scanner1"))
+
+    def test_noop_when_already_latched_and_still_low(self) -> None:
+        app_state.low_spool_latched = {"scanner1": True}
+        _check_low_spool("scanner1", 50.0)  # still below threshold
+
+        app_state.mqtt_client.publish.assert_not_called()
+
+    def test_noop_on_empty_device_id(self) -> None:
+        _check_low_spool("", 50.0)
+        app_state.mqtt_client.publish.assert_not_called()
+
+    def test_noop_on_none_device_id(self) -> None:
+        _check_low_spool(None, 50.0)  # type: ignore[arg-type]
+        app_state.mqtt_client.publish.assert_not_called()
+
+    def test_exactly_at_threshold_triggers_latch(self) -> None:
+        _check_low_spool("scanner1", 100.0)  # exactly at threshold (<=)
+
+        app_state.mqtt_client.publish.assert_called_once()
+        self.assertEqual(app_state.mqtt_client.publish.call_args[0][1], "true")
+
+    def test_exactly_at_threshold_plus_hysteresis_does_not_clear(self) -> None:
+        app_state.low_spool_latched = {"scanner1": True}
+        # Must be strictly > threshold + hysteresis to clear; 150.0 is not > 150.0
+        _check_low_spool("scanner1", 150.0)
+
+        app_state.mqtt_client.publish.assert_not_called()
+
+
+class TestHandleAfcLowSpoolIntegration(unittest.TestCase):
+    """Integration-ish: _handle_afc triggers _check_low_spool after deduction."""
+
+    def setUp(self) -> None:
+        _reset_app_state()
+
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_low_spool_published_once_after_deduction_below_threshold(
+        self, mock_fetch: MagicMock
+    ) -> None:
+        # Initial weight 800g, deducts to 80g which is below threshold (100g)
+        mock_fetch.return_value = {"lane1": 80.0}
+        app_state.active_spool_weights = {"lane1": 800.0}
+        app_state.active_spool_uids = {"lane1": "uid-aaa"}
+        app_state.active_spool_devices = {"lane1": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag"}
+
+        _handle_afc()
+
+        # Collect all publish calls
+        calls = app_state.mqtt_client.publish.call_args_list
+        low_spool_calls = [c for c in calls if "cmd/low_spool" in c[0][0]]
+        self.assertEqual(len(low_spool_calls), 1)
+        self.assertEqual(low_spool_calls[0][0][1], "true")
+        self.assertTrue(app_state.low_spool_latched.get("scanner1"))
+
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_low_spool_not_published_when_weight_above_threshold(
+        self, mock_fetch: MagicMock
+    ) -> None:
+        # Deducts to 500g, well above threshold
+        mock_fetch.return_value = {"lane1": 500.0}
+        app_state.active_spool_weights = {"lane1": 800.0}
+        app_state.active_spool_uids = {"lane1": "uid-aaa"}
+        app_state.active_spool_devices = {"lane1": "scanner1"}
+        app_state.active_spool_formats = {"lane1": "openprinttag"}
+
+        _handle_afc()
+
+        calls = app_state.mqtt_client.publish.call_args_list
+        low_spool_calls = [c for c in calls if "cmd/low_spool" in c[0][0]]
+        self.assertEqual(len(low_spool_calls), 0)
+        self.assertFalse(app_state.low_spool_latched.get("scanner1", False))
 
 
 if __name__ == "__main__":
