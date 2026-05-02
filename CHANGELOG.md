@@ -4,6 +4,44 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.7.2] - 2026-05-02
+
+### Fixed
+
+- **Klipper var path discovery never worked** — `discover_klipper_var_path()`
+  was hitting a non-existent Moonraker endpoint (`/printer/configfile/settings`)
+  and silently returning None. Toolhead-mode users have lost the Klipper
+  variables file watcher since the middleware was first written. Now uses
+  `/printer/objects/query?configfile=settings` and walks the nested response
+  shape correctly. (#77)
+- **Tilde-prefixed save_variables filename** — when Klipper reports
+  `~/printer_data/config/variables.cfg` (literal `~`), the path-resolution
+  logic produced a broken concatenated path. Now expands `~` before checking
+  absoluteness. (#77)
+- **Toolhead lock state machine** had three gaps preventing re-scan after a
+  spool swap (#76):
+  - Single-toolhead users: a Mainsail/Spoolman manual spool change
+    (non-null → non-null spool_id transition) now clears the lock and updates
+    tracked state. Multi-toolhead behavior unchanged.
+  - Scan-driven auto-release: when an incoming scan has a different UID from
+    the active spool AND Klipper is idle, the lock releases and the new scan
+    is processed normally. During a print, the lock holds.
+  - Lock log message now points users to recovery actions (Mainsail eject or
+    REST unlock).
+
+### Added
+
+- **`POST /api/unlock/{target}` REST endpoint** — explicit unlock for HA
+  automations and power users. Validates against configured scanner targets
+  to prevent `lane_locks` poisoning. Idempotent. (#76)
+
+### Thanks
+
+Big thanks to **PlasticSnake** (Discord) / **@shallqs** (GitHub) for the clean
+reproduction in #76 that drove the lock-path redesign.
+
+---
+
 ## [1.7.1] - 2026-05-02
 
 ### Fixed
