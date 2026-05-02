@@ -110,6 +110,56 @@ def get_status() -> dict[str, Any]:
     }
 
 
+def _configured_targets() -> set[str]:
+    """All `lane`/`toolhead` values present in scanner config — what the lock
+    gate keys off. Used to validate unlock requests so callers can't poison
+    `lane_locks` with arbitrary keys."""
+    targets: set[str] = set()
+    for s in app_state.cfg.get("scanners", {}).values():
+        if isinstance(s, dict):
+            t = s.get("lane") or s.get("toolhead")
+            if t:
+                targets.add(t)
+    return targets
+
+
+@app.post("/api/unlock/{target}", response_model=ApiResponse)
+def unlock_target(target: str) -> ApiResponse:
+    """
+    Explicit unlock for a locked toolhead or AFC lane (#76).
+
+    Use cases:
+      - HA automation that wants to drop the lock on a button press
+      - User stuck in the lock-out scenario where idle-detection didn't fire
+      - Power users scripting against the middleware
+
+    Idempotent: unlocking an already-unlocked target returns success.
+    """
+    if target not in _configured_targets():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown target '{target}'. Configured targets: "
+                   f"{sorted(_configured_targets())}",
+        )
+
+    with app_state.state_lock:
+        was_locked = bool(app_state.lane_locks.get(target))
+        app_state.lane_locks[target] = False
+
+    if was_locked:
+        logger.info(f"REST API: explicit unlock for {target}")
+        return ApiResponse(
+            success=True,
+            message=f"Unlocked {target}",
+            toolhead=target,
+        )
+    return ApiResponse(
+        success=True,
+        message=f"{target} was already unlocked",
+        toolhead=target,
+    )
+
+
 @app.post("/api/mobile-scan", response_model=ApiResponse)
 def mobile_scan(req: MobileScanRequest) -> ApiResponse:
     mobile_cfg = app_state.cfg.get("mobile", {})

@@ -193,9 +193,52 @@ class ToolheadStatusSync:
             logger.info(f"Toolhead status: active spool changed to #{current_spool_id}")
 
         elif prev != current_spool_id and prev is not None and current_spool_id is not None:
-            # Global spool_id changed from one spool to another. In multi-toolhead
-            # setups this happens when a different tool is assigned — does NOT mean
-            # the previous tool's spool was ejected. Do not clear any locks.
-            logger.debug(
-                f"Toolhead status: global spool changed #{prev} → #{current_spool_id} (no lock change)"
-            )
+            # Global spool_id changed from one spool to another. On multi-toolhead
+            # setups this is ambiguous (could be a different tool getting assigned),
+            # so we don't touch locks. On single-toolhead there's only one slot —
+            # the swap is authoritative, so clear the lock so the user's next scan
+            # gets through (#76).
+            if _is_single_toolhead_setup():
+                target = _single_toolhead_target()
+                if target:
+                    with app_state.state_lock:
+                        was_locked = bool(app_state.lane_locks.get(target))
+                        if was_locked:
+                            publish_lock(target, "clear")
+                        # Track the new spool_id regardless of lock state so
+                        # consecutive Mainsail swaps stay consistent.
+                        app_state.active_spools[target] = current_spool_id
+                    if was_locked:
+                        logger.info(
+                            f"Toolhead status: single-toolhead spool swap #{prev} → "
+                            f"#{current_spool_id}, clearing lock on {target}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Toolhead status: single-toolhead spool swap #{prev} → "
+                            f"#{current_spool_id} (no lock to clear)"
+                        )
+            else:
+                logger.debug(
+                    f"Toolhead status: global spool changed #{prev} → #{current_spool_id} (no lock change)"
+                )
+
+
+def _toolhead_targets() -> set[str]:
+    """Distinct toolhead targets (T0, T1, ...) from `toolhead`-action scanners."""
+    return {
+        s["toolhead"]
+        for s in app_state.cfg.get("scanners", {}).values()
+        if isinstance(s, dict) and s.get("action") == "toolhead" and s.get("toolhead")
+    }
+
+
+def _is_single_toolhead_setup() -> bool:
+    """True if the config has exactly one toolhead-action target."""
+    return len(_toolhead_targets()) == 1
+
+
+def _single_toolhead_target() -> str | None:
+    """Returns the single toolhead target if there is exactly one, else None."""
+    targets = _toolhead_targets()
+    return next(iter(targets)) if len(targets) == 1 else None
