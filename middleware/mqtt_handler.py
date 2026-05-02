@@ -15,6 +15,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
+import requests
 
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
@@ -282,6 +283,61 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
         resync_lock_state()
 
 
+def _is_printer_idle() -> bool:
+    """
+    Returns True when Klipper reports `print_stats.state == "standby"`.
+    Returns False on any other state or on fetch failure — treat unknown as
+    busy so we never auto-release a lock during a print.
+    """
+    moonraker_url = app_state.cfg.get("moonraker_url", "")
+    if not moonraker_url:
+        return False
+    try:
+        response = requests.get(
+            f"{moonraker_url}/printer/objects/query?print_stats",
+            timeout=2,
+        )
+        response.raise_for_status()
+        state = (
+            response.json()
+            .get("result", {})
+            .get("status", {})
+            .get("print_stats", {})
+            .get("state", "")
+        )
+        return state == "standby"
+    except (requests.RequestException, ValueError):
+        logger.debug("Could not query Klipper print state; treating as busy")
+        return False
+
+
+def _should_auto_release_lock(target: str, payload: dict) -> bool:
+    """
+    Decide whether a locked target should auto-release for an incoming scan.
+
+    Auto-release happens when:
+      - Incoming UID is known and differs from the currently-active UID
+      - Klipper is idle (print_stats.state == "standby")
+
+    Same-UID re-scans are ignored without auto-release. UID-less payloads
+    (e.g. tag-removed events) leave the lock in place.
+    """
+    incoming_uid = (payload.get("uid") or "").lower()
+    if not incoming_uid:
+        return False
+
+    # Snapshot active UID under state_lock before the network I/O in
+    # _is_printer_idle() — avoids a race window where the active spool
+    # could change while we're querying Klipper.
+    with app_state.state_lock:
+        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+
+    if active_uid and incoming_uid == active_uid:
+        return False
+
+    return _is_printer_idle()
+
+
 def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
     """Fires on every MQTT message. Resolves scanner, checks lock, routes to handler."""
     try:
@@ -296,8 +352,22 @@ def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> 
         # Shared scanners (afc_stage/toolhead_stage) have no target to lock
         target = _get_scanner_target(scanner_cfg)
         if target and app_state.lane_locks.get(target):
-            logger.info(f"Ignoring scan on {target} (locked)")
-            return
+            if _should_auto_release_lock(target, payload):
+                incoming_uid = (payload.get("uid") or "").lower()
+                active_uid = app_state.active_spool_uids.get(target, "")
+                logger.info(
+                    f"Lock auto-release on {target}: idle printer, swap "
+                    f"{active_uid or '?'} → {incoming_uid}"
+                )
+                with app_state.state_lock:
+                    app_state.lane_locks[target] = False
+                # Fall through to normal scan processing
+            else:
+                logger.info(
+                    f"Ignoring scan on {target} (locked). To unlock: eject the spool "
+                    f"in Mainsail, or POST /api/unlock/{target} on the middleware REST API."
+                )
+                return
 
         if not app_state.DISPATCHER_AVAILABLE:
             logger.warning("Rich-tag dispatcher not available — cannot process scanner payload")

@@ -299,21 +299,32 @@ def discover_klipper_var_path() -> str | None:
     try:
         logger.info("Discovering Klipper save_variables path...")
         response = requests.get(
-            f"{app_state.cfg['moonraker_url']}/printer/configfile/settings", timeout=5
+            f"{app_state.cfg['moonraker_url']}/printer/objects/query?configfile=settings",
+            timeout=5,
         )
         response.raise_for_status()
-        settings = response.json().get("result", {}).get("settings", {})
-        filename = settings.get("save_variables", {}).get("filename")
+        configfile = (
+            response.json()
+            .get("result", {})
+            .get("status", {})
+            .get("configfile", {})
+            .get("settings", {})
+        )
+        filename = configfile.get("save_variables", {}).get("filename")
 
         if not filename:
             logger.warning("No [save_variables] in Klipper config. Klipper sync disabled.")
             return None
 
+        # Klipper may report the path as `~/...` (literal tilde), absolute, or
+        # bare-relative. Expand `~` first so the absolute-path branch is taken
+        # when applicable; otherwise fall back to the default config dir.
+        filename = os.path.expanduser(filename)
         if not filename.startswith("/"):
             filename = os.path.join(os.path.expanduser("~/printer_data/config"), filename)
 
         logger.info(f"Discovered Klipper variables file: {filename}")
         return filename
-    except Exception as e:
-        logger.error(f"Failed to discover Klipper variables path: {e}")
+    except (requests.RequestException, ValueError):
+        logger.exception("Failed to discover Klipper variables path")
         return None

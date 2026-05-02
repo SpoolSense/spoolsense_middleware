@@ -170,15 +170,55 @@ class TestCheckTransition(unittest.TestCase):
         self.assertEqual(sync._last_spool_id, 12)
 
     @patch("toolhead_status.publish_lock")
-    def test_global_spool_change_does_not_clear_locks(self, mock_publish_lock: MagicMock) -> None:
-        # Spool changed from one ID to another (e.g., different tool activated in Mainsail).
-        # This is NOT an eject — do not touch any locks.
+    def test_global_spool_change_multi_toolhead_does_not_clear_locks(self, mock_publish_lock: MagicMock) -> None:
+        # Multi-toolhead config: spool changed from one ID to another (e.g., a
+        # different tool activated in Mainsail). Ambiguous — could be a different
+        # tool getting assigned. Do not touch any locks.
+        app_state.cfg["scanners"] = {
+            "scanner_t0": {"action": "toolhead", "toolhead": "T0"},
+            "scanner_t1": {"action": "toolhead", "toolhead": "T1"},
+        }
         app_state.active_spools["T0"] = 3
+        app_state.lane_locks["T0"] = True
         sync = self._make_sync(last_spool_id=3)
 
         sync._check_transition(9)
 
         mock_publish_lock.assert_not_called()
+
+    @patch("toolhead_status.publish_lock")
+    def test_global_spool_change_single_toolhead_clears_lock(self, mock_publish_lock: MagicMock) -> None:
+        # Single-toolhead config: spool swap (e.g., Mainsail UI change) is
+        # authoritative — there's only one slot, so clear the lock and update
+        # active_spools so the next scan can go through (#76).
+        app_state.cfg["scanners"] = {
+            "scanner_t0": {"action": "toolhead", "toolhead": "T0"},
+        }
+        app_state.active_spools["T0"] = 3
+        app_state.lane_locks["T0"] = True
+        sync = self._make_sync(last_spool_id=3)
+
+        sync._check_transition(9)
+
+        mock_publish_lock.assert_called_once_with("T0", "clear")
+        self.assertEqual(app_state.active_spools["T0"], 9)
+
+    @patch("toolhead_status.publish_lock")
+    def test_global_spool_change_single_toolhead_no_lock_to_clear(self, mock_publish_lock: MagicMock) -> None:
+        # Single-toolhead, but the toolhead isn't locked — transition does not
+        # try to clear a lock that isn't there, BUT it still updates tracked
+        # active_spools so consecutive Mainsail swaps stay consistent.
+        app_state.cfg["scanners"] = {
+            "scanner_t0": {"action": "toolhead", "toolhead": "T0"},
+        }
+        app_state.active_spools["T0"] = 3
+        app_state.lane_locks["T0"] = False
+        sync = self._make_sync(last_spool_id=3)
+
+        sync._check_transition(9)
+
+        mock_publish_lock.assert_not_called()
+        self.assertEqual(app_state.active_spools["T0"], 9)
 
     @patch("toolhead_status.publish_lock")
     def test_eject_with_no_matching_toolhead_clears_lane_locks(self, mock_publish_lock: MagicMock) -> None:
