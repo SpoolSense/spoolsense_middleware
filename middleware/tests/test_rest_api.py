@@ -267,5 +267,53 @@ class TestAssignTool(unittest.TestCase):
         self.assertEqual(resp.json()["spool_id"], 42)
 
 
+class TestUnlockTarget(unittest.TestCase):
+    """POST /api/unlock/{target} — explicit unlock for #76."""
+
+    def setUp(self):
+        _reset_app_state()
+        # Mix of toolhead + AFC scanners so we cover both target kinds
+        app_state.cfg["scanners"] = {
+            "ecb338": {"action": "afc_lane", "lane": "lane1"},
+            "f08538": {"action": "toolhead", "toolhead": "T0"},
+        }
+
+    def test_unlocks_locked_target(self):
+        app_state.lane_locks["T0"] = True
+        resp = client.post("/api/unlock/T0")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["toolhead"], "T0")
+        self.assertFalse(app_state.lane_locks["T0"])
+
+    def test_idempotent_when_already_unlocked(self):
+        app_state.lane_locks["T0"] = False
+        resp = client.post("/api/unlock/T0")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        self.assertIn("already unlocked", resp.json()["message"])
+
+    def test_works_for_afc_lane_target(self):
+        app_state.lane_locks["lane1"] = True
+        resp = client.post("/api/unlock/lane1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(app_state.lane_locks["lane1"])
+
+    def test_unknown_target_returns_404(self):
+        # Targets not present in the scanner config are rejected — prevents
+        # callers from poisoning lane_locks with arbitrary keys
+        resp = client.post("/api/unlock/T99")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("Unknown target", resp.json()["detail"])
+
+    def test_does_not_touch_other_targets(self):
+        app_state.lane_locks["T0"] = True
+        app_state.lane_locks["lane1"] = True
+        client.post("/api/unlock/T0")
+        self.assertFalse(app_state.lane_locks["T0"])
+        self.assertTrue(app_state.lane_locks["lane1"])
+
+
 if __name__ == "__main__":
     unittest.main()
