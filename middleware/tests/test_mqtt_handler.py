@@ -41,6 +41,7 @@ from mqtt_handler import (  # noqa: E402
     _extract_scanner_device_id,
     _resolve_scanner_from_topic,
     _get_scanner_target,
+    on_connect,
 )
 
 
@@ -156,6 +157,23 @@ class TestGetScannerTarget(unittest.TestCase):
         scanner_cfg = {"action": "afc_lane", "lane": "lane2", "toolhead": "T0"}
         # lane is checked first via `or`
         assert _get_scanner_target(scanner_cfg) == "lane2"
+
+
+class TestOnConnect(unittest.TestCase):
+
+    def setUp(self):
+        _reset_app_state(
+            scanners={"f08538": {"action": "toolhead", "toolhead": "T0"}},
+        )
+        app_state.DISPATCHER_AVAILABLE = True
+        app_state.spoolman_client = None
+        app_state.watcher = None
+
+    def test_on_connect_toolhead_action_does_not_raise(self):
+        client = MagicMock()
+        with patch("mqtt_handler.discover_klipper_var_path", return_value="/tmp/x.cfg"):
+            on_connect(client, None, {}, 0)
+        client.subscribe.assert_called_once_with("spoolsense/f08538/tag/state")
 
 
 if __name__ == "__main__":
