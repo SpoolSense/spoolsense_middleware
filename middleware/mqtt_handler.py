@@ -10,18 +10,19 @@ Tag processing splits into two paths:
 """
 from __future__ import annotations
 
+from var_watcher import sync_from_klipper_vars
+
 import json
 import logging
 from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
-import requests
 
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
+from spoolman_cache import find_spool_by_nfc, refresh_spool_cache
 from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
-from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
     from spoolman.client import SpoolInfo
@@ -83,12 +84,6 @@ def _record_spool_tracking(
         app_state.active_spool_densities[target]  = density or 1.24
         app_state.active_spool_formats[target]    = tag_format or "unknown"
 
-    # Check low-spool threshold at scan time — if a new spool has plenty of
-    # filament, this also clears any latched low-spool state from the same
-    # device so the LED stops breathing after a spool swap.
-    if device_id:
-        _check_low_spool(device_id, remaining)
-
 
 # ── UID-only tag handling ────────────────────────────────────────────────────
 
@@ -97,7 +92,7 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     target_id = _get_scanner_target(scanner_cfg) or _extract_scanner_device_id(topic) or "unknown"
     logger.info(f"UID-only tag on {target_id}: {uid} — looking up in Spoolman")
 
-    spool = app_state.spoolman_client.find_by_nfc(uid) if app_state.spoolman_client else None
+    spool = find_spool_by_nfc(uid)
     if not spool:
         logger.warning(f"No spool found in Spoolman for UID: {uid}")
         return
@@ -148,6 +143,11 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
         logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {target_id}")
 
+
+    current = app_state.active_spools.get(target)
+    if current == spool_id:
+        logger.info(f"Ignoring same spool {spool_id} on {target}")
+        return
 
 # ── Rich-tag handling ────────────────────────────────────────────────────────
 
@@ -264,78 +264,22 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
 
     client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
-    if app_state.spoolman_client:
-        app_state.spoolman_client.refresh()
+    refresh_spool_cache()
 
     # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
     if has_toolhead_scanners(app_state.cfg):
         app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
-        from var_watcher import start_klipper_watcher, sync_from_klipper_vars
         sync_from_klipper_vars()
         if app_state.watcher:
             app_state.watcher.stop()
             app_state.watcher.join(timeout=2)
+        from var_watcher import start_klipper_watcher
         app_state.watcher = start_klipper_watcher()
 
     # Re-publish AFC lock state so scanners know current state after reconnect
     if has_afc_scanners(app_state.cfg):
         from afc_status import resync_lock_state
         resync_lock_state()
-
-
-def _is_printer_idle() -> bool:
-    """
-    Returns True when Klipper reports `print_stats.state == "standby"`.
-    Returns False on any other state or on fetch failure — treat unknown as
-    busy so we never auto-release a lock during a print.
-    """
-    moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
-        return False
-    try:
-        response = requests.get(
-            f"{moonraker_url}/printer/objects/query?print_stats",
-            timeout=2,
-        )
-        response.raise_for_status()
-        state = (
-            response.json()
-            .get("result", {})
-            .get("status", {})
-            .get("print_stats", {})
-            .get("state", "")
-        )
-        return state == "standby"
-    except (requests.RequestException, ValueError):
-        logger.debug("Could not query Klipper print state; treating as busy")
-        return False
-
-
-def _should_auto_release_lock(target: str, payload: dict) -> bool:
-    """
-    Decide whether a locked target should auto-release for an incoming scan.
-
-    Auto-release happens when:
-      - Incoming UID is known and differs from the currently-active UID
-      - Klipper is idle (print_stats.state == "standby")
-
-    Same-UID re-scans are ignored without auto-release. UID-less payloads
-    (e.g. tag-removed events) leave the lock in place.
-    """
-    incoming_uid = (payload.get("uid") or "").lower()
-    if not incoming_uid:
-        return False
-
-    # Snapshot active UID under state_lock before the network I/O in
-    # _is_printer_idle() — avoids a race window where the active spool
-    # could change while we're querying Klipper.
-    with app_state.state_lock:
-        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
-
-    if active_uid and incoming_uid == active_uid:
-        return False
-
-    return _is_printer_idle()
 
 
 def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
@@ -352,36 +296,9 @@ def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> 
         # Shared scanners (afc_stage/toolhead_stage) have no target to lock
         target = _get_scanner_target(scanner_cfg)
         if target and app_state.lane_locks.get(target):
-            if _should_auto_release_lock(target, payload):
-                # _should_auto_release_lock did network I/O (~2s); re-verify
-                # under state_lock to close the TOCTOU window before writing.
-                # (CodeRabbit #79)
-                incoming_uid = (payload.get("uid") or "").lower()
-                released = False
-                active_uid = ""
-                with app_state.state_lock:
-                    if app_state.lane_locks.get(target):
-                        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
-                        if not active_uid or active_uid != incoming_uid:
-                            app_state.lane_locks[target] = False
-                            released = True
-                if released:
-                    logger.info(
-                        f"Lock auto-release on {target}: idle printer, swap "
-                        f"{active_uid or '?'} → {incoming_uid}"
-                    )
-                    # Fall through to normal scan processing
-                else:
-                    logger.debug(
-                        f"Lock auto-release aborted on {target}: state changed mid-check"
-                    )
-                    return
-            else:
-                logger.info(
-                    f"Ignoring scan on {target} (locked). To unlock: eject the spool "
-                    f"in Mainsail, or POST /api/unlock/{target} on the middleware REST API."
-                )
-                return
+            logger.info(f"Overwriting spool on {target} (clearing lock)")
+            publish_lock(target, "clear")
+            app_state.lane_locks[target] = False
 
         if not app_state.DISPATCHER_AVAILABLE:
             logger.warning("Rich-tag dispatcher not available — cannot process scanner payload")
