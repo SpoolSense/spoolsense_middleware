@@ -10,7 +10,7 @@ All notable changes to SpoolSense are documented here.
 
 - **Happy Hare MMU integration (pull mode)** — new `happy_hare_stage`
   scanner action for shared scanners used with Happy Hare-managed MMUs
-  (ERCF, etc). Workflow: user selects an MMU gate via
+  (ERCF, etc.). Workflow: user selects an MMU gate via
   `MMU_SELECT_GATE GATE=N`, then scans a tag. The middleware reads the
   selected gate from Moonraker, PATCHes the spool's `extra.mmu_gate` and
   `extra.printer_name` in Spoolman, then fires `MMU_SPOOLMAN SYNC=1` so

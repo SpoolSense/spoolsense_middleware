@@ -222,6 +222,14 @@ def _activate_from_scan(
     event = _build_spool_event(scanner_cfg, action_enum, target, spoolman_id,
                                color_hex, filament_label, remaining, scan)
 
+    # Happy Hare has its own binding path — skip the generic publisher chain
+    # so a no-op publisher call doesn't burn a round trip for every scan.
+    if action_enum == Action.HAPPY_HARE_STAGE:
+        _route_happy_hare(spoolman_id)
+        if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
+            logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")
+        return
+
     # Attempt Spoolman activation if we have a spool ID
     spoolman_activated = False
     if spoolman_id is not None:
@@ -238,8 +246,6 @@ def _activate_from_scan(
         _route_staged(action_enum, spoolman_activated, color_hex, filament_label, remaining, spoolman_id)
     elif action_enum in (Action.AFC_LANE, Action.TOOLHEAD):
         _route_dedicated(action_enum, spoolman_activated, spoolman_id, target, event)
-    elif action_enum == Action.HAPPY_HARE_STAGE:
-        _route_happy_hare(spoolman_id)
 
     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
         logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")

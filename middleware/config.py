@@ -307,6 +307,16 @@ def _validate_happy_hare(config: dict) -> None:
     Multiple `happy_hare_stage` scanners are intentionally allowed — they
     all bind to whichever gate is currently selected, which is harmless.
     """
+    # Malformed YAML (e.g. `happy_hare: null` or `happy_hare: "yes"`) should
+    # fail loud, not crash on setdefault later. Absent key is fine — defaults
+    # get applied.
+    if "happy_hare" in config and not isinstance(config["happy_hare"], dict):
+        _config_error(
+            "happy_hare must be a mapping in config.yaml (got %s). "
+            "Remove the section or format it as `happy_hare:\\n  enabled: true\\n  ...`",
+            type(config["happy_hare"]).__name__,
+        )
+
     happy_hare = config.setdefault("happy_hare", {})
     happy_hare.setdefault("enabled", False)
     happy_hare.setdefault("printer_name", "")
@@ -325,6 +335,16 @@ def _validate_happy_hare(config: dict) -> None:
             "happy_hare.enabled is true but happy_hare.printer_name is empty. "
             "Set 'happy_hare.printer_name' to match the Printer Name configured "
             "in Happy Hare's mmu_parameters.cfg."
+        )
+
+    # Happy Hare binding writes to Spoolman — the integration cannot function
+    # in tag-only mode. Fail loud at config load so users don't discover this
+    # only after the first scan.
+    if has_hh_scanner and not config.get("spoolman_url"):
+        _config_error(
+            "A scanner has action 'happy_hare_stage' but spoolman_url is not set. "
+            "Happy Hare binding writes to Spoolman — tag-only mode is not supported "
+            "for this action. Set 'spoolman_url' in config.yaml."
         )
 
 

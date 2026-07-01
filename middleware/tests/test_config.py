@@ -421,17 +421,39 @@ class TestValidateHappyHare(unittest.TestCase):
             "happy_hare": {"enabled": True},
         })
 
-    def test_enabled_with_printer_name_accepted(self):
-        self._ok({
-            "scanners": {"abc123": {"action": "happy_hare_stage"}},
-            "happy_hare": {"enabled": True, "printer_name": "muffin"},
-        })
-
     def test_hh_scanner_without_enabled_rejected(self):
         # Cross-check: scanner action present but integration disabled → fail loud
         self._call({
             "scanners": {"abc123": {"action": "happy_hare_stage"}},
             "happy_hare": {"enabled": False},
+        })
+
+    def test_hh_scanner_without_spoolman_url_rejected(self):
+        # HH bind writes to Spoolman — tag-only mode isn't supported
+        self._call({
+            "scanners": {"abc123": {"action": "happy_hare_stage"}},
+            "happy_hare": {"enabled": True, "printer_name": "muffin"},
+        })
+
+    def test_hh_scanner_with_spoolman_url_accepted(self):
+        self._ok({
+            "scanners": {"abc123": {"action": "happy_hare_stage"}},
+            "happy_hare": {"enabled": True, "printer_name": "muffin"},
+            "spoolman_url": "http://spoolman:7912",
+        })
+
+    def test_null_happy_hare_section_rejected(self):
+        # `happy_hare: null` in YAML would crash setdefault otherwise
+        self._call({
+            "scanners": {"abc123": {"action": "afc_stage"}},
+            "happy_hare": None,
+        })
+
+    def test_string_happy_hare_section_rejected(self):
+        # `happy_hare: "yes"` in YAML would crash setdefault otherwise
+        self._call({
+            "scanners": {"abc123": {"action": "afc_stage"}},
+            "happy_hare": "yes",
         })
 
 
