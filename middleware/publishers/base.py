@@ -34,6 +34,7 @@ class Action(str, Enum):
     AFC_LANE = "afc_lane"
     TOOLHEAD = "toolhead"
     TOOLHEAD_STAGE = "toolhead_stage"
+    HAPPY_HARE_STAGE = "happy_hare_stage"
 
 
 @dataclass

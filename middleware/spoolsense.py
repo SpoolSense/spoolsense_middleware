@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.7.2"
+__version__ = "1.7.3"
 """
 SpoolSense NFC Middleware
 =========================
@@ -34,7 +34,11 @@ import threading
 import paho.mqtt.client as mqtt
 
 import app_state
-from config import CONFIG_PATH, load_config, has_afc_scanners, has_toolhead_scanners, has_toolhead_stage_scanners
+from config import (
+    CONFIG_PATH, load_config,
+    has_afc_scanners, has_happy_hare_scanners,
+    has_toolhead_scanners, has_toolhead_stage_scanners,
+)
 from mqtt_handler import on_connect, on_message
 from activation import publish_lock
 from afc_status import AfcStatusSync
@@ -142,6 +146,8 @@ def _log_startup() -> None:
         logger.info("Klipper sync: file watcher")
     if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
         logger.info("Toolhead status: Moonraker spool eject polling")
+    if has_happy_hare_scanners(app_state.cfg):
+        logger.info("Happy Hare: pull-mode gate binding enabled")
     logger.info(f"Filament usage: UPDATE_TAG macro tracking enabled")
     logger.info(f"Dispatcher: {'enabled' if app_state.DISPATCHER_AVAILABLE else 'disabled'}")
 

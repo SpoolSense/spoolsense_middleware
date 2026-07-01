@@ -323,5 +323,64 @@ class TestNoWrites(unittest.TestCase):
         mock_patch.assert_not_called()
 
 
+class TestUpdateSpoolExtras(unittest.TestCase):
+    """PATCH /api/v1/spool/<id> with `extra` updates, JSON-encoded per value."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    @patch("requests.patch")
+    def test_extras_json_encoded_per_value(self, mock_patch):
+        # Spoolman stores extras as JSON-encoded strings, so we must encode
+        # each value before sending: int 4 → "4", string "muffin" → '"muffin"'.
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        mock_patch.return_value = resp
+
+        client = SpoolmanClient(BASE_URL)
+        result = client.update_spool_extras(42, {"mmu_gate": 4, "printer_name": "muffin"})
+
+        assert result is True
+        args, kwargs = mock_patch.call_args
+        assert args[0] == f"{BASE_URL}/api/v1/spool/42"
+        assert kwargs["json"] == {"extra": {"mmu_gate": "4", "printer_name": '"muffin"'}}
+
+    @patch("requests.patch")
+    def test_returns_false_on_http_error(self, mock_patch):
+        import requests as req
+        mock_patch.side_effect = req.HTTPError("404")
+        client = SpoolmanClient(BASE_URL)
+        assert client.update_spool_extras(42, {"x": 1}) is False
+
+    @patch("requests.patch")
+    def test_logs_spoolman_response_body_on_400(self, mock_patch):
+        # Unknown extra fields return 400 with a body like
+        # `{"message": "Unknown extra field mmu_gate."}` — the log must
+        # include that body so users know which field to declare.
+        import requests as req
+        err_response = MagicMock()
+        err_response.text = '{"message": "Unknown extra field mmu_gate."}'
+        http_error = req.HTTPError("400 Client Error")
+        http_error.response = err_response
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock(side_effect=http_error)
+        mock_patch.return_value = resp
+
+        client = SpoolmanClient(BASE_URL)
+        with self.assertLogs("spoolman.client", level="ERROR") as captured:
+            result = client.update_spool_extras(42, {"mmu_gate": 4})
+        assert result is False
+        combined = "\n".join(r.getMessage() for r in captured.records)
+        assert "Unknown extra field mmu_gate" in combined
+
+    @patch("requests.patch")
+    def test_returns_false_on_connection_error(self, mock_patch):
+        import requests as req
+        mock_patch.side_effect = req.ConnectionError("refused")
+        client = SpoolmanClient(BASE_URL)
+        assert client.update_spool_extras(42, {"x": 1}) is False
+
+
 if __name__ == "__main__":
     unittest.main()
