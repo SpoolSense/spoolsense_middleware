@@ -135,6 +135,17 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
         logger.info(f"[{stage_name}] Tag data cached, waiting for assignment. Scanner remains unlocked")
 
 
+def _route_happy_hare(spoolman_id: int | None) -> None:
+    """Handle happy_hare_stage — bind the scanned spool to the currently-selected
+    MMU gate via Spoolman extras + Happy Hare sync trigger. No lock, no cache."""
+    if spoolman_id is None:
+        logger.warning("[happy_hare_stage] No Spoolman ID for scan — cannot bind to MMU gate. "
+                       "The scanned tag must be registered in Spoolman first.")
+        return
+    from happy_hare import bind_spool_to_current_gate
+    bind_spool_to_current_gate(spoolman_id)
+
+
 def _route_dedicated(action_enum: Action, spoolman_activated: bool,
                      spoolman_id: int | None, target: str, event: SpoolEvent) -> None:
     """Handle afc_lane and toolhead — lock after activation or tag-only publish."""
@@ -227,6 +238,8 @@ def _activate_from_scan(
         _route_staged(action_enum, spoolman_activated, color_hex, filament_label, remaining, spoolman_id)
     elif action_enum in (Action.AFC_LANE, Action.TOOLHEAD):
         _route_dedicated(action_enum, spoolman_activated, spoolman_id, target, event)
+    elif action_enum == Action.HAPPY_HARE_STAGE:
+        _route_happy_hare(spoolman_id)
 
     if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
         logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")

@@ -24,10 +24,12 @@ import app_state  # noqa: E402
 
 from config import (  # noqa: E402
     _validate_scanners,
+    _validate_happy_hare,
     _derive_toolheads,
     _migrate_legacy_config,
     discover_klipper_var_path,
     has_afc_scanners,
+    has_happy_hare_scanners,
     has_toolhead_scanners,
     has_toolhead_stage_scanners,
 )
@@ -105,6 +107,15 @@ class TestValidateScanners(unittest.TestCase):
 
     def test_toolhead_stage_with_lane_rejected(self):
         self._call({"scanners": {"abc123": {"action": "toolhead_stage", "lane": "lane1"}}})
+
+    def test_happy_hare_stage_no_target_accepted(self):
+        self._ok({"scanners": {"abc123": {"action": "happy_hare_stage"}}})
+
+    def test_happy_hare_stage_with_lane_rejected(self):
+        self._call({"scanners": {"abc123": {"action": "happy_hare_stage", "lane": "lane1"}}})
+
+    def test_happy_hare_stage_with_toolhead_rejected(self):
+        self._call({"scanners": {"abc123": {"action": "happy_hare_stage", "toolhead": "T0"}}})
 
     def test_empty_scanners_dict_rejected(self):
         self._call({"scanners": {}})
@@ -380,6 +391,63 @@ class TestDiscoverKlipperVarPath(unittest.TestCase):
             result = discover_klipper_var_path()
             assert result == "/cached/path/variables.cfg"
             mock_get.assert_not_called()
+
+
+class TestValidateHappyHare(unittest.TestCase):
+    """The optional `happy_hare:` section + cross-check against scanner actions."""
+
+    def _call(self, config):
+        with self.assertRaises(SystemExit):
+            _validate_happy_hare(config)
+
+    def _ok(self, config):
+        _validate_happy_hare(config)
+
+    def test_section_absent_is_ok(self):
+        # No happy_hare section, no happy_hare_stage scanners → defaults applied, no error
+        cfg = {"scanners": {"abc123": {"action": "afc_stage"}}}
+        self._ok(cfg)
+        assert cfg["happy_hare"]["enabled"] is False
+
+    def test_disabled_with_no_hh_scanner_is_ok(self):
+        self._ok({
+            "scanners": {"abc123": {"action": "afc_stage"}},
+            "happy_hare": {"enabled": False},
+        })
+
+    def test_enabled_without_printer_name_rejected(self):
+        self._call({
+            "scanners": {"abc123": {"action": "happy_hare_stage"}},
+            "happy_hare": {"enabled": True},
+        })
+
+    def test_enabled_with_printer_name_accepted(self):
+        self._ok({
+            "scanners": {"abc123": {"action": "happy_hare_stage"}},
+            "happy_hare": {"enabled": True, "printer_name": "muffin"},
+        })
+
+    def test_hh_scanner_without_enabled_rejected(self):
+        # Cross-check: scanner action present but integration disabled → fail loud
+        self._call({
+            "scanners": {"abc123": {"action": "happy_hare_stage"}},
+            "happy_hare": {"enabled": False},
+        })
+
+
+class TestHasHappyHareScanners(unittest.TestCase):
+    def test_returns_true_when_present(self):
+        assert has_happy_hare_scanners(
+            {"scanners": {"a": {"action": "happy_hare_stage"}}}
+        ) is True
+
+    def test_returns_false_when_only_other_actions(self):
+        assert has_happy_hare_scanners(
+            {"scanners": {"a": {"action": "afc_stage"}, "b": {"action": "toolhead"}}}
+        ) is False
+
+    def test_returns_false_when_no_scanners(self):
+        assert has_happy_hare_scanners({}) is False
 
 
 if __name__ == "__main__":

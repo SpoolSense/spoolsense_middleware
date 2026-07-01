@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH: str = os.path.expanduser("~/SpoolSense/config.yaml")
 
-VALID_ACTIONS: tuple[str, ...] = ("afc_stage", "afc_lane", "toolhead", "toolhead_stage")
+VALID_ACTIONS: tuple[str, ...] = (
+    "afc_stage", "afc_lane", "toolhead", "toolhead_stage", "happy_hare_stage",
+)
 
 DEFAULTS: dict = {
     "mqtt": {
@@ -146,7 +148,7 @@ def _validate_scanners(config: dict) -> None:
         elif action == "toolhead":
             _validate_targeted_scanner(device_id, scanner_cfg, action, "toolhead", "lane", toolheads_list)
 
-        elif action in ("afc_stage", "toolhead_stage"):
+        elif action in ("afc_stage", "toolhead_stage", "happy_hare_stage"):
             # Shared scanners have no target — lane/toolhead fields are invalid
             if "lane" in scanner_cfg or "toolhead" in scanner_cfg:
                 _config_error(
@@ -200,6 +202,15 @@ def has_toolhead_stage_scanners(config: dict) -> bool:
     """Returns True if any scanner has a toolhead_stage action."""
     return any(
         s.get("action") == "toolhead_stage"
+        for s in config.get("scanners", {}).values()
+        if isinstance(s, dict)
+    )
+
+
+def has_happy_hare_scanners(config: dict) -> bool:
+    """Returns True if any scanner has a happy_hare_stage action."""
+    return any(
+        s.get("action") == "happy_hare_stage"
         for s in config.get("scanners", {}).values()
         if isinstance(s, dict)
     )
@@ -264,6 +275,7 @@ def load_config() -> dict:
 
     _validate_scanners(config)
     _validate_mobile(config)
+    _validate_happy_hare(config)
 
     return config
 
@@ -284,6 +296,36 @@ def _validate_mobile(config: dict) -> None:
     mobile_port = mobile["port"]
     if not isinstance(mobile_port, int) or mobile_port < 1 or mobile_port > 65535:
         _config_error("mobile.port must be an integer 1-65535 (got %s)", mobile_port)
+
+
+def _validate_happy_hare(config: dict) -> None:
+    """
+    Validate the optional `happy_hare:` top-level section and cross-check
+    against scanner actions. A `happy_hare_stage` scanner requires
+    `happy_hare.enabled: true` and a `printer_name`.
+
+    Multiple `happy_hare_stage` scanners are intentionally allowed — they
+    all bind to whichever gate is currently selected, which is harmless.
+    """
+    happy_hare = config.setdefault("happy_hare", {})
+    happy_hare.setdefault("enabled", False)
+    happy_hare.setdefault("printer_name", "")
+
+    has_hh_scanner = has_happy_hare_scanners(config)
+    enabled = bool(happy_hare["enabled"])
+
+    if has_hh_scanner and not enabled:
+        _config_error(
+            "A scanner has action 'happy_hare_stage' but happy_hare.enabled is false. "
+            "Set 'happy_hare.enabled: true' in config.yaml or change the scanner action."
+        )
+
+    if enabled and not happy_hare["printer_name"]:
+        _config_error(
+            "happy_hare.enabled is true but happy_hare.printer_name is empty. "
+            "Set 'happy_hare.printer_name' to match the Printer Name configured "
+            "in Happy Hare's mmu_parameters.cfg."
+        )
 
 
 def discover_klipper_var_path() -> str | None:

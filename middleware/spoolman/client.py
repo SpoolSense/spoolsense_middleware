@@ -1,11 +1,16 @@
 """
 client.py — SpoolmanClient for spool lookup and enrichment.
 
-Read-only interface to Spoolman. Looks up spools by NFC UID and enriches
-tag data with Spoolman's color, material, and weight info. Does NOT create
-or modify spools — the scanner handles all Spoolman writes, and Moonraker
-handles filament usage tracking via sync_rate.
+Primarily read-only: looks up spools by NFC UID and enriches tag data with
+Spoolman's color, material, and weight info. The scanner handles spool
+creation and the bulk of Spoolman writes; Moonraker handles filament usage
+tracking via sync_rate.
+
+One narrow write path exists: `update_spool_extras()` is used by integrations
+that need to bind metadata onto an existing spool (e.g. Happy Hare's MMU gate
+assignment).
 """
+import json
 import logging
 import time
 from typing import Optional
@@ -56,6 +61,41 @@ class SpoolmanClient:
         except requests.RequestException:
             logger.exception("Failed to fetch spool %s", spool_id)
             return None
+
+    def update_spool_extras(self, spool_id: int, extras: dict) -> bool:
+        """
+        PATCH the `extra` field on a spool. Returns True on success.
+
+        Spoolman stores `extra` values as JSON-encoded strings (an int 4
+        becomes "4", a string "muffin" becomes '"muffin"'), so each value
+        is run through `json.dumps()` before sending.
+
+        Only the keys passed in are written; Spoolman merges them with the
+        spool's existing extras. Unknown extra keys (fields not declared
+        under Spoolman → Extras) are rejected with HTTP 400 — the error
+        body is logged so users can see which field to declare.
+        """
+        payload = {"extra": {k: json.dumps(v) for k, v in extras.items()}}
+        try:
+            response = requests.patch(
+                f"{self.base_url}/api/v1/spool/{spool_id}",
+                json=payload,
+                timeout=5,
+            )
+            response.raise_for_status()
+            return True
+        except requests.HTTPError as e:
+            # Include Spoolman's response body — "Unknown extra field X" and
+            # similar messages are actionable, but only if the user sees them.
+            body = e.response.text if e.response is not None else ""
+            logger.error(
+                "Failed to update extras on spool %s: %s. Spoolman response: %s",
+                spool_id, e, body,
+            )
+            return False
+        except requests.RequestException:
+            logger.exception("Failed to update extras on spool %s", spool_id)
+            return False
 
     def find_by_nfc(self, nfc_uid: str) -> Optional[dict]:
         """Looks up a spool by NFC UID, with TTL-based cache and single forced refresh on miss."""
