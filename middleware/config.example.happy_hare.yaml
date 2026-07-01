@@ -1,0 +1,63 @@
+# =============================================================
+# SpoolSense NFC Middleware — Configuration (Happy Hare MMU)
+# =============================================================
+# Copy this file to ~/SpoolSense/config.yaml and fill in your values.
+#
+#   cp config.example.happy_hare.yaml ~/SpoolSense/config.yaml
+#
+# This config is for Happy Hare MMU users running in pull mode.
+# Workflow:
+#   1. Select an MMU gate (MMU_SELECT_GATE GATE=N) in Mainsail / LCD
+#   2. Scan a tag on the shared scanner
+#   3. The middleware reads the selected gate from Moonraker, writes
+#      mmu_gate + printer_name to the spool's Spoolman extras, then
+#      fires MMU_SPOOLMAN SYNC=1 so Happy Hare picks up the binding
+#      immediately.
+#
+# Pull mode is required. Happy Hare reports its mode via printer.mmu
+# .spoolman_support — the middleware queries it and refuses to bind
+# in push or readonly mode (use MMU_GATE_MAP NEXT_SPOOLID=... there).
+# =============================================================
+
+# ---- MQTT Broker --------------------------------------------
+mqtt:
+  broker: "YOUR_HOME_ASSISTANT_IP"
+  port: 1883
+  username: "your_mqtt_username"
+  password: "your_mqtt_password"
+
+# ---- Spoolman URL (required for Happy Hare integration) -----
+spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
+
+# ---- Moonraker URL ------------------------------------------
+moonraker_url: "http://YOUR_KLIPPER_IP"
+
+# ---- Low Spool Threshold ------------------------------------
+low_spool_threshold: 100
+
+# ---- Happy Hare integration ---------------------------------
+#
+# Prerequisite: declare these extra fields in Spoolman before the first bind:
+#   Settings → Extra Fields → Spool → Add
+#     - key: mmu_gate       type: integer
+#     - key: printer_name   type: text
+# Without these declared, the PATCH will fail with HTTP 400 "Unknown extra
+# field X." (the error body is logged so you can see which field is missing).
+happy_hare:
+  enabled: true
+  # Written to each spool's extra.printer_name in Spoolman. Happy Hare uses
+  # this to identify which spools belong to this printer when syncing from
+  # Spoolman. Typically matches the "Printer Name" set in Happy Hare's
+  # mmu_parameters.cfg, but the middleware does not enforce that — anything
+  # consistent with how you've configured Happy Hare will work.
+  printer_name: "YOUR_PRINTER_NAME"
+
+# ---- Scanners ------------------------------------------------
+# One shared scanner, used to bind any spool to whichever gate the user
+# has currently selected. No `lane` or `toolhead` field — happy_hare_stage
+# is a shared (untargeted) action.
+scanners:
+  "YOUR_DEVICE_ID":
+    action: "happy_hare_stage"
+
+scanner_topic_prefix: "spoolsense"

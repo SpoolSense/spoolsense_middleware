@@ -121,6 +121,19 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     action = scanner_cfg["action"]
     target = _get_scanner_target(scanner_cfg)
 
+    # Happy Hare — bind to currently-selected MMU gate immediately,
+    # no cache, no lock.
+    if action == "happy_hare_stage":
+        from happy_hare import bind_spool_to_current_gate
+        bind_spool_to_current_gate(spool_id)
+        # Still drive low-spool LED feedback on the scanner so users loading
+        # multiple spools into MMU gates see when one is nearly empty.
+        if device_id and remaining is not None:
+            _check_low_spool(device_id, remaining)
+        if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
+            logger.warning(f"Low spool: {name} ({remaining:.1f}g) on {target_id}")
+        return
+
     # Shared scanners — cache for later assignment, don't activate yet
     if action in ("toolhead_stage", "afc_stage"):
         with app_state.state_lock:

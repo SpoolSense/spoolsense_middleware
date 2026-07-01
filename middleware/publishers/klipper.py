@@ -264,6 +264,12 @@ class KlipperPublisher(Publisher):
             logger.info(f"[toolhead_stage] Staged spool {event.spool_id} for next tool pickup")
             return True
 
+        elif action == Action.HAPPY_HARE_STAGE:
+            # Shared scanner — actual binding is handled by happy_hare.py
+            # (Spoolman PATCH + MMU_SPOOLMAN SYNC=1). Nothing for the
+            # generic Klipper publisher to do at scan time.
+            return True
+
         else:
             # Forward-compatible: unknown actions are a no-op success so future
             # action types added in new PRs don't break existing publishers.
