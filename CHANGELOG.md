@@ -4,6 +4,25 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.7.3] - 2026-05-10
+
+### Added
+
+- **Happy Hare MMU integration (pull mode)** — new `happy_hare_stage`
+  scanner action for shared scanners used with Happy Hare-managed MMUs
+  (ERCF, etc). Workflow: user selects an MMU gate via
+  `MMU_SELECT_GATE GATE=N`, then scans a tag. The middleware reads the
+  selected gate from Moonraker, PATCHes the spool's `extra.mmu_gate` and
+  `extra.printer_name` in Spoolman, then fires `MMU_SPOOLMAN SYNC=1` so
+  Happy Hare picks up the binding immediately. Pull mode is auto-detected
+  via `printer.mmu.spoolman_support` — no config knob. Config example at
+  `middleware/config.example.happy_hare.yaml`.
+- **`SpoolmanClient.update_spool_extras()`** — narrow PATCH helper for
+  writing declared extra fields on a spool. Used only by the Happy Hare
+  integration. Values are JSON-encoded per Spoolman's on-disk format.
+
+---
+
 ## [1.7.2] - 2026-05-02
 
 ### Fixed
