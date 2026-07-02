@@ -11,7 +11,6 @@ import os
 import threading
 
 import paho.mqtt.client as mqtt
-from watchdog.observers import Observer
 
 from typing import TYPE_CHECKING
 
@@ -37,7 +36,6 @@ except ImportError:
 cfg: dict = {}
 spoolman_client: SpoolmanClient | None = None
 mqtt_client: mqtt.Client | None = None
-watcher: Observer | None = None
 afc_status_sync: AfcStatusSync | None = None
 toolchanger_status_sync: ToolchangerStatusSync | None = None
 toolhead_status_sync: ToolheadStatusSync | None = None

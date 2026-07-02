@@ -37,7 +37,7 @@ middleware/
 ├── toolhead_status.py         # Toolhead spool eject detection
 ├── filament_usage.py          # UPDATE_TAG macro — filament deduction tracking
 ├── moonraker_ws.py            # Moonraker websocket — real-time AFC and macro events
-├── var_watcher.py             # Klipper save_variables file watcher (toolhead modes)
+├── klipper_vars.py            # Klipper save_variables sync via Moonraker websocket (toolhead modes)
 │
 ├── spoolman/
 │   └── client.py              # SpoolmanClient — read-only spool lookup, UID cache, tag enrichment
@@ -88,8 +88,7 @@ The middleware runs several background threads:
 - **ToolchangerStatusSync** — watches the ASSIGN_SPOOL Klipper macro for manual tool assignment.
 - **FilamentUsageSync** — watches the UPDATE_TAG Klipper macro for filament deduction after each print.
 - **ToolheadStatusSync** — polls Moonraker for spool eject detection on toolhead macros.
-- **MoonrakerWebsocket** — single websocket connection to Moonraker for real-time AFC stepper and macro variable updates.
-- **VarWatcher** — watchdog file watcher on Klipper's `save_variables.cfg` for toolhead/single modes.
+- **MoonrakerWebsocket** — single websocket connection to Moonraker for real-time AFC stepper, macro variable, and save_variables updates.
 
 ## Config
 

@@ -1,7 +1,7 @@
 """
 mqtt_handler.py — MQTT callbacks and tag processing pipeline.
 
-on_connect()  — subscribes to scanner topics, syncs klipper vars, re-publishes AFC lock state
+on_connect()  — subscribes to scanner topics, re-publishes AFC lock state
 on_message()  — resolves scanner from topic, checks lock, routes to _handle_rich_tag()
 
 Tag processing splits into two paths:
@@ -20,7 +20,7 @@ import requests
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
-from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
+from config import has_afc_scanners
 from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
@@ -280,15 +280,8 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     if app_state.spoolman_client:
         app_state.spoolman_client.refresh()
 
-    # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
-    if has_toolhead_scanners(app_state.cfg):
-        app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
-        from var_watcher import start_klipper_watcher, sync_from_klipper_vars
-        sync_from_klipper_vars()
-        if app_state.watcher:
-            app_state.watcher.stop()
-            app_state.watcher.join(timeout=2)
-        app_state.watcher = start_klipper_watcher()
+    # Klipper variable sync happens over the Moonraker websocket
+    # (klipper_vars.py) — nothing to re-establish on MQTT reconnect.
 
     # Re-publish AFC lock state so scanners know current state after reconnect
     if has_afc_scanners(app_state.cfg):

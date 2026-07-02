@@ -11,7 +11,6 @@ import logging
 import os
 import sys
 
-import requests
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,6 @@ DEFAULTS: dict = {
     "spoolman_url": None,
     "moonraker_url": None,
     "low_spool_threshold": 100,
-    "klipper_var_path": None,
     "scanner_topic_prefix": "spoolsense",
     "scanners": {},
     "tag_writeback_enabled": False,
@@ -235,8 +233,6 @@ def load_config() -> dict:
     mqtt_cfg = {**DEFAULTS["mqtt"], **user_config.get("mqtt", {})}
     config = {**DEFAULTS, **user_config}
     config["mqtt"] = mqtt_cfg
-    if config.get("klipper_var_path"):
-        config["klipper_var_path"] = os.path.expanduser(config["klipper_var_path"])
 
     # Validate required fields
     missing: list[str] = []
@@ -258,6 +254,14 @@ def load_config() -> dict:
         )
 
     config["moonraker_url"] = config["moonraker_url"].rstrip("/")
+
+    # klipper_var_path is obsolete — variables sync via the Moonraker
+    # websocket now (#85). Accept-and-ignore so existing configs don't break.
+    if config.get("klipper_var_path"):
+        logger.warning(
+            "klipper_var_path is deprecated and ignored — Klipper variables "
+            "now sync via the Moonraker websocket. Remove it from config.yaml."
+        )
 
     # Migrate legacy config if needed
     config = _migrate_legacy_config(config)
@@ -348,47 +352,3 @@ def _validate_happy_hare(config: dict) -> None:
         )
 
 
-def discover_klipper_var_path() -> str | None:
-    """
-    Queries Moonraker to find exactly where Klipper is saving its variables.
-    This is better than hardcoding it, because users put save_variables.cfg in different places.
-    """
-    import app_state
-
-    if app_state.cfg.get("klipper_var_path"):
-        return app_state.cfg["klipper_var_path"]
-
-    try:
-        logger.info("Discovering Klipper save_variables path...")
-        response = requests.get(
-            f"{app_state.cfg['moonraker_url']}/printer/objects/query?configfile=settings",
-            timeout=5,
-        )
-        response.raise_for_status()
-        # Defensive walk through the nested response — guard each level with
-        # isinstance(dict) so an unexpected Moonraker response shape returns
-        # None cleanly instead of raising AttributeError. (CodeRabbit #79)
-        cur: object = response.json()
-        for key in ("result", "status", "configfile", "settings", "save_variables", "filename"):
-            if not isinstance(cur, dict):
-                cur = None
-                break
-            cur = cur.get(key)
-        filename = cur if isinstance(cur, str) else None
-
-        if not filename:
-            logger.warning("No [save_variables] in Klipper config. Klipper sync disabled.")
-            return None
-
-        # Klipper may report the path as `~/...` (literal tilde), absolute, or
-        # bare-relative. Expand `~` first so the absolute-path branch is taken
-        # when applicable; otherwise fall back to the default config dir.
-        filename = os.path.expanduser(filename)
-        if not filename.startswith("/"):
-            filename = os.path.join(os.path.expanduser("~/printer_data/config"), filename)
-
-        logger.info(f"Discovered Klipper variables file: {filename}")
-        return filename
-    except (requests.RequestException, ValueError):
-        logger.exception("Failed to discover Klipper variables path")
-        return None

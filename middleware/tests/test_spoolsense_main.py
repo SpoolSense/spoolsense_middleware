@@ -24,11 +24,7 @@ sys.modules.setdefault("paho.mqtt.client", MagicMock())
 sys.modules.setdefault("watchdog", MagicMock())
 sys.modules.setdefault("watchdog.observers", MagicMock())
 
-# FileSystemEventHandler needs a real base so var_watcher.KlipperVarHandler
-# is importable as a real class (same trick as test_var_watcher.py)
-_watchdog_events_mock = MagicMock()
-_watchdog_events_mock.FileSystemEventHandler = object
-sys.modules["watchdog.events"] = _watchdog_events_mock
+sys.modules.setdefault("watchdog.events", MagicMock())
 
 # spoolsense.py configures file logging at import time — redirect to avoid
 # creating ~/SpoolSense/middleware/spoolsense.log during tests
