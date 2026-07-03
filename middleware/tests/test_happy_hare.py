@@ -60,8 +60,8 @@ class TestBindHappyPath(unittest.TestCase):
         _reset()
 
     def test_bind_patches_spoolman_with_gate_and_printer_name(self):
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare._send_gcode"):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode"):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is True
         app_state.spoolman_client.update_spool_extras.assert_called_once_with(
@@ -69,16 +69,16 @@ class TestBindHappyPath(unittest.TestCase):
         )
 
     def test_bind_fires_mmu_spoolman_sync(self):
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare._send_gcode") as mock_gcode:
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode") as mock_gcode:
             bind_spool_to_current_gate(spool_id=42)
         mock_gcode.assert_called_once_with("http://moonraker:7125", "MMU_SPOOLMAN SYNC=1")
 
     def test_bind_sync_failure_does_not_fail_overall_bind(self):
         # The PATCH already landed; a missing sync just means Happy Hare
         # picks it up on the next periodic pull. Still report success.
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare._send_gcode", side_effect=Exception("boom")):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode", side_effect=Exception("boom")):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is True
 
@@ -100,34 +100,34 @@ class TestBindGuards(unittest.TestCase):
 
     def test_skipped_when_printer_name_empty(self):
         _reset(printer_name="")
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
         self._assert_no_patch_called()
 
     def test_skipped_when_moonraker_unreachable(self):
         import requests
-        with patch("happy_hare.requests.get", side_effect=requests.ConnectionError("refused")):
+        with patch("moonraker_client.requests.get", side_effect=requests.ConnectionError("refused")):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
         self._assert_no_patch_called()
 
     def test_refused_when_spoolman_support_is_push(self):
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="push"))):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
         self._assert_no_patch_called()
 
     def test_refused_when_spoolman_support_is_readonly(self):
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="readonly"))):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
         self._assert_no_patch_called()
 
     def test_skipped_when_mmu_disabled(self):
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(enabled=False))):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
@@ -135,14 +135,14 @@ class TestBindGuards(unittest.TestCase):
 
     def test_skipped_when_no_gate_selected(self):
         # Happy Hare reports gate=-1 (or any non-int) when no gate is selected
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(gate=-1))):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
         self._assert_no_patch_called()
 
     def test_skipped_when_gate_out_of_range(self):
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(gate=10, num_gates=8))):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
@@ -150,14 +150,14 @@ class TestBindGuards(unittest.TestCase):
 
     def test_skipped_when_spoolman_client_missing(self):
         app_state.spoolman_client = None
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
 
     def test_returns_false_when_spoolman_patch_fails(self):
         app_state.spoolman_client.update_spool_extras = MagicMock(return_value=False)
-        with patch("happy_hare.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare._send_gcode"):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode"):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
 
@@ -172,7 +172,7 @@ class TestModeCheckCaching(unittest.TestCase):
     def test_mismatch_logs_exactly_once(self):
         # Two calls while mode is wrong — error logged on the first, suppressed
         # on the second. (Spamming logs every scan would be noisy.)
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="push"))):
             with self.assertLogs("happy_hare", level="ERROR") as captured:
                 # Need at least one ERROR for assertLogs to pass; we'll count after.
@@ -183,9 +183,9 @@ class TestModeCheckCaching(unittest.TestCase):
 
     def test_pull_mode_cached_after_first_success(self):
         # First call confirms pull → cached. Second call should not re-query Moonraker.
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status())) as mock_get, \
-             patch("happy_hare._send_gcode"):
+             patch("happy_hare.send_gcode"):
             assert bind_spool_to_current_gate(spool_id=1) is True
             first_call_count = mock_get.call_count
             assert bind_spool_to_current_gate(spool_id=2) is True
@@ -198,15 +198,15 @@ class TestModeCheckCaching(unittest.TestCase):
         # If Happy Hare's mode is wrong, we must not cache it permanently —
         # the user could fix mmu_parameters.cfg and we should recover without
         # restarting the middleware.
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="push"))):
             bind_spool_to_current_gate(spool_id=1)
         assert happy_hare._cached_pull_mode is False
 
         # User flips Happy Hare to pull mode. Next bind should succeed.
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="pull"))), \
-             patch("happy_hare._send_gcode"):
+             patch("happy_hare.send_gcode"):
             assert bind_spool_to_current_gate(spool_id=1) is True
         assert happy_hare._cached_pull_mode is True
 
@@ -216,7 +216,7 @@ class TestModeCheckCaching(unittest.TestCase):
         # next call retries.
         bad_status = _mmu_status()
         del bad_status["spoolman_support"]
-        with patch("happy_hare.requests.get",
+        with patch("moonraker_client.requests.get",
                    return_value=_mock_response(bad_status)):
             assert bind_spool_to_current_gate(spool_id=1) is False
         assert happy_hare._cached_pull_mode is False

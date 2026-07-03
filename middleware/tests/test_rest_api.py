@@ -227,7 +227,7 @@ class TestAssignTool(unittest.TestCase):
         self.assertFalse(resp.json()["success"])
 
     def test_valid_assign_sends_gcode_and_returns_success(self):
-        with patch("rest_api._send_gcode") as mock_gcode:
+        with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post("T0")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["success"])
@@ -239,14 +239,14 @@ class TestAssignTool(unittest.TestCase):
 
     def test_toolhead_uppercased(self):
         # Mobile clients may send lowercase toolhead names
-        with patch("rest_api._send_gcode") as mock_gcode:
+        with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post("t0")
         self.assertEqual(resp.status_code, 200)
         call_args = mock_gcode.call_args[0]
         self.assertIn("T0", call_args[1])
 
     def test_invalid_toolhead_returns_failure(self):
-        with patch("rest_api._send_gcode"):
+        with patch("rest_api.send_gcode"):
             resp = self._post("T9")
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["success"])
@@ -257,12 +257,12 @@ class TestAssignTool(unittest.TestCase):
         self.assertEqual(resp.status_code, 409)
 
     def test_moonraker_error_returns_502(self):
-        with patch("rest_api._send_gcode", side_effect=Exception("connection refused")):
+        with patch("rest_api.send_gcode", side_effect=Exception("connection refused")):
             resp = self._post("T0")
         self.assertEqual(resp.status_code, 502)
 
     def test_response_includes_spool_id(self):
-        with patch("rest_api._send_gcode"):
+        with patch("rest_api.send_gcode"):
             resp = self._post("T0")
         self.assertEqual(resp.json()["spool_id"], 42)
 

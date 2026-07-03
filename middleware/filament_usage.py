@@ -20,6 +20,7 @@ import requests
 
 import app_state
 from config import has_afc_scanners
+from moonraker_client import query_objects, send_gcode
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +108,7 @@ def _clear_pending() -> None:
         return
 
     try:
-        requests.post(
-            f"{moonraker}/printer/gcode/script",
-            json={"script": f"SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE=0"},
-            timeout=5,
-        ).raise_for_status()
+        send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE=0")
         logger.debug("UPDATE_TAG: cleared pending variable")
     except Exception:
         logger.exception("UPDATE_TAG: failed to clear pending variable")
@@ -277,31 +274,23 @@ def _fetch_tool_filament_used() -> dict[str, float] | None:
 
     # Query tool objects — e.g. ?tool%20T0&tool%20T1
     query_parts = "&".join(f"tool%20{t}" for t in tool_names)
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/objects/query?{query_parts}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        status = response.json().get("result", {}).get("status", {})
+    status = query_objects(moonraker, query_parts, context="UPDATE_TAG")
+    if status is None:
+        return None
 
-        result: dict[str, float] = {}
-        for tool_name in tool_names:
-            tool_data = status.get(f"tool {tool_name}", {})
-            filament = tool_data.get("filament_used")
-            if filament is None:
-                # Tool object doesn't have filament_used — mod not installed
-                return None
+    result: dict[str, float] = {}
+    for tool_name in tool_names:
+        tool_data = status.get(f"tool {tool_name}", {})
+        filament = tool_data.get("filament_used")
+        if filament is None:
+            # Tool object doesn't have filament_used — mod not installed
+            return None
+        try:
             result[tool_name] = float(filament)
+        except (TypeError, ValueError):
+            return None
 
-        return result if result else None
-
-    except requests.ConnectionError:
-        logger.debug("UPDATE_TAG: Moonraker not reachable for tool query")
-        return None
-    except Exception:
-        logger.exception("UPDATE_TAG: failed to fetch tool filament_used")
-        return None
+    return result if result else None
 
 
 def _mm_to_grams(mm: float, diameter_mm: float, density_g_cm3: float) -> float:
@@ -400,21 +389,11 @@ def _fetch_pending() -> int | None:
     if not moonraker:
         return None
 
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/objects/query?gcode_macro%20{MACRO_NAME}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        result = response.json()
-        macro_data = result.get("result", {}).get("status", {}).get(f"gcode_macro {MACRO_NAME}", {})
-        return macro_data.get(VARIABLE_NAME, 0)
-    except requests.ConnectionError:
-        logger.debug("UPDATE_TAG: Moonraker not reachable")
+    status = query_objects(moonraker, f"gcode_macro%20{MACRO_NAME}", context="UPDATE_TAG")
+    if status is None:
         return None
-    except Exception:
-        logger.exception("UPDATE_TAG: unexpected error fetching macro state")
-        return None
+    macro_data = status.get(f"gcode_macro {MACRO_NAME}", {})
+    return macro_data.get(VARIABLE_NAME, 0)
 
 
 class FilamentUsageSync:

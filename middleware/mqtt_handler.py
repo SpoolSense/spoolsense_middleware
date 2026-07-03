@@ -15,12 +15,12 @@ import logging
 from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
-import requests
 
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
 from config import has_afc_scanners
+import moonraker_client
 from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
@@ -295,26 +295,7 @@ def _is_printer_idle() -> bool:
     Returns False on any other state or on fetch failure — treat unknown as
     busy so we never auto-release a lock during a print.
     """
-    moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
-        return False
-    try:
-        response = requests.get(
-            f"{moonraker_url}/printer/objects/query?print_stats",
-            timeout=2,
-        )
-        response.raise_for_status()
-        state = (
-            response.json()
-            .get("result", {})
-            .get("status", {})
-            .get("print_stats", {})
-            .get("state", "")
-        )
-        return state == "standby"
-    except (requests.RequestException, ValueError):
-        logger.debug("Could not query Klipper print state; treating as busy")
-        return False
+    return moonraker_client.is_printer_idle(app_state.cfg.get("moonraker_url", ""))
 
 
 def _should_auto_release_lock(target: str, payload: dict) -> bool:

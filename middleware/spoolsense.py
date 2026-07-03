@@ -186,19 +186,15 @@ def _discover_afc_lanes() -> list[str]:
     if not moonraker_url:
         return []
 
-    try:
-        import requests as req
-        resp = req.get(f"{moonraker_url}/printer/objects/list", timeout=5)
-        if not resp.ok:
-            return []
-        objects = resp.json().get("result", {}).get("objects", [])
-        lanes = [o.replace("AFC_stepper ", "") for o in objects if o.startswith("AFC_stepper ")]
-        if lanes:
-            logger.info(f"Discovered AFC lanes: {lanes}")
-        return lanes
-    except Exception:
+    from moonraker_client import list_objects
+    objects = list_objects(moonraker_url)
+    if objects is None:
         logger.warning("Could not discover AFC lanes from Moonraker")
         return []
+    lanes = [o.replace("AFC_stepper ", "") for o in objects if o.startswith("AFC_stepper ")]
+    if lanes:
+        logger.info(f"Discovered AFC lanes: {lanes}")
+    return lanes
 
 
 def _setup_websocket(lane_names: list[str]) -> bool:

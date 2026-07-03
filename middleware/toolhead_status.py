@@ -18,9 +18,8 @@ import logging
 import threading
 import time
 
-import requests
-
 import app_state
+import moonraker_client
 from activation import publish_lock
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,9 @@ RETRY_BASE: float = 2.0
 RETRY_MAX: float = 30.0
 
 
-_FETCH_ERROR = object()  # sentinel: fetch failed (distinct from spool_id=None meaning "no spool")
+# Canonical sentinel lives in moonraker_client; re-exported here because
+# this module's tests and callers compare against it by identity.
+_FETCH_ERROR = moonraker_client.FETCH_ERROR
 
 
 def _fetch_active_spool_id() -> int | None | object:
@@ -42,43 +43,7 @@ def _fetch_active_spool_id() -> int | None | object:
         None: no active spool (ejected)
         _FETCH_ERROR: fetch failed (Moonraker unreachable, timeout, etc.)
     """
-    moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
-        return _FETCH_ERROR
-
-    try:
-        response = requests.get(
-            f"{moonraker_url}/server/spoolman/spool_id",
-            timeout=5,
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        # Moonraker wraps in {"result": {"spool_id": N}}
-        if isinstance(result, dict) and "result" in result:
-            result = result["result"]
-
-        spool_id = result.get("spool_id") if isinstance(result, dict) else None
-        # Moonraker returns 0 (not null) when spool is cleared/ejected
-        if spool_id is None or spool_id == 0:
-            return None
-        return int(spool_id)
-
-    except requests.ConnectionError:
-        logger.debug("Toolhead status: Moonraker not reachable")
-        return _FETCH_ERROR
-    except requests.Timeout:
-        logger.warning("Toolhead status: Moonraker request timed out")
-        return _FETCH_ERROR
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            logger.debug("Toolhead status: Spoolman integration not configured in Moonraker")
-        else:
-            logger.exception("Toolhead status: HTTP error")
-        return _FETCH_ERROR
-    except Exception:
-        logger.exception("Toolhead status: unexpected error")
-        return _FETCH_ERROR
+    return moonraker_client.get_active_spool_id(app_state.cfg.get("moonraker_url", ""))
 
 
 class ToolheadStatusSync:

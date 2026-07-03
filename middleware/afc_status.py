@@ -72,8 +72,8 @@ def _send_lane_data_delayed(lane_name: str, pending: dict, source: str) -> None:
         moonraker_url = app_state.cfg.get("moonraker_url", "")
         if moonraker_url:
             try:
-                from publishers.klipper import _send_gcode
-                _send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
+                from moonraker_client import send_gcode
+                send_gcode(moonraker_url, f"SET_SPOOL_ID LANE={lane_name} SPOOL_ID={spoolman_id}")
                 logger.info("AFC %s: sent SET_SPOOL_ID LANE=%s SPOOL_ID=%s", source, lane_name, spoolman_id)
             except Exception:
                 logger.exception("AFC %s: failed to send SET_SPOOL_ID for %s", source, lane_name)
