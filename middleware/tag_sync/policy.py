@@ -10,8 +10,11 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, TYPE_CHECKING
 import app_state
+
+if TYPE_CHECKING:
+    from state.models import ScanEvent, SpoolInfo
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +54,8 @@ def should_write_remaining(
 
 
 def build_write_plan(
-    scan: "ScanEvent",
-    spool_info: "SpoolInfo | None",
+    scan: ScanEvent,
+    spool_info: SpoolInfo | None,
     device_id: str | None,
 ) -> TagWritePlan | None:
     """
