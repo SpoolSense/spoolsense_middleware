@@ -37,6 +37,7 @@ middleware/
 ├── toolhead_status.py         # Toolhead spool eject detection
 ├── filament_usage.py          # UPDATE_TAG macro — filament deduction tracking
 ├── moonraker_ws.py            # Moonraker websocket — real-time AFC and macro events
+├── moonraker_client.py        # Shared Moonraker HTTP helpers — gcode, queries, spool_id, DB items
 ├── klipper_vars.py            # Klipper save_variables sync via Moonraker websocket (toolhead modes)
 │
 ├── spoolman/

@@ -22,11 +22,14 @@ from __future__ import annotations
 import logging
 import re
 
-import requests
-
+from moonraker_client import send_gcode, set_active_spool_id, set_database_item
 from publishers.base import Action, Publisher, SpoolEvent
 
 logger = logging.getLogger(__name__)
+
+# Compatibility alias — send_gcode lived here before moonraker_client.py
+# existed; several modules and forks import it under this name.
+_send_gcode = send_gcode
 
 
 def _validate_color_hex(color_hex: str) -> str | None:
@@ -57,20 +60,6 @@ def display_spoolcolor(color_hex: str) -> str | None:
     if safe == "000000":
         return _LED_BLACK_SUBSTITUTE
     return safe
-
-
-def _send_gcode(moonraker: str, script: str) -> None:
-    """
-    POST a single gcode script to Moonraker.
-
-    Raises on HTTP error or connection failure. Callers are responsible for
-    catching and handling exceptions.
-    """
-    requests.post(
-        f"{moonraker}/printer/gcode/script",
-        json={"script": script},
-        timeout=5,
-    ).raise_for_status()
 
 
 def _send_afc_lane_data(
@@ -187,11 +176,7 @@ def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
     }
 
     try:
-        requests.post(
-            f"{moonraker}/server/database/item",
-            json={"namespace": "lane_data", "key": event.target, "value": value},
-            timeout=5,
-        ).raise_for_status()
+        set_database_item(moonraker, "lane_data", event.target, value)
         logger.info(f"[toolhead] Published lane_data for {event.target}: {material} {color}")
     except Exception:
         logger.exception(f"[toolhead] Failed to publish lane_data for {event.target}")
@@ -298,11 +283,7 @@ class KlipperPublisher(Publisher):
             return False
 
         if not event.tag_only and event.spool_id is not None:
-            requests.post(
-                f"{moonraker}/printer/gcode/script",
-                json={"script": f"SET_SPOOL_ID LANE={event.target} SPOOL_ID={event.spool_id}"},
-                timeout=5,
-            ).raise_for_status()
+            send_gcode(moonraker, f"SET_SPOOL_ID LANE={event.target} SPOOL_ID={event.spool_id}")
             logger.info(f"[afc_lane] Set spool {event.spool_id} on {event.target} via AFC")
         else:
             _send_afc_lane_data(
@@ -327,17 +308,12 @@ class KlipperPublisher(Publisher):
             return False
 
         if not event.tag_only and event.spool_id is not None:
-            requests.post(
-                f"{moonraker}/server/spoolman/spool_id",
-                json={"spool_id": event.spool_id},
-                timeout=5,
-            ).raise_for_status()
+            set_active_spool_id(moonraker, event.spool_id)
             try:
-                requests.post(
-                    f"{moonraker}/printer/gcode/script",
-                    json={"script": f"SAVE_VARIABLE VARIABLE={event.target.lower()}_spool_id VALUE={event.spool_id}"},
-                    timeout=5,
-                ).raise_for_status()
+                send_gcode(
+                    moonraker,
+                    f"SAVE_VARIABLE VARIABLE={event.target.lower()}_spool_id VALUE={event.spool_id}",
+                )
             except Exception:
                 # Rollback: revert Spoolman to prevent orphaned spool_id (#15)
                 logger.error(
@@ -345,11 +321,7 @@ class KlipperPublisher(Publisher):
                     event.spool_id, event.target,
                 )
                 try:
-                    requests.post(
-                        f"{moonraker}/server/spoolman/spool_id",
-                        json={"spool_id": 0},
-                        timeout=5,
-                    ).raise_for_status()
+                    set_active_spool_id(moonraker, 0)
                 except Exception:
                     logger.exception("[toolhead] Rollback also failed — Spoolman may have stale spool_id")
                 raise

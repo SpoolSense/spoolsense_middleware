@@ -196,23 +196,23 @@ class TestIsPrinterIdle(unittest.TestCase):
         return resp
 
     def test_returns_true_when_standby(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("standby")
             assert _is_printer_idle() is True
 
     def test_returns_false_when_printing(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("printing")
             assert _is_printer_idle() is False
 
     def test_returns_false_when_paused(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("paused")
             assert _is_printer_idle() is False
 
     def test_returns_false_on_network_error(self):
         import requests
-        with patch("mqtt_handler.requests.get", side_effect=requests.ConnectionError("boom")):
+        with patch("moonraker_client.requests.get", side_effect=requests.ConnectionError("boom")):
             assert _is_printer_idle() is False
 
     def test_returns_false_when_no_moonraker_url(self):

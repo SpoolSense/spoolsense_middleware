@@ -21,10 +21,8 @@ from __future__ import annotations
 import logging
 import threading
 
-import requests
-
 import app_state
-from publishers.klipper import _send_gcode
+from moonraker_client import query_objects, send_gcode
 
 logger = logging.getLogger(__name__)
 
@@ -43,23 +41,10 @@ _logged_mismatch: bool = False
 def _fetch_mmu_status() -> dict | None:
     """GET printer.mmu from Moonraker. Returns the object dict, or None on failure."""
     moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
+    status = query_objects(moonraker_url, "mmu", context="Happy Hare")
+    if status is None:
         return None
-    try:
-        response = requests.get(
-            f"{moonraker_url}/printer/objects/query?mmu",
-            timeout=5,
-        )
-        response.raise_for_status()
-        return (
-            response.json()
-            .get("result", {})
-            .get("status", {})
-            .get("mmu")
-        )
-    except (requests.RequestException, ValueError):
-        logger.exception("Happy Hare: failed to query printer.mmu")
-        return None
+    return status.get("mmu")
 
 
 def _check_mode(mmu_status: dict) -> bool:
@@ -166,7 +151,7 @@ def bind_spool_to_current_gate(spool_id: int) -> bool:
     moonraker_url = app_state.cfg.get("moonraker_url", "")
     if moonraker_url:
         try:
-            _send_gcode(moonraker_url, "MMU_SPOOLMAN SYNC=1")
+            send_gcode(moonraker_url, "MMU_SPOOLMAN SYNC=1")
         except Exception:
             logger.exception("Happy Hare: bind succeeded but MMU_SPOOLMAN SYNC=1 failed; "
                              "Happy Hare will pick up the binding on its next periodic pull")
