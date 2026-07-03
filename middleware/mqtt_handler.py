@@ -76,12 +76,14 @@ def _record_spool_tracking(
     if not target or not uid or remaining is None:
         return
     with app_state.state_lock:
-        app_state.active_spool_weights[target]   = remaining
-        app_state.active_spool_uids[target]      = uid
-        app_state.active_spool_devices[target]    = device_id or ""
-        app_state.active_spool_diameters[target]  = diameter_mm or 1.75
-        app_state.active_spool_densities[target]  = density or 1.24
-        app_state.active_spool_formats[target]    = tag_format or "unknown"
+        app_state.active_spool_tracking[target] = app_state.ActiveSpool(
+            uid=uid,
+            device_id=device_id or "",
+            weight_g=remaining,
+            diameter_mm=diameter_mm or 1.75,
+            density=density or 1.24,
+            tag_format=tag_format or "unknown",
+        )
 
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same
@@ -317,7 +319,8 @@ def _should_auto_release_lock(target: str, payload: dict) -> bool:
     # _is_printer_idle() — avoids a race window where the active spool
     # could change while we're querying Klipper.
     with app_state.state_lock:
-        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+        rec = app_state.active_spool_tracking.get(target)
+        active_uid = rec.uid.lower() if rec else ""
 
     if active_uid and incoming_uid == active_uid:
         return False
@@ -348,7 +351,8 @@ def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> 
                 active_uid = ""
                 with app_state.state_lock:
                     if app_state.lane_locks.get(target):
-                        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+                        rec = app_state.active_spool_tracking.get(target)
+                        active_uid = rec.uid.lower() if rec else ""
                         if not active_uid or active_uid != incoming_uid:
                             app_state.lane_locks[target] = False
                             released = True

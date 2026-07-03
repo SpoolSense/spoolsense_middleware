@@ -56,7 +56,7 @@ def _reset_app_state(prefix="spoolsense", scanners=None):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.active_spool_uids = {}
+    app_state.active_spool_tracking = {}
     app_state.pending_spool = None
     app_state.state_lock = threading.Lock()
 
@@ -225,7 +225,7 @@ class TestShouldAutoReleaseLock(unittest.TestCase):
 
     def setUp(self):
         _reset_app_state()
-        app_state.active_spool_uids["T0"] = "abc123"
+        app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(uid="abc123")
 
     def test_same_uid_does_not_auto_release(self):
         # Same tag scanned twice — no swap intent, lock stays
@@ -254,7 +254,7 @@ class TestShouldAutoReleaseLock(unittest.TestCase):
         # Edge: lock is set but tracking is empty (e.g. lock set without
         # _record_spool_tracking running). Different incoming UID + idle
         # printer should still release.
-        app_state.active_spool_uids = {}
+        app_state.active_spool_tracking = {}
         with patch("mqtt_handler._is_printer_idle", return_value=True):
             assert _should_auto_release_lock("T0", {"uid": "anything"}) is True
 
@@ -268,7 +268,7 @@ class TestOnMessageLockBehavior(unittest.TestCase):
         )
         app_state.DISPATCHER_AVAILABLE = True
         app_state.lane_locks["T0"] = True
-        app_state.active_spool_uids["T0"] = "abc123"
+        app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(uid="abc123")
 
     def _msg(self, uid: str | None) -> MagicMock:
         m = MagicMock()
