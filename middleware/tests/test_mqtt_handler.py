@@ -18,7 +18,6 @@ sys.modules.setdefault("watchdog.events", MagicMock())
 
 # Stub optional heavy dependencies before importing mqtt_handler
 for mod in (
-    "var_watcher",
     "adapters",
     "adapters.dispatcher",
     "tag_sync",
@@ -171,12 +170,12 @@ class TestOnConnect(unittest.TestCase):
         )
         app_state.DISPATCHER_AVAILABLE = True
         app_state.spoolman_client = None
-        app_state.watcher = None
 
     def test_on_connect_toolhead_action_does_not_raise(self):
+        # Var sync now lives on the Moonraker websocket (#85) — on_connect
+        # only subscribes and re-publishes lock state.
         client = MagicMock()
-        with patch("mqtt_handler.discover_klipper_var_path", return_value="/tmp/x.cfg"):
-            on_connect(client, None, {}, 0)
+        on_connect(client, None, {}, 0)
         client.subscribe.assert_called_once_with("spoolsense/f08538/tag/state")
 
 

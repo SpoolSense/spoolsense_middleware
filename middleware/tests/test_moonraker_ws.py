@@ -185,6 +185,83 @@ class TestMoonrakerWebsocket(unittest.TestCase):
         for v in objects.values():
             self.assertIsNone(v)
 
+    def test_save_variables_subscribed_when_discovered_and_callback_set(self):
+        """save_variables joins the subscription only when Klipper has the
+        section AND a consumer registered the callback."""
+        self.ws.on_save_variables = lambda variables: None
+        self.ws._has_save_variables = True
+        self.assertIn("save_variables", self.ws._build_subscribe_objects())
+
+    def test_save_variables_not_subscribed_when_not_discovered(self):
+        # Klipper without [save_variables] — subscribing would error the request
+        self.ws.on_save_variables = lambda variables: None
+        self.ws._has_save_variables = False
+        self.assertNotIn("save_variables", self.ws._build_subscribe_objects())
+
+    def test_save_variables_not_subscribed_without_callback(self):
+        # No consumer (e.g. AFC-only config) — don't subscribe to noise
+        self.ws._has_save_variables = True
+        self.assertNotIn("save_variables", self.ws._build_subscribe_objects())
+
+    def test_objects_list_discovers_save_variables(self):
+        """printer.objects.list response records save_variables availability."""
+        mock_ws = MagicMock()
+        self.ws._list_id = 1
+        msg = json.dumps({
+            "id": 1,
+            "result": {"objects": ["toolhead", "save_variables"]}
+        })
+        self.ws._on_message(mock_ws, msg)
+        self.assertTrue(self.ws._has_save_variables)
+
+    def test_save_variables_callback_dispatched(self):
+        """save_variables delta dispatches the variables dict to the callback."""
+        received = []
+        self.ws.on_save_variables = lambda variables: received.append(variables)
+
+        msg = json.dumps({
+            "method": "notify_status_update",
+            "params": [{
+                "save_variables": {"variables": {"t0_spool_id": 131}}
+            }, 12345.0]
+        })
+        self.ws._on_message(None, msg)
+
+        self.assertEqual(received, [{"t0_spool_id": 131}])
+
+    def test_klippy_ready_resubscribe_includes_save_variables(self):
+        """After a Klipper restart, the re-discovery round-trip must re-include
+        save_variables in the new subscription (callback persists across it)."""
+        sent = []
+        mock_ws = MagicMock()
+        mock_ws.send = lambda msg: sent.append(json.loads(msg))
+        self.ws.on_save_variables = lambda variables: None
+
+        # Klipper restarts → middleware re-requests the objects list
+        self.ws._on_message(mock_ws, json.dumps({"method": "notify_klippy_ready"}))
+        self.assertEqual(sent[0]["method"], "printer.objects.list")
+
+        # Objects list arrives (with save_variables) → resubscribe fires
+        self.ws._on_message(mock_ws, json.dumps({
+            "id": self.ws._list_id,
+            "result": {"objects": ["toolhead", "save_variables"]}
+        }))
+        self.assertEqual(sent[1]["method"], "printer.objects.subscribe")
+        self.assertIn("save_variables", sent[1]["params"]["objects"])
+
+    def test_save_variables_non_dict_variables_ignored(self):
+        """Malformed variables payload does not reach the callback."""
+        received = []
+        self.ws.on_save_variables = lambda variables: received.append(variables)
+
+        msg = json.dumps({
+            "method": "notify_status_update",
+            "params": [{"save_variables": {"variables": "garbage"}}, 12345.0]
+        })
+        self.ws._on_message(None, msg)
+
+        self.assertEqual(received, [])
+
 
 if __name__ == "__main__":
     unittest.main()
