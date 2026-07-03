@@ -45,8 +45,13 @@ class SpoolmanClient:
             self.cache = new_cache
             self._last_refresh = time.time()
             logger.info(f"Spoolman cache refreshed: {len(self.cache)} spools indexed.")
+            # Imported lazily: this client stays free of app_state coupling (#41)
+            from health import set_health
+            set_health("spoolman", "connected")
         except Exception as e:
             logger.error(f"Failed to fetch Spoolman cache: {e}")
+            from health import set_health
+            set_health("spoolman", "unreachable")
 
     def refresh(self) -> None:
         """Public wrapper around _fetch_all_spools for explicit cache priming."""
