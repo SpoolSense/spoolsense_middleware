@@ -80,8 +80,14 @@ def list_objects(moonraker: str, timeout: float = DEFAULT_TIMEOUT) -> list | Non
         response.raise_for_status()
         objects = response.json().get("result", {}).get("objects", [])
         return objects if isinstance(objects, list) else None
+    except requests.ConnectionError:
+        logger.debug("moonraker: not reachable listing objects")
+        return None
+    except requests.Timeout:
+        logger.warning("moonraker: objects/list request timed out")
+        return None
     except Exception:
-        logger.debug("moonraker: objects/list failed", exc_info=True)
+        logger.exception("moonraker: unexpected error listing objects")
         return None
 
 

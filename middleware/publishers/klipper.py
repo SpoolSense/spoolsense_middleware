@@ -316,7 +316,7 @@ class KlipperPublisher(Publisher):
                 )
             except Exception:
                 # Rollback: revert Spoolman to prevent orphaned spool_id (#15)
-                logger.error(
+                logger.exception(
                     "[toolhead] SAVE_VARIABLE failed for spool %s on %s — rolling back Spoolman",
                     event.spool_id, event.target,
                 )
