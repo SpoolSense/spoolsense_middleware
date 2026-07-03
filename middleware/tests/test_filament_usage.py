@@ -38,17 +38,21 @@ def _reset_app_state():
         "low_spool_threshold": 100,
     }
     app_state.state_lock = threading.Lock()
-    app_state.active_spool_weights = {}
-    app_state.active_spool_uids = {}
-    app_state.active_spool_devices = {}
-    app_state.active_spool_diameters = {}
-    app_state.active_spool_densities = {}
-    app_state.active_spool_formats = {}
+    app_state.active_spool_tracking = {}
     app_state.low_spool_latched = {}
     app_state.mqtt_client = MagicMock()
     mock_result = MagicMock()
     mock_result.rc = 0
     app_state.mqtt_client.publish.return_value = mock_result
+
+
+def _track(target, uid, device="", weight=None, diameter=1.75, density=1.24,
+           fmt="unknown"):
+    """Install an ActiveSpool tracking record for a target."""
+    app_state.active_spool_tracking[target] = app_state.ActiveSpool(
+        uid=uid, device_id=device, weight_g=weight,
+        diameter_mm=diameter, density=density, tag_format=fmt,
+    )
 
 
 class TestFetchLastJobWeights(unittest.TestCase):
@@ -186,11 +190,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
     @patch("filament_usage._fetch_tool_filament_used")
     def test_sends_deduction_from_tool_objects(self, mock_fetch_tool, mock_clear):
         mock_fetch_tool.return_value = {"T0": 5000.0}  # 5000mm
-        app_state.active_spool_uids["T0"] = "abc123"
-        app_state.active_spool_devices["T0"] = "f3d360"
-        app_state.active_spool_diameters["T0"] = 1.75
-        app_state.active_spool_densities["T0"] = 1.24
-        app_state.active_spool_formats["T0"] = "openprinttag"
+        _track("T0", uid="abc123", device="f3d360", fmt="openprinttag")
 
         _handle_toolchanger()
 
@@ -202,16 +202,8 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
     @patch("filament_usage._fetch_tool_filament_used")
     def test_sends_per_tool_deductions_from_tool_objects(self, mock_fetch_tool, mock_clear):
         mock_fetch_tool.return_value = {"T0": 3000.0, "T2": 2000.0}
-        app_state.active_spool_uids["T0"] = "uid-aaa"
-        app_state.active_spool_devices["T0"] = "scanner1"
-        app_state.active_spool_diameters["T0"] = 1.75
-        app_state.active_spool_densities["T0"] = 1.24
-        app_state.active_spool_formats["T0"] = "openprinttag"
-        app_state.active_spool_uids["T2"] = "uid-bbb"
-        app_state.active_spool_devices["T2"] = "scanner1"
-        app_state.active_spool_diameters["T2"] = 1.75
-        app_state.active_spool_densities["T2"] = 1.24
-        app_state.active_spool_formats["T2"] = "openprinttag"
+        _track("T0", uid="uid-aaa", device="scanner1", fmt="openprinttag")
+        _track("T2", uid="uid-bbb", device="scanner1", fmt="openprinttag")
 
         _handle_toolchanger()
 
@@ -224,11 +216,8 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
     @patch("filament_usage._fetch_tool_filament_used")
     def test_uses_tag_diameter_and_density(self, mock_fetch_tool, mock_clear):
         mock_fetch_tool.return_value = {"T0": 1000.0}  # 1000mm
-        app_state.active_spool_uids["T0"] = "abc123"
-        app_state.active_spool_devices["T0"] = "f3d360"
-        app_state.active_spool_diameters["T0"] = 2.85
-        app_state.active_spool_densities["T0"] = 1.27
-        app_state.active_spool_formats["T0"] = "openprinttag"
+        _track("T0", uid="abc123", device="f3d360", diameter=2.85, density=1.27,
+               fmt="openprinttag")
 
         _handle_toolchanger()
 
@@ -243,8 +232,7 @@ class TestHandleToolchangerPrimary(unittest.TestCase):
     @patch("filament_usage._fetch_tool_filament_used")
     def test_skips_tools_with_zero_usage(self, mock_fetch_tool, mock_clear):
         mock_fetch_tool.return_value = {"T0": 0.0, "T1": 0.0}
-        app_state.active_spool_uids["T0"] = "uid-aaa"
-        app_state.active_spool_devices["T0"] = "scanner1"
+        _track("T0", uid="uid-aaa", device="scanner1")
 
         _handle_toolchanger()
 
@@ -263,9 +251,7 @@ class TestHandleToolchangerFallback(unittest.TestCase):
     def test_falls_back_to_slicer_weights(self, mock_fetch_tool, mock_fetch_job, mock_clear):
         mock_fetch_tool.return_value = None  # mod not installed
         mock_fetch_job.return_value = [25.5]
-        app_state.active_spool_uids["T0"] = "abc123"
-        app_state.active_spool_devices["T0"] = "f3d360"
-        app_state.active_spool_formats["T0"] = "openprinttag"
+        _track("T0", uid="abc123", device="f3d360", fmt="openprinttag")
 
         _handle_toolchanger()
 
@@ -279,12 +265,8 @@ class TestHandleToolchangerFallback(unittest.TestCase):
     def test_fallback_per_tool_deductions(self, mock_fetch_tool, mock_fetch_job, mock_clear):
         mock_fetch_tool.return_value = None
         mock_fetch_job.return_value = [50.0, 0.0, 30.0, 0.0]
-        app_state.active_spool_uids["T0"] = "uid-aaa"
-        app_state.active_spool_devices["T0"] = "scanner1"
-        app_state.active_spool_formats["T0"] = "openprinttag"
-        app_state.active_spool_uids["T2"] = "uid-bbb"
-        app_state.active_spool_devices["T2"] = "scanner1"
-        app_state.active_spool_formats["T2"] = "openprinttag"
+        _track("T0", uid="uid-aaa", device="scanner1", fmt="openprinttag")
+        _track("T2", uid="uid-bbb", device="scanner1", fmt="openprinttag")
 
         _handle_toolchanger()
 
@@ -336,10 +318,8 @@ class TestHandleAfc(unittest.TestCase):
     @patch("filament_usage._fetch_afc_lane_weights")
     def test_sends_deduction_from_weight_delta(self, mock_fetch, mock_clear):
         mock_fetch.return_value = {"lane1": 550.0, "lane2": 720.0}
-        app_state.active_spool_weights = {"lane1": 800.0, "lane2": 750.0}
-        app_state.active_spool_uids = {"lane1": "uid-aaa", "lane2": "uid-bbb"}
-        app_state.active_spool_devices = {"lane1": "scanner1", "lane2": "scanner1"}
-        app_state.active_spool_formats = {"lane1": "openprinttag", "lane2": "openprinttag"}
+        _track("lane1", uid="uid-aaa", device="scanner1", weight=800.0, fmt="openprinttag")
+        _track("lane2", uid="uid-bbb", device="scanner1", weight=750.0, fmt="openprinttag")
 
         _handle_afc()
 
@@ -352,22 +332,17 @@ class TestHandleAfc(unittest.TestCase):
     @patch("filament_usage._fetch_afc_lane_weights")
     def test_updates_initial_weight_after_deduction(self, mock_fetch, mock_clear):
         mock_fetch.return_value = {"lane1": 550.0}
-        app_state.active_spool_weights = {"lane1": 800.0}
-        app_state.active_spool_uids = {"lane1": "uid-aaa"}
-        app_state.active_spool_devices = {"lane1": "scanner1"}
-        app_state.active_spool_formats = {"lane1": "openprinttag"}
+        _track("lane1", uid="uid-aaa", device="scanner1", weight=800.0, fmt="openprinttag")
 
         _handle_afc()
 
-        self.assertEqual(app_state.active_spool_weights["lane1"], 550.0)
+        self.assertEqual(app_state.active_spool_tracking["lane1"].weight_g, 550.0)
 
     @patch("filament_usage._clear_pending")
     @patch("filament_usage._fetch_afc_lane_weights")
     def test_skips_lanes_with_no_usage(self, mock_fetch, mock_clear):
         mock_fetch.return_value = {"lane1": 800.0}  # same as initial
-        app_state.active_spool_weights = {"lane1": 800.0}
-        app_state.active_spool_uids = {"lane1": "uid-aaa"}
-        app_state.active_spool_devices = {"lane1": "scanner1"}
+        _track("lane1", uid="uid-aaa", device="scanner1", weight=800.0)
 
         _handle_afc()
 
@@ -377,8 +352,8 @@ class TestHandleAfc(unittest.TestCase):
     @patch("filament_usage._fetch_afc_lane_weights")
     def test_skips_lanes_without_initial_weight(self, mock_fetch, mock_clear):
         mock_fetch.return_value = {"lane1": 550.0}
-        # No initial weight recorded
-        app_state.active_spool_weights = {}
+        # No tracking record for the lane at all
+        app_state.active_spool_tracking = {}
 
         _handle_afc()
 
@@ -493,10 +468,7 @@ class TestHandleAfcLowSpoolIntegration(unittest.TestCase):
     ) -> None:
         # Initial weight 800g, deducts to 80g which is below threshold (100g)
         mock_fetch.return_value = {"lane1": 80.0}
-        app_state.active_spool_weights = {"lane1": 800.0}
-        app_state.active_spool_uids = {"lane1": "uid-aaa"}
-        app_state.active_spool_devices = {"lane1": "scanner1"}
-        app_state.active_spool_formats = {"lane1": "openprinttag"}
+        _track("lane1", uid="uid-aaa", device="scanner1", weight=800.0, fmt="openprinttag")
 
         _handle_afc()
 
@@ -513,10 +485,7 @@ class TestHandleAfcLowSpoolIntegration(unittest.TestCase):
     ) -> None:
         # Deducts to 500g, well above threshold
         mock_fetch.return_value = {"lane1": 500.0}
-        app_state.active_spool_weights = {"lane1": 800.0}
-        app_state.active_spool_uids = {"lane1": "uid-aaa"}
-        app_state.active_spool_devices = {"lane1": "scanner1"}
-        app_state.active_spool_formats = {"lane1": "openprinttag"}
+        _track("lane1", uid="uid-aaa", device="scanner1", weight=800.0, fmt="openprinttag")
 
         _handle_afc()
 

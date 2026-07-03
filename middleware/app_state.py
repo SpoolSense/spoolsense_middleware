@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+from dataclasses import dataclass
 
 import paho.mqtt.client as mqtt
 
@@ -73,21 +74,27 @@ pending_spool: dict | None = None
 WRITE_COOLDOWN_SECONDS: int = 10
 tag_write_timestamps: dict[str, float] = {}
 
-# Filament usage tracking — used by UPDATE_TAG to calculate deductions.
-# Records the initial tag weight, UID, scanner device_id, and filament
-# properties per target at scan time. Protected by state_lock.
-active_spool_weights: dict[str, float] = {}
-active_spool_uids: dict[str, str] = {}
-active_spool_devices: dict[str, str] = {}
+# Scan-time tracking for the spool active on each target (toolhead or lane).
+# One record per target — written atomically by _record_spool_tracking() so
+# the fields can never drift apart. Used by UPDATE_TAG deduction math and
+# the lock auto-release UID comparison. Protected by state_lock.
+@dataclass
+class ActiveSpool:
+    uid: str
+    device_id: str = ""              # "" = mobile-scanned, no scanner device
+    weight_g: float | None = None    # remaining at scan; re-baselined after each deduction
+    diameter_mm: float = 1.75
+    density: float = 1.24            # g/cm³
+    tag_format: str = "unknown"      # "openprinttag", "opentag3d", "uid_only", ...
+
+
+active_spool_tracking: dict[str, ActiveSpool] = {}
 
 # Low-spool LED state — tracks whether the low-spool retained MQTT command
 # has been sent to each scanner. Edge-triggered: we only publish on state
 # transitions to avoid flooding the broker. Keyed by device_id (not lane)
 # because the MQTT cmd topic is per-scanner.
 low_spool_latched: dict[str, bool] = {}
-active_spool_diameters: dict[str, float] = {}   # mm, default 1.75
-active_spool_densities: dict[str, float] = {}   # g/cm³, default 1.24
-active_spool_formats: dict[str, str] = {}       # tag format — "openprinttag", "tigertag", etc.
 
 # Pending deductions for mobile-scanned spools (no scanner to receive MQTT).
 # Maps UID → grams pending. Persisted to ~/SpoolSense/deductions.json.
