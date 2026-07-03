@@ -96,6 +96,16 @@ active_spool_tracking: dict[str, ActiveSpool] = {}
 # because the MQTT cmd topic is per-scanner.
 low_spool_latched: dict[str, bool] = {}
 
+# Per-service health for the MQTT status topic (#41). "unknown" until the
+# first check; updated via health.set_health() which publishes retained
+# snapshots on transitions. Protected by state_lock.
+service_health: dict[str, str] = {
+    "mqtt": "unknown",
+    "moonraker": "unknown",
+    "spoolman": "unknown",
+    "klipper": "unknown",
+}
+
 # Pending deductions for mobile-scanned spools (no scanner to receive MQTT).
 # Maps UID → grams pending. Persisted to ~/SpoolSense/deductions.json.
 # Protected by state_lock.

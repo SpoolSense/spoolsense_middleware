@@ -111,7 +111,10 @@ class ToolheadStatusSync:
                 consecutive_failures = 0
                 wait = POLL_INTERVAL
             else:
-                # Fetch failed — do NOT treat as eject, just backoff and retry
+                # Fetch failed — do NOT treat as eject, just backoff and retry.
+                # No health report here: _FETCH_ERROR includes 404 from
+                # no-Spoolman setups, which is not a Moonraker outage — the
+                # websocket open/close is the moonraker health source (#41).
                 consecutive_failures += 1
                 wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
                 if consecutive_failures == 1:

@@ -38,6 +38,7 @@ middleware/
 ├── filament_usage.py          # UPDATE_TAG macro — filament deduction tracking
 ├── moonraker_ws.py            # Moonraker websocket — real-time AFC and macro events
 ├── moonraker_client.py        # Shared Moonraker HTTP helpers — gcode, queries, spool_id, DB items
+├── health.py                  # Service health → retained MQTT status topic (edge-triggered)
 ├── klipper_vars.py            # Klipper save_variables sync via Moonraker websocket (toolhead modes)
 │
 ├── spoolman/

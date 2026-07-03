@@ -279,6 +279,13 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
 
     client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
+
+    # Health status (#41) — mark MQTT up and refresh the retained snapshot
+    # so subscribers see this session's state after a reconnect.
+    from health import set_health, publish_current
+    set_health("mqtt", "connected")
+    publish_current()
+
     if app_state.spoolman_client:
         app_state.spoolman_client.refresh()
 
