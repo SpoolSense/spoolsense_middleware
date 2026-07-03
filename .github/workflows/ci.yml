@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 = Raspberry Pi OS (Bullseye) floor; 3.12 = current
+        python-version: ["3.9", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: middleware/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r middleware/requirements-dev.txt
+
+      - name: Lint (syntax errors and undefined names only)
+        run: flake8 middleware/ --count --select=E9,F63,F7,F82 --show-source --exclude=middleware/docs
+
+      - name: Test
+        run: pytest middleware/tests/ -q

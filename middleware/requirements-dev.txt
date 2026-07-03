@@ -1,0 +1,5 @@
+# Development / CI dependencies — not needed on the printer host
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27          # fastapi TestClient transport (test_rest_api.py)
+flake8>=7.0

@@ -21,6 +21,7 @@ from unittest.mock import patch  # noqa: E402
 import app_state  # noqa: E402
 
 from config import (  # noqa: E402
+    _apply_scanner_defaults,
     _validate_scanners,
     _validate_happy_hare,
     _derive_toolheads,
@@ -51,10 +52,23 @@ class TestValidateScanners(unittest.TestCase):
         self._ok({"scanners": {"abc123": {"action": "toolhead", "toolhead": "T0"}}})
 
     def test_toolhead_defaults_to_t0(self):
-        # Single-toolhead users shouldn't need to specify toolhead: "T0" (#44)
+        # Single-toolhead users shouldn't need to specify toolhead: "T0" (#44).
+        # Defaulting runs in load_config() via _apply_scanner_defaults() before
+        # validation — mirror that order here.
         config = {"scanners": {"abc123": {"action": "toolhead"}}}
+        _apply_scanner_defaults(config)
         self._ok(config)
         self.assertEqual(config["scanners"]["abc123"]["toolhead"], "T0")
+
+    def test_explicit_toolhead_not_overwritten_by_default(self):
+        config = {"scanners": {"abc123": {"action": "toolhead", "toolhead": "T3"}}}
+        _apply_scanner_defaults(config)
+        self.assertEqual(config["scanners"]["abc123"]["toolhead"], "T3")
+
+    def test_defaults_do_not_touch_other_actions(self):
+        config = {"scanners": {"abc123": {"action": "afc_stage"}}}
+        _apply_scanner_defaults(config)
+        self.assertNotIn("toolhead", config["scanners"]["abc123"])
 
     def test_valid_toolhead_stage(self):
         self._ok({"scanners": {"abc123": {"action": "toolhead_stage"}}})

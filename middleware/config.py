@@ -119,6 +119,19 @@ def _validate_targeted_scanner(device_id: str, scanner_cfg: dict, action: str,
         )
 
 
+def _apply_scanner_defaults(config: dict) -> None:
+    """
+    Apply per-scanner defaults before derivation and validation.
+
+    Runs in load_config() ahead of _derive_toolheads() and
+    _validate_scanners() — single-toolhead users shouldn't need to
+    specify `toolhead: "T0"` explicitly (#44).
+    """
+    for scanner_cfg in config.get("scanners", {}).values():
+        if isinstance(scanner_cfg, dict) and scanner_cfg.get("action") == "toolhead":
+            scanner_cfg.setdefault("toolhead", "T0")
+
+
 def _validate_scanners(config: dict) -> None:
     """Validates the scanners config entries. Exits on any invalid config."""
     scanners = config.get("scanners", {})
@@ -267,9 +280,7 @@ def load_config() -> dict:
     config = _migrate_legacy_config(config)
 
     # Apply scanner defaults before derivation and validation
-    for scanner_cfg in config.get("scanners", {}).values():
-        if isinstance(scanner_cfg, dict) and scanner_cfg.get("action") == "toolhead":
-            scanner_cfg.setdefault("toolhead", "T0")  # single-toolhead users don't need to specify
+    _apply_scanner_defaults(config)
 
     # Derive toolheads from scanner entries if not explicitly provided
     if not config.get("toolheads"):
