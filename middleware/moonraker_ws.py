@@ -1,11 +1,12 @@
 """
 moonraker_ws.py — Moonraker websocket connection for real-time printer object updates.
 
-Subscribes to AFC_stepper and gcode_macro ASSIGN_SPOOL objects.
-Dispatches state deltas to registered callbacks. Auto-reconnects
-with exponential backoff and full state re-sync.
+Subscribes to AFC_stepper, gcode_macro ASSIGN_SPOOL/UPDATE_TAG, and
+save_variables objects. Dispatches state deltas to registered callbacks.
+Auto-reconnects with exponential backoff and full state re-sync.
 
-Replaces HTTP polling in afc_status.py and toolchanger_status.py (#11).
+Replaces HTTP polling in afc_status.py and toolchanger_status.py (#11),
+and the save_variables file watcher (#85).
 """
 from __future__ import annotations
 
@@ -32,6 +33,17 @@ RETRY_BASE: float = 2.0
 RETRY_MAX: float = 30.0
 
 
+def _report_health(service: str, status: str) -> None:
+    """Best-effort health reporting (#41) — must never break websocket setup.
+
+    Imported lazily so this module stays importable without app_state."""
+    try:
+        from health import set_health
+        set_health(service, status)
+    except Exception:
+        logger.debug("health reporting unavailable", exc_info=True)
+
+
 class MoonrakerWebsocket:
     """
     Single websocket connection to Moonraker for real-time printer object updates.
@@ -56,10 +68,14 @@ class MoonrakerWebsocket:
         self._subscribe_id: int = -1   # ID for in-flight printer.objects.subscribe request
         self._ws = None
 
+        # Objects discovered via printer.objects.list on each connect
+        self._has_save_variables: bool = False
+
         # Callbacks — set by consumers
         self.on_lane_update: Callable[[str, dict], None] | None = None
         self.on_assign_spool: Callable[[str], None] | None = None
         self.on_update_tag: Callable[[int], None] | None = None
+        self.on_save_variables: Callable[[dict], None] | None = None
 
     def set_lane_names(self, names: list[str]) -> None:
         """Set AFC lane names to subscribe to (e.g. ['lane1', 'lane2'])."""
@@ -125,6 +141,7 @@ class MoonrakerWebsocket:
         """Connected — discover AFC lanes via printer.objects.list, then subscribe."""
         logger.info("MoonrakerWebsocket: connected")
         self._consecutive_failures = 0
+        _report_health("moonraker", "connected")
         self._discover_lanes(ws)
 
     def _discover_lanes(self, ws) -> None:
@@ -177,12 +194,19 @@ class MoonrakerWebsocket:
                 logger.info("MoonrakerWebsocket: discovered AFC lanes: %s", discovered)
             else:
                 logger.info("MoonrakerWebsocket: no AFC lanes found — subscribing without AFC_stepper objects")
+            # Only subscribe to save_variables if Klipper actually has the
+            # section — subscribing to a missing object errors the request.
+            self._has_save_variables = "save_variables" in objects
             self._send_subscribe(ws)
             return
 
         # Subscription response — contains full initial state
         if msg_id is not None and msg_id == self._subscribe_id:
             status = data.get("result", {}).get("status", {})
+            # Successful subscription implies Klipper is up — Moonraker
+            # rejects object subscriptions while klippy is down. Covers
+            # normal startup, where notify_klippy_ready never fires.
+            _report_health("klipper", "ready")
             self._dispatch_status(status)
             logger.info("MoonrakerWebsocket: initial state received")
             return
@@ -197,13 +221,17 @@ class MoonrakerWebsocket:
         # Klipper restarted — re-discover lanes and re-subscribe for fresh state
         elif method == "notify_klippy_ready":
             logger.info("MoonrakerWebsocket: Klipper ready — re-discovering AFC lanes")
+            _report_health("klipper", "ready")
             self._discover_lanes(ws)
 
         elif method == "notify_klippy_disconnected":
             logger.warning("MoonrakerWebsocket: Klipper disconnected — waiting for reconnect")
+            _report_health("klipper", "disconnected")
 
     def _on_close(self, ws, close_status_code, close_msg) -> None:
         logger.info(f"MoonrakerWebsocket: connection closed ({close_status_code})")
+        if not self._stop_event.is_set():
+            _report_health("moonraker", "unreachable")
 
     def _on_error(self, ws, error) -> None:
         if not self._stop_event.is_set():
@@ -216,6 +244,8 @@ class MoonrakerWebsocket:
             objects[f"AFC_stepper {lane}"] = None
         objects["gcode_macro ASSIGN_SPOOL"] = None
         objects["gcode_macro UPDATE_TAG"] = None
+        if self._has_save_variables and self.on_save_variables:
+            objects["save_variables"] = None
         return objects
 
     def _dispatch_status(self, status: dict) -> None:
@@ -232,3 +262,7 @@ class MoonrakerWebsocket:
             elif key == "gcode_macro UPDATE_TAG" and self.on_update_tag:
                 pending = value.get("pending", 0)
                 self.on_update_tag(pending)
+            elif key == "save_variables" and self.on_save_variables:
+                variables = value.get("variables")
+                if isinstance(variables, dict):
+                    self.on_save_variables(variables)

@@ -24,8 +24,8 @@ from pydantic import BaseModel
 import app_state
 from adapters.dispatcher import detect_and_parse
 from activation import _activate_from_scan
+from moonraker_client import send_gcode
 from mqtt_handler import _record_spool_tracking, _get_scanner_target
-from publishers.klipper import _send_gcode
 from config import CONFIG_PATH
 
 logger = logging.getLogger(__name__)
@@ -266,7 +266,7 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         return ApiResponse(success=False, message="Moonraker URL not configured")
 
     try:
-        _send_gcode(moonraker, f"ASSIGN_SPOOL TOOL={toolhead}")
+        send_gcode(moonraker, f"ASSIGN_SPOOL TOOL={toolhead}")
         logger.info(f"[mobile] Sent ASSIGN_SPOOL TOOL={toolhead}")
     except Exception as e:
         logger.exception("Failed to send ASSIGN_SPOOL gcode")

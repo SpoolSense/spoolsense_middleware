@@ -4,6 +4,32 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.0] - 2026-07-05
+
+### Added
+
+- **Middleware health status on MQTT** — per-service health (mqtt, moonraker,
+  spoolman, klipper) published to `spoolsense/middleware/status` (retained,
+  QoS 1, transitions only). Scanners and dashboards see current state
+  immediately on subscribe. (#41)
+- **CI pipeline** — pytest + flake8 on every PR and push to dev/master,
+  Python 3.9 and 3.12.
+
+### Changed
+
+- **Klipper variables sync moved to the Moonraker websocket** — the watchdog
+  file watcher on save_variables.cfg is gone. Remote middleware deployments
+  (e.g. on a Home Assistant box) now get manual-spool-change sync too.
+  Multi-digit toolheads (T10+) now map to the correct variable. The
+  `klipper_var_path` config option is deprecated and ignored (a warning is
+  logged if set); the `watchdog` dependency is removed. (#85)
+- **Moonraker HTTP transport consolidated** into `moonraker_client.py` — one
+  home for gcode, object queries, spool_id, and database items. (#88)
+- **Spool tracking state consolidated** — six parallel per-target dicts
+  replaced by a single ActiveSpool record written atomically. (#89)
+
+---
+
 ## [1.7.3] - 2026-05-10
 
 ### Added

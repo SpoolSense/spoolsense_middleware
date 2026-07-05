@@ -18,7 +18,6 @@ sys.modules.setdefault("watchdog.events", MagicMock())
 
 # Stub optional heavy dependencies before importing mqtt_handler
 for mod in (
-    "var_watcher",
     "adapters",
     "adapters.dispatcher",
     "tag_sync",
@@ -57,7 +56,7 @@ def _reset_app_state(prefix="spoolsense", scanners=None):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.active_spool_uids = {}
+    app_state.active_spool_tracking = {}
     app_state.pending_spool = None
     app_state.state_lock = threading.Lock()
 
@@ -171,12 +170,12 @@ class TestOnConnect(unittest.TestCase):
         )
         app_state.DISPATCHER_AVAILABLE = True
         app_state.spoolman_client = None
-        app_state.watcher = None
 
     def test_on_connect_toolhead_action_does_not_raise(self):
+        # Var sync now lives on the Moonraker websocket (#85) — on_connect
+        # only subscribes and re-publishes lock state.
         client = MagicMock()
-        with patch("mqtt_handler.discover_klipper_var_path", return_value="/tmp/x.cfg"):
-            on_connect(client, None, {}, 0)
+        on_connect(client, None, {}, 0)
         client.subscribe.assert_called_once_with("spoolsense/f08538/tag/state")
 
 
@@ -197,23 +196,23 @@ class TestIsPrinterIdle(unittest.TestCase):
         return resp
 
     def test_returns_true_when_standby(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("standby")
             assert _is_printer_idle() is True
 
     def test_returns_false_when_printing(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("printing")
             assert _is_printer_idle() is False
 
     def test_returns_false_when_paused(self):
-        with patch("mqtt_handler.requests.get") as mock_get:
+        with patch("moonraker_client.requests.get") as mock_get:
             mock_get.return_value = self._resp("paused")
             assert _is_printer_idle() is False
 
     def test_returns_false_on_network_error(self):
         import requests
-        with patch("mqtt_handler.requests.get", side_effect=requests.ConnectionError("boom")):
+        with patch("moonraker_client.requests.get", side_effect=requests.ConnectionError("boom")):
             assert _is_printer_idle() is False
 
     def test_returns_false_when_no_moonraker_url(self):
@@ -226,7 +225,7 @@ class TestShouldAutoReleaseLock(unittest.TestCase):
 
     def setUp(self):
         _reset_app_state()
-        app_state.active_spool_uids["T0"] = "abc123"
+        app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(uid="abc123")
 
     def test_same_uid_does_not_auto_release(self):
         # Same tag scanned twice — no swap intent, lock stays
@@ -255,7 +254,7 @@ class TestShouldAutoReleaseLock(unittest.TestCase):
         # Edge: lock is set but tracking is empty (e.g. lock set without
         # _record_spool_tracking running). Different incoming UID + idle
         # printer should still release.
-        app_state.active_spool_uids = {}
+        app_state.active_spool_tracking = {}
         with patch("mqtt_handler._is_printer_idle", return_value=True):
             assert _should_auto_release_lock("T0", {"uid": "anything"}) is True
 
@@ -269,7 +268,7 @@ class TestOnMessageLockBehavior(unittest.TestCase):
         )
         app_state.DISPATCHER_AVAILABLE = True
         app_state.lane_locks["T0"] = True
-        app_state.active_spool_uids["T0"] = "abc123"
+        app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(uid="abc123")
 
     def _msg(self, uid: str | None) -> MagicMock:
         m = MagicMock()

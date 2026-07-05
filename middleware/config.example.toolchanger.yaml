@@ -44,10 +44,5 @@ scanners:
 
 scanner_topic_prefix: "spoolsense"
 
-# ---- Klipper Variables File (optional) ----------------------
-# Path to Klipper's save_variables file.
-# If not set, the middleware auto-discovers it from Moonraker.
-# klipper_var_path: "~/printer_data/config/klipper-toolchanger/offset_save_file.cfg"
-
 # ---- Tag Writeback (optional) ------------------------------
 # tag_writeback_enabled: false

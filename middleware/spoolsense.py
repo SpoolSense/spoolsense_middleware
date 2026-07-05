@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.7.3"
+__version__ = "1.8.0"
 """
 SpoolSense NFC Middleware
 =========================
@@ -19,7 +19,8 @@ Each scanner is configured with an action that determines how scans are routed:
                 in Moonraker/Spoolman and saves to Klipper variables.
 
 AFC lane state is synced via Moonraker's /printer/afc/status API (polling).
-Klipper variables are synced via file watcher for toolhead scanners.
+Klipper variables are synced via the Moonraker websocket (save_variables
+object) for toolhead scanners.
 
 Configuration is loaded from ~/SpoolSense/config.yaml — see config.example.*.yaml.
 """
@@ -47,7 +48,7 @@ from publishers.klipper import KlipperPublisher
 from toolchanger_status import ToolchangerStatusSync
 from toolhead_status import ToolheadStatusSync
 from filament_usage import FilamentUsageSync
-from var_watcher import start_klipper_watcher
+from klipper_vars import on_ws_save_variables
 from moonraker_ws import WEBSOCKET_AVAILABLE, MoonrakerWebsocket
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -85,8 +86,6 @@ def on_shutdown(signum: int, frame: object) -> None:
         app_state.filament_usage_sync.stop()
     if app_state.toolhead_status_sync:
         app_state.toolhead_status_sync.stop()
-    if app_state.watcher:
-        app_state.watcher.stop()
 
     # Tell subscribers we're going offline, then release all scanner locks
     if app_state.mqtt_client:
@@ -119,7 +118,7 @@ def _print_config_summary() -> None:
     print(f"  mqtt.broker      : {app_state.cfg['mqtt']['broker']}")
     print(f"  afc_sync         : {'Moonraker API polling' if has_afc_scanners(app_state.cfg) else 'n/a'}")
     print(f"  macro_assign     : {'ASSIGN_SPOOL macro polling' if has_toolhead_stage_scanners(app_state.cfg) else 'n/a'}")
-    print(f"  klipper_sync     : {'file watcher' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
+    print(f"  klipper_sync     : {'Moonraker websocket' if has_toolhead_scanners(app_state.cfg) else 'n/a'}")
     print(f"  tag_writeback    : {'enabled' if app_state.cfg.get('tag_writeback_enabled') else 'disabled (dry-run)'}")
     print(f"  dispatcher       : {'available' if app_state.DISPATCHER_AVAILABLE else 'unavailable (required — will not start)'}")
     print(f"  mobile_api       : {'enabled on port ' + str(mobile.get('port', 5001)) if mobile.get('enabled') else 'disabled'}")
@@ -143,7 +142,7 @@ def _log_startup() -> None:
     if has_toolhead_stage_scanners(app_state.cfg):
         logger.info("Macro assign: ASSIGN_SPOOL macro polling")
     if has_toolhead_scanners(app_state.cfg):
-        logger.info("Klipper sync: file watcher")
+        logger.info("Klipper sync: Moonraker websocket (save_variables)")
     if has_toolhead_scanners(app_state.cfg) or has_toolhead_stage_scanners(app_state.cfg):
         logger.info("Toolhead status: Moonraker spool eject polling")
     if has_happy_hare_scanners(app_state.cfg):
@@ -187,19 +186,15 @@ def _discover_afc_lanes() -> list[str]:
     if not moonraker_url:
         return []
 
-    try:
-        import requests as req
-        resp = req.get(f"{moonraker_url}/printer/objects/list", timeout=5)
-        if not resp.ok:
-            return []
-        objects = resp.json().get("result", {}).get("objects", [])
-        lanes = [o.replace("AFC_stepper ", "") for o in objects if o.startswith("AFC_stepper ")]
-        if lanes:
-            logger.info(f"Discovered AFC lanes: {lanes}")
-        return lanes
-    except Exception:
+    from moonraker_client import list_objects
+    objects = list_objects(moonraker_url)
+    if objects is None:
         logger.warning("Could not discover AFC lanes from Moonraker")
         return []
+    lanes = [o.replace("AFC_stepper ", "") for o in objects if o.startswith("AFC_stepper ")]
+    if lanes:
+        logger.info(f"Discovered AFC lanes: {lanes}")
+    return lanes
 
 
 def _setup_websocket(lane_names: list[str]) -> bool:
@@ -248,6 +243,19 @@ def _start_sync_services(use_ws: bool) -> None:
     app_state.filament_usage_sync = FilamentUsageSync()
     if use_ws:
         app_state.moonraker_ws.on_update_tag = app_state.filament_usage_sync.on_ws_update_tag
+
+    # Klipper save_variables — syncs spool IDs on manual changes (SAVE_VARIABLE
+    # in Mainsail/console). Websocket-only; without the websocket, manual var
+    # changes are picked up by ToolheadStatusSync's eject polling alone.
+    if has_toolhead_scanners(cfg):
+        if use_ws:
+            app_state.moonraker_ws.on_save_variables = on_ws_save_variables
+        else:
+            logger.warning(
+                "Klipper sync: websocket unavailable — manual spool changes in "
+                "Klipper variables will not sync until the websocket connects."
+            )
+
     app_state.filament_usage_sync.start(use_ws=use_ws)
 
     # Wire all websocket callbacks before starting the connection
@@ -258,10 +266,6 @@ def _start_sync_services(use_ws: bool) -> None:
     if has_toolhead_scanners(cfg) or has_toolhead_stage_scanners(cfg):
         app_state.toolhead_status_sync = ToolheadStatusSync()
         app_state.toolhead_status_sync.start()
-
-    # Klipper variables file watcher — syncs spool IDs from save_variables.cfg on manual changes
-    if has_toolhead_scanners(cfg):
-        app_state.watcher = start_klipper_watcher()
 
 
 def _start_rest_api() -> None:

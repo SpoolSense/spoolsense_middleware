@@ -18,16 +18,14 @@ sys.modules.setdefault("watchdog.events", MagicMock())
 
 from unittest.mock import patch  # noqa: E402
 
-import requests  # noqa: E402
-
 import app_state  # noqa: E402
 
 from config import (  # noqa: E402
+    _apply_scanner_defaults,
     _validate_scanners,
     _validate_happy_hare,
     _derive_toolheads,
     _migrate_legacy_config,
-    discover_klipper_var_path,
     has_afc_scanners,
     has_happy_hare_scanners,
     has_toolhead_scanners,
@@ -54,10 +52,23 @@ class TestValidateScanners(unittest.TestCase):
         self._ok({"scanners": {"abc123": {"action": "toolhead", "toolhead": "T0"}}})
 
     def test_toolhead_defaults_to_t0(self):
-        # Single-toolhead users shouldn't need to specify toolhead: "T0" (#44)
+        # Single-toolhead users shouldn't need to specify toolhead: "T0" (#44).
+        # Defaulting runs in load_config() via _apply_scanner_defaults() before
+        # validation — mirror that order here.
         config = {"scanners": {"abc123": {"action": "toolhead"}}}
+        _apply_scanner_defaults(config)
         self._ok(config)
         self.assertEqual(config["scanners"]["abc123"]["toolhead"], "T0")
+
+    def test_explicit_toolhead_not_overwritten_by_default(self):
+        config = {"scanners": {"abc123": {"action": "toolhead", "toolhead": "T3"}}}
+        _apply_scanner_defaults(config)
+        self.assertEqual(config["scanners"]["abc123"]["toolhead"], "T3")
+
+    def test_defaults_do_not_touch_other_actions(self):
+        config = {"scanners": {"abc123": {"action": "afc_stage"}}}
+        _apply_scanner_defaults(config)
+        self.assertNotIn("toolhead", config["scanners"]["abc123"])
 
     def test_valid_toolhead_stage(self):
         self._ok({"scanners": {"abc123": {"action": "toolhead_stage"}}})
@@ -297,100 +308,6 @@ class TestHasScannerFunctions(unittest.TestCase):
         assert has_afc_scanners(config) is True
         assert has_toolhead_scanners(config) is True
         assert has_toolhead_stage_scanners(config) is True
-
-
-class TestDiscoverKlipperVarPath(unittest.TestCase):
-    """Verifies discover_klipper_var_path() hits the correct Moonraker endpoint
-    and parses the response shape correctly (#77)."""
-
-    def setUp(self):
-        app_state.cfg = {"moonraker_url": "http://moonraker:7125"}
-
-    def _moonraker_response(self, filename: str | None) -> MagicMock:
-        save_variables = {"filename": filename} if filename is not None else {}
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json = MagicMock(return_value={
-            "result": {
-                "status": {
-                    "configfile": {
-                        "settings": {
-                            "save_variables": save_variables,
-                        }
-                    }
-                }
-            }
-        })
-        return resp
-
-    def test_uses_correct_moonraker_endpoint(self):
-        with patch("config.requests.get") as mock_get:
-            mock_get.return_value = self._moonraker_response("/home/pi/printer_data/config/variables.cfg")
-            discover_klipper_var_path()
-            args, kwargs = mock_get.call_args
-            assert "printer/objects/query?configfile=settings" in args[0], args[0]
-
-    def test_parses_absolute_filename(self):
-        with patch("config.requests.get") as mock_get:
-            mock_get.return_value = self._moonraker_response("/home/pi/printer_data/config/variables.cfg")
-            result = discover_klipper_var_path()
-            assert result == "/home/pi/printer_data/config/variables.cfg"
-
-    def test_relative_filename_resolved_to_default_config_dir(self):
-        with patch("config.requests.get") as mock_get:
-            mock_get.return_value = self._moonraker_response("variables.cfg")
-            result = discover_klipper_var_path()
-            assert result.endswith("/printer_data/config/variables.cfg")
-
-    def test_tilde_filename_expanded_to_home(self):
-        # Klipper's configfile.settings can report paths with a literal `~`.
-        # Without expansion, os.path.join with the default config dir produces
-        # a broken concatenated path (verified against a real toolchanger
-        # printer reporting `~/printer_data/config/...`).
-        with patch("config.requests.get") as mock_get:
-            mock_get.return_value = self._moonraker_response("~/printer_data/config/variables.cfg")
-            result = discover_klipper_var_path()
-            assert result == os.path.expanduser("~/printer_data/config/variables.cfg")
-            assert "~" not in result
-            assert result.startswith("/")
-
-    def test_missing_save_variables_returns_none(self):
-        with patch("config.requests.get") as mock_get:
-            mock_get.return_value = self._moonraker_response(None)
-            assert discover_klipper_var_path() is None
-
-    def test_network_failure_returns_none(self):
-        with patch("config.requests.get", side_effect=requests.ConnectionError("connection refused")):
-            assert discover_klipper_var_path() is None
-
-    def test_http_error_returns_none(self):
-        with patch("config.requests.get") as mock_get:
-            resp = MagicMock()
-            resp.raise_for_status = MagicMock(side_effect=requests.HTTPError("404"))
-            mock_get.return_value = resp
-            assert discover_klipper_var_path() is None
-
-    def test_invalid_json_returns_none(self):
-        with patch("config.requests.get") as mock_get:
-            resp = MagicMock()
-            resp.raise_for_status = MagicMock()
-            resp.json = MagicMock(side_effect=ValueError("not json"))
-            mock_get.return_value = resp
-            assert discover_klipper_var_path() is None
-
-    def test_unexpected_exception_propagates(self):
-        # Programming errors (KeyError, AttributeError) should NOT be silently
-        # swallowed — they indicate bugs we want to surface, not hide.
-        with patch("config.requests.get", side_effect=KeyError("config")):
-            with self.assertRaises(KeyError):
-                discover_klipper_var_path()
-
-    def test_returns_cached_path_without_querying_moonraker(self):
-        app_state.cfg["klipper_var_path"] = "/cached/path/variables.cfg"
-        with patch("config.requests.get") as mock_get:
-            result = discover_klipper_var_path()
-            assert result == "/cached/path/variables.cfg"
-            mock_get.assert_not_called()
 
 
 class TestValidateHappyHare(unittest.TestCase):

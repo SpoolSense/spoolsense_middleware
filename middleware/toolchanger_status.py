@@ -32,10 +32,11 @@ import logging
 import re
 import threading
 
-import requests
-
 import app_state
-from publishers.klipper import _send_gcode, _validate_color_hex, display_spoolcolor
+from moonraker_client import (
+    query_objects, send_gcode, set_active_spool_id, set_database_item,
+)
+from publishers.klipper import _validate_color_hex, display_spoolcolor
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,7 @@ def _activate_spoolman(moonraker: str, macro: str, tool_number_str: str, spoolma
     orphaned assignments that disappear after reboot (#15)."""
     # Step 1: tell Moonraker which spool is active
     try:
-        requests.post(
-            f"{moonraker}/server/spoolman/spool_id",
-            json={"spool_id": spoolman_id},
-            timeout=5,
-        ).raise_for_status()
+        set_active_spool_id(moonraker, spoolman_id)
         logger.info(f"[toolhead_stage] SET_ACTIVE_SPOOL {spoolman_id} on {macro}")
     except Exception:
         logger.exception(f"[toolhead_stage] Failed to set active spool on {macro} — skipping persist")
@@ -69,7 +66,7 @@ def _activate_spoolman(moonraker: str, macro: str, tool_number_str: str, spoolma
     # Step 2: set the gcode variable so macros can read it
     gcode_var_set = False
     try:
-        _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}")
+        send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE={spoolman_id}")
         gcode_var_set = True
         logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} spool_id={spoolman_id}")
     except Exception:
@@ -77,7 +74,7 @@ def _activate_spoolman(moonraker: str, macro: str, tool_number_str: str, spoolma
 
     # Step 3: persist to disk so it survives reboot
     try:
-        _send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
+        send_gcode(moonraker, f"SAVE_VARIABLE VARIABLE=t{tool_number_str}_spool_id VALUE={spoolman_id}")
         logger.info(f"[toolhead_stage] SAVE_VARIABLE t{tool_number_str}_spool_id={spoolman_id}")
         return True
     except Exception:
@@ -85,12 +82,12 @@ def _activate_spoolman(moonraker: str, macro: str, tool_number_str: str, spoolma
 
     # Rollback: undo steps 1 and 2 to avoid partial state
     try:
-        requests.post(f"{moonraker}/server/spoolman/spool_id", json={"spool_id": 0}, timeout=5).raise_for_status()
+        set_active_spool_id(moonraker, 0)
     except Exception:
         logger.exception(f"[toolhead_stage] Spoolman rollback failed for {macro}")
     if gcode_var_set:
         try:
-            _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE=0")
+            send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=spool_id VALUE=0")
         except Exception:
             logger.exception(f"[toolhead_stage] Gcode variable rollback failed for {macro}")
     return False
@@ -121,11 +118,7 @@ def _publish_tool_lane_data(moonraker: str, macro: str, tool_number_str: str,
         "lane": tool_number_str,
     }
     try:
-        requests.post(
-            f"{moonraker}/server/database/item",
-            json={"namespace": "lane_data", "key": macro, "value": lane_value},
-            timeout=5,
-        ).raise_for_status()
+        set_database_item(moonraker, "lane_data", macro, lane_value)
         logger.info(f"[toolhead_stage] Published lane_data for {macro}: {safe_material} {safe_color}")
     except Exception:
         logger.exception(f"[toolhead_stage] Failed to publish lane_data for {macro}")
@@ -155,7 +148,7 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     spool_color = display_spoolcolor(color_hex)
     if spool_color is not None:
         try:
-            _send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{spool_color}'\"")
+            send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={macro} VARIABLE=color VALUE=\"'{spool_color}'\"")
             logger.info(f"[toolhead_stage] SET_GCODE_VARIABLE {macro} color='{spool_color}'")
         except Exception:
             logger.exception(f"[toolhead_stage] Failed to set color on {macro}")
@@ -186,24 +179,11 @@ def _fetch_pending_tool() -> str | None:
     if not moonraker:
         return None
 
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/objects/query?gcode_macro%20{MACRO_NAME}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        result = response.json()
-        macro_data = result.get("result", {}).get("status", {}).get(f"gcode_macro {MACRO_NAME}", {})
-        return macro_data.get(VARIABLE_NAME, "")
-    except requests.ConnectionError:
-        logger.debug("Macro assign: Moonraker not reachable")
+    status = query_objects(moonraker, f"gcode_macro%20{MACRO_NAME}", context="Macro assign")
+    if status is None:
         return None
-    except requests.Timeout:
-        logger.warning("Macro assign: Moonraker request timed out")
-        return None
-    except Exception:
-        logger.exception("Macro assign: unexpected error")
-        return None
+    macro_data = status.get(f"gcode_macro {MACRO_NAME}", {})
+    return macro_data.get(VARIABLE_NAME, "")
 
 
 def _clear_pending_tool() -> None:
@@ -213,7 +193,7 @@ def _clear_pending_tool() -> None:
         return
 
     try:
-        _send_gcode(
+        send_gcode(
             moonraker,
             f'SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE="\'\'\"',
         )

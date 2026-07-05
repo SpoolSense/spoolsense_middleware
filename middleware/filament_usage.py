@@ -20,6 +20,7 @@ import requests
 
 import app_state
 from config import has_afc_scanners
+from moonraker_client import query_objects, send_gcode
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +108,7 @@ def _clear_pending() -> None:
         return
 
     try:
-        requests.post(
-            f"{moonraker}/printer/gcode/script",
-            json={"script": f"SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE=0"},
-            timeout=5,
-        ).raise_for_status()
+        send_gcode(moonraker, f"SET_GCODE_VARIABLE MACRO={MACRO_NAME} VARIABLE={VARIABLE_NAME} VALUE=0")
         logger.debug("UPDATE_TAG: cleared pending variable")
     except Exception:
         logger.exception("UPDATE_TAG: failed to clear pending variable")
@@ -123,7 +120,8 @@ _WRITABLE_FORMATS = {"openprinttag", "opentag3d"}
 
 def _is_writable_tag(target: str) -> bool:
     """Check if the tag on this target supports weight writes."""
-    fmt = app_state.active_spool_formats.get(target, "unknown")
+    rec = app_state.active_spool_tracking.get(target)
+    fmt = rec.tag_format if rec else "unknown"
     return fmt in _WRITABLE_FORMATS
 
 
@@ -221,23 +219,21 @@ def _handle_afc() -> None:
 
     # Snapshot state under lock
     with app_state.state_lock:
-        initial_weights = dict(app_state.active_spool_weights)
-        uids = dict(app_state.active_spool_uids)
-        devices = dict(app_state.active_spool_devices)
+        tracking = dict(app_state.active_spool_tracking)
 
     for lane, current_weight in lane_weights.items():
-        device_id = devices.get(lane)
-        _check_low_spool(device_id, current_weight)
+        rec = tracking.get(lane)
+        _check_low_spool(rec.device_id if rec else None, current_weight)
 
-        initial = initial_weights.get(lane)
-        if initial is None:
+        if rec is None or rec.weight_g is None:
             continue
 
-        deduction = initial - current_weight
+        deduction = rec.weight_g - current_weight
         if deduction <= 0:
             continue
 
-        uid = uids.get(lane)
+        uid = rec.uid
+        device_id = rec.device_id
         if not uid:
             logger.debug(f"UPDATE_TAG: no UID for {lane}, skipping")
             continue
@@ -252,9 +248,11 @@ def _handle_afc() -> None:
         else:
             _publish_deduction(device_id, uid, deduction)
 
-        # Update initial weight so next UPDATE_TAG only deducts the delta
+        # Re-baseline so the next UPDATE_TAG only deducts the delta
         with app_state.state_lock:
-            app_state.active_spool_weights[lane] = current_weight
+            live = app_state.active_spool_tracking.get(lane)
+            if live is not None:
+                live.weight_g = current_weight
 
 
 def _fetch_tool_filament_used() -> dict[str, float] | None:
@@ -270,38 +268,30 @@ def _fetch_tool_filament_used() -> dict[str, float] | None:
 
     # Build query for all active tools
     with app_state.state_lock:
-        tool_names = list(app_state.active_spool_uids.keys())
+        tool_names = list(app_state.active_spool_tracking.keys())
 
     if not tool_names:
         return None
 
     # Query tool objects — e.g. ?tool%20T0&tool%20T1
     query_parts = "&".join(f"tool%20{t}" for t in tool_names)
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/objects/query?{query_parts}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        status = response.json().get("result", {}).get("status", {})
+    status = query_objects(moonraker, query_parts, context="UPDATE_TAG")
+    if status is None:
+        return None
 
-        result: dict[str, float] = {}
-        for tool_name in tool_names:
-            tool_data = status.get(f"tool {tool_name}", {})
-            filament = tool_data.get("filament_used")
-            if filament is None:
-                # Tool object doesn't have filament_used — mod not installed
-                return None
+    result: dict[str, float] = {}
+    for tool_name in tool_names:
+        tool_data = status.get(f"tool {tool_name}", {})
+        filament = tool_data.get("filament_used")
+        if filament is None:
+            # Tool object doesn't have filament_used — mod not installed
+            return None
+        try:
             result[tool_name] = float(filament)
+        except (TypeError, ValueError):
+            return None
 
-        return result if result else None
-
-    except requests.ConnectionError:
-        logger.debug("UPDATE_TAG: Moonraker not reachable for tool query")
-        return None
-    except Exception:
-        logger.exception("UPDATE_TAG: failed to fetch tool filament_used")
-        return None
+    return result if result else None
 
 
 def _mm_to_grams(mm: float, diameter_mm: float, density_g_cm3: float) -> float:
@@ -328,29 +318,25 @@ def _handle_toolchanger() -> None:
     if tool_usage is not None:
         logger.info("UPDATE_TAG: using per-tool filament_used from toolchanger")
         with app_state.state_lock:
-            uids = dict(app_state.active_spool_uids)
-            devices = dict(app_state.active_spool_devices)
-            diameters = dict(app_state.active_spool_diameters)
-            densities = dict(app_state.active_spool_densities)
+            tracking = dict(app_state.active_spool_tracking)
 
         for tool_name, usage_mm in tool_usage.items():
             if usage_mm <= 0:
                 continue
 
-            uid = uids.get(tool_name)
-            device_id = devices.get(tool_name)
-            if not uid:
+            rec = tracking.get(tool_name)
+            if rec is None or not rec.uid:
                 logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
                 continue
+            uid = rec.uid
+            device_id = rec.device_id
 
             # Only send deductions for tags that can store weight updates
             if not _is_writable_tag(tool_name):
                 logger.debug(f"UPDATE_TAG: {tool_name} tag format is not writable, skipping deduction")
                 continue
 
-            diameter = diameters.get(tool_name, 1.75)
-            density = densities.get(tool_name, 1.24)
-            usage_g = _mm_to_grams(usage_mm, diameter, density)
+            usage_g = _mm_to_grams(usage_mm, rec.diameter_mm, rec.density)
 
             # Mobile-scanned spools have no scanner device — store for REST retrieval
             if not device_id:
@@ -368,16 +354,16 @@ def _handle_toolchanger() -> None:
         return
 
     with app_state.state_lock:
-        uids = dict(app_state.active_spool_uids)
-        devices = dict(app_state.active_spool_devices)
+        tracking = dict(app_state.active_spool_tracking)
 
     for index, weight in enumerate(weights):
         if weight <= 0:
             continue
 
         tool_name = f"T{index}"
-        uid = uids.get(tool_name)
-        device_id = devices.get(tool_name)
+        rec = tracking.get(tool_name)
+        uid = rec.uid if rec else None
+        device_id = rec.device_id if rec else None
 
         if not uid:
             logger.debug(f"UPDATE_TAG: no active spool on {tool_name}, skipping")
@@ -400,21 +386,11 @@ def _fetch_pending() -> int | None:
     if not moonraker:
         return None
 
-    try:
-        response = requests.get(
-            f"{moonraker}/printer/objects/query?gcode_macro%20{MACRO_NAME}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        result = response.json()
-        macro_data = result.get("result", {}).get("status", {}).get(f"gcode_macro {MACRO_NAME}", {})
-        return macro_data.get(VARIABLE_NAME, 0)
-    except requests.ConnectionError:
-        logger.debug("UPDATE_TAG: Moonraker not reachable")
+    status = query_objects(moonraker, f"gcode_macro%20{MACRO_NAME}", context="UPDATE_TAG")
+    if status is None:
         return None
-    except Exception:
-        logger.exception("UPDATE_TAG: unexpected error fetching macro state")
-        return None
+    macro_data = status.get(f"gcode_macro {MACRO_NAME}", {})
+    return macro_data.get(VARIABLE_NAME, 0)
 
 
 class FilamentUsageSync:

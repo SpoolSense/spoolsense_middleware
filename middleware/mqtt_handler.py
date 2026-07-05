@@ -1,7 +1,7 @@
 """
 mqtt_handler.py — MQTT callbacks and tag processing pipeline.
 
-on_connect()  — subscribes to scanner topics, syncs klipper vars, re-publishes AFC lock state
+on_connect()  — subscribes to scanner topics, re-publishes AFC lock state
 on_message()  — resolves scanner from topic, checks lock, routes to _handle_rich_tag()
 
 Tag processing splits into two paths:
@@ -15,12 +15,12 @@ import logging
 from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
-import requests
 
 import app_state
 from activation import activate_spool, publish_lock, _activate_from_scan
 from publishers.klipper import display_spoolcolor
-from config import discover_klipper_var_path, has_afc_scanners, has_toolhead_scanners
+from config import has_afc_scanners
+import moonraker_client
 from filament_usage import _check_low_spool
 
 if TYPE_CHECKING:
@@ -76,12 +76,14 @@ def _record_spool_tracking(
     if not target or not uid or remaining is None:
         return
     with app_state.state_lock:
-        app_state.active_spool_weights[target]   = remaining
-        app_state.active_spool_uids[target]      = uid
-        app_state.active_spool_devices[target]    = device_id or ""
-        app_state.active_spool_diameters[target]  = diameter_mm or 1.75
-        app_state.active_spool_densities[target]  = density or 1.24
-        app_state.active_spool_formats[target]    = tag_format or "unknown"
+        app_state.active_spool_tracking[target] = app_state.ActiveSpool(
+            uid=uid,
+            device_id=device_id or "",
+            weight_g=remaining,
+            diameter_mm=diameter_mm or 1.75,
+            density=density or 1.24,
+            tag_format=tag_format or "unknown",
+        )
 
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same
@@ -277,18 +279,18 @@ def on_connect(client: mqtt.Client, userdata: object, flags: dict, rc: int) -> N
     logger.info(f"Subscribed to {len(scanners)} scanner(s): {', '.join(scanners.keys())}")
 
     client.publish("spoolsense/middleware/online", "true", qos=1, retain=True)
+
+    # Health status (#41) — mark MQTT up and refresh the retained snapshot
+    # so subscribers see this session's state after a reconnect.
+    from health import set_health, publish_current
+    set_health("mqtt", "connected")
+    publish_current()
+
     if app_state.spoolman_client:
         app_state.spoolman_client.refresh()
 
-    # Sync klipper variables for toolhead scanners (AFC uses afc_status.py instead)
-    if has_toolhead_scanners(app_state.cfg):
-        app_state.cfg["klipper_var_path"] = discover_klipper_var_path()
-        from var_watcher import start_klipper_watcher, sync_from_klipper_vars
-        sync_from_klipper_vars()
-        if app_state.watcher:
-            app_state.watcher.stop()
-            app_state.watcher.join(timeout=2)
-        app_state.watcher = start_klipper_watcher()
+    # Klipper variable sync happens over the Moonraker websocket
+    # (klipper_vars.py) — nothing to re-establish on MQTT reconnect.
 
     # Re-publish AFC lock state so scanners know current state after reconnect
     if has_afc_scanners(app_state.cfg):
@@ -302,26 +304,7 @@ def _is_printer_idle() -> bool:
     Returns False on any other state or on fetch failure — treat unknown as
     busy so we never auto-release a lock during a print.
     """
-    moonraker_url = app_state.cfg.get("moonraker_url", "")
-    if not moonraker_url:
-        return False
-    try:
-        response = requests.get(
-            f"{moonraker_url}/printer/objects/query?print_stats",
-            timeout=2,
-        )
-        response.raise_for_status()
-        state = (
-            response.json()
-            .get("result", {})
-            .get("status", {})
-            .get("print_stats", {})
-            .get("state", "")
-        )
-        return state == "standby"
-    except (requests.RequestException, ValueError):
-        logger.debug("Could not query Klipper print state; treating as busy")
-        return False
+    return moonraker_client.is_printer_idle(app_state.cfg.get("moonraker_url", ""))
 
 
 def _should_auto_release_lock(target: str, payload: dict) -> bool:
@@ -343,7 +326,8 @@ def _should_auto_release_lock(target: str, payload: dict) -> bool:
     # _is_printer_idle() — avoids a race window where the active spool
     # could change while we're querying Klipper.
     with app_state.state_lock:
-        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+        rec = app_state.active_spool_tracking.get(target)
+        active_uid = rec.uid.lower() if rec else ""
 
     if active_uid and incoming_uid == active_uid:
         return False
@@ -374,7 +358,8 @@ def on_message(client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> 
                 active_uid = ""
                 with app_state.state_lock:
                     if app_state.lane_locks.get(target):
-                        active_uid = (app_state.active_spool_uids.get(target) or "").lower()
+                        rec = app_state.active_spool_tracking.get(target)
+                        active_uid = rec.uid.lower() if rec else ""
                         if not active_uid or active_uid != incoming_uid:
                             app_state.lane_locks[target] = False
                             released = True
