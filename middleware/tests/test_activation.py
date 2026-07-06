@@ -176,5 +176,31 @@ class TestValidateMaterial(unittest.TestCase):
         assert _validate_material("PLA\n") is False
 
 
+class TestStagedObserverEvents(unittest.TestCase):
+    """Tag-only staged rich scans never reach the publisher chain — they must
+    still hit the observer path so the MQTT event stream sees them (#93)."""
+
+    def test_tag_only_staged_notifies_observers(self):
+        from activation import _route_staged
+        from publishers.base import Action
+        event = MagicMock()
+        with patch("activation.notify_observers") as mock_notify, \
+             patch("activation._cache_pending_spool"):
+            _route_staged(Action.AFC_STAGE, False, "FF0000", "PLA", 500.0,
+                          None, event)
+        mock_notify.assert_called_once_with(event)
+
+    def test_spoolman_staged_does_not_double_notify(self):
+        # With a spoolman_id the event already went through the manager —
+        # secondaries saw it there; notifying again would duplicate
+        from activation import _route_staged
+        from publishers.base import Action
+        with patch("activation.notify_observers") as mock_notify, \
+             patch("activation._cache_pending_spool"):
+            _route_staged(Action.AFC_STAGE, True, "FF0000", "PLA", 500.0,
+                          42, MagicMock())
+        mock_notify.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
