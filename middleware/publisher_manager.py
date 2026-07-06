@@ -122,6 +122,26 @@ class PublisherManager:
             return True
         return primary_succeeded
 
+    def notify(self, event: SpoolEvent) -> None:
+        """
+        Fan an event out to SECONDARY publishers only — observation, not action.
+
+        Used by scan paths that must not trigger the primary publisher's
+        printer commands (UID-only staged scans, Happy Hare binds) but should
+        still appear on observer channels like the MQTT event stream (#93).
+        Failures are logged and never raised.
+        """
+        for publisher in self._publishers:
+            if publisher.primary:
+                continue
+            try:
+                publisher.publish(event)
+            except Exception:
+                logger.exception(
+                    "Publisher '%s' raised unexpectedly during notify (event=%s action=%s)",
+                    publisher.name, event.scanner_id, event.action,
+                )
+
     def shutdown(self) -> None:
         """Call teardown() on all registered publishers. Used during graceful shutdown."""
         for publisher in self._publishers:

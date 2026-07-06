@@ -199,5 +199,40 @@ class TestPublisherManagerShutdown(unittest.TestCase):
         mgr.shutdown()
 
 
+class TestNotify(unittest.TestCase):
+    """notify() is observation-only: secondaries receive, the primary never does."""
+
+    def setUp(self):
+        import app_state
+        app_state.cfg = {}
+
+    def _manager_with(self, *publishers):
+        from publisher_manager import PublisherManager
+        m = PublisherManager()
+        for pub in publishers:
+            m.register(pub)
+        return m
+
+    def test_secondary_receives_primary_does_not(self):
+        primary = _make_publisher("klipper", primary=True, enabled=True, result=True)
+        secondary = _make_publisher("mqtt_events", primary=False, enabled=True, result=True)
+        m = self._manager_with(primary, secondary)
+
+        m.notify(_make_event())
+
+        secondary.publish.assert_called_once()
+        primary.publish.assert_not_called()
+
+    def test_secondary_exception_swallowed(self):
+        secondary = _make_publisher("mqtt_events", primary=False, enabled=True, result=True)
+        secondary.publish.side_effect = Exception("boom")
+        m = self._manager_with(secondary)
+        m.notify(_make_event())  # must not raise
+
+    def test_no_publishers_is_noop(self):
+        m = self._manager_with()
+        m.notify(_make_event())  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

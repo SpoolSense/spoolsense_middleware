@@ -29,7 +29,8 @@ middleware/
 │
 ├── publishers/
 │   ├── base.py                # SpoolEvent dataclass, Publisher ABC, Action enum
-│   └── klipper.py             # KlipperPublisher — gcode commands, Moonraker REST
+│   ├── klipper.py             # KlipperPublisher — gcode commands, Moonraker REST
+│   └── mqtt_events.py         # MqttEventPublisher — SpoolEvents → spoolsense/events/#
 ├── publisher_manager.py       # Fan-out dispatcher — primary + secondary publishers
 │
 ├── afc_status.py              # AFC lane state sync via Moonraker (websocket/polling)
