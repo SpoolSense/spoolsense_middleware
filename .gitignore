@@ -22,6 +22,9 @@ venv/
 # mex scaffold (local AI context, not tracked)
 .mex/
 
+# Git worktrees for isolated feature work
+.worktrees/
+
 # Ollama suggestions (local dev notes)
 ollama_suggestions.md
 

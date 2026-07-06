@@ -57,6 +57,8 @@ class MobileScanRequest(BaseModel):
 
 class AssignToolRequest(BaseModel):
     toolhead: str
+    uid: Optional[str] = None            # uid from the originating scan — binds the assignment to that spool (#31)
+    spool_id: Optional[int] = None       # spoolman id from the scan — rides along with uid for newer clients
 
 
 class ApiResponse(BaseModel):
@@ -258,6 +260,17 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         pending = app_state.pending_spool
         if not pending:
             raise HTTPException(status_code=409, detail="No pending spool — scan a tag first")
+        # Spool binding (spoolsense-mobile #31): newer clients echo back the uid
+        # they scanned. pending_spool is a single last-write-wins slot, so a scan
+        # from any phone landing between mobile-scan and assign-tool would hand
+        # this assignment the wrong spool — reject before any gcode goes out.
+        # Case-insensitive: mobile sends uppercase hex, parsers store lowercase.
+        # Omitted uid = legacy client, keep the old unchecked behavior.
+        if req.uid and req.uid.lower() != (pending.get("uid") or "").lower():
+            raise HTTPException(
+                status_code=409,
+                detail="Pending spool changed since scan — rescan and try again",
+            )
         # Don't clear pending_spool here — toolchanger_status.py watcher
         # consumes it when it detects the ASSIGN_SPOOL macro variable change
 
