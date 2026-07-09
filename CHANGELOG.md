@@ -4,6 +4,18 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.1.1] - 2026-07-09
+
+### Changed
+
+- **assign-tool 409 responses carry machine-readable codes** — minor change
+  prepping for the SpoolSense Mobile iOS release. The error body now includes
+  `code: "no_pending_spool"` or `code: "pending_spool_changed"` so upcoming
+  app versions can distinguish the two failure causes. Status codes and
+  behavior are unchanged, and the current shipped app is unaffected. (#99)
+
+---
+
 ## [1.8.1] - 2026-07-08
 
 ### Added
