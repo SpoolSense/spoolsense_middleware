@@ -89,9 +89,14 @@ def _resolve_scan_data(scan: ScanEvent, spool_info: SpoolInfo | None) -> tuple[s
 def _build_spool_event(
     scanner_cfg: dict, action_enum: Action, target: str | None,
     spoolman_id: int | None, color_hex: str, filament_label: str,
-    remaining: float | None, scan: ScanEvent,
+    remaining: float | None, scan: ScanEvent, device_id: str | None = None,
 ) -> SpoolEvent:
     """Build a SpoolEvent from resolved scan data."""
+    # scanner_id source order: the device_id the caller resolved from the MQTT
+    # topic (or "mobile" for REST scans) → an explicit device_id in the config
+    # dict (not normally present) → the target → "unknown". The topic-derived
+    # device_id is what lets event-stream (#93) consumers tell scanners apart.
+    scanner_id = device_id or scanner_cfg.get("device_id") or target or "unknown"
     return SpoolEvent(
         spool_id=spoolman_id,
         action=action_enum,
@@ -103,7 +108,7 @@ def _build_spool_event(
         nozzle_temp_max=getattr(scan, "nozzle_temp_max", None),
         bed_temp_min=getattr(scan, "bed_temp_min", None),
         bed_temp_max=getattr(scan, "bed_temp_max", None),
-        scanner_id=scanner_cfg.get("device_id", target or "unknown"),
+        scanner_id=scanner_id,
         tag_only=spoolman_id is None,
     )
 
@@ -215,6 +220,7 @@ def _activate_from_scan(
     scanner_cfg: dict,
     scan: ScanEvent,
     spool_info: SpoolInfo | None = None,
+    device_id: str | None = None,
 ) -> None:
     """
     Main activation entry point for rich-data tags.
@@ -222,6 +228,9 @@ def _activate_from_scan(
     Two concerns handled separately:
       1. Spool-ID activation (Spoolman-backed) — only when spoolman_id is available
       2. Action routing (always) — stage/cache or lock based on scanner action
+
+    device_id is the scanner that produced the scan (topic-derived, or "mobile"
+    for REST scans); it becomes the event stream's scanner_id (#93).
     """
     action_str = scanner_cfg["action"]
     target     = scanner_cfg.get("lane") or scanner_cfg.get("toolhead")
@@ -237,7 +246,7 @@ def _activate_from_scan(
     spoolman_id = spool_info.spoolman_id if spool_info else None
 
     event = _build_spool_event(scanner_cfg, action_enum, target, spoolman_id,
-                               color_hex, filament_label, remaining, scan)
+                               color_hex, filament_label, remaining, scan, device_id)
 
     # Happy Hare has its own binding path — skip the generic publisher chain
     # so a no-op publisher call doesn't burn a round trip for every scan.
