@@ -267,6 +267,88 @@ class TestAssignTool(unittest.TestCase):
         self.assertEqual(resp.json()["spool_id"], 42)
 
 
+class TestAssignToolSpoolBinding(unittest.TestCase):
+    """POST /api/assign-tool with uid binding — rejects stale assignments
+    when another scan replaced pending_spool between mobile-scan and
+    assign-tool (spoolsense-mobile #31)."""
+
+    def setUp(self):
+        _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
+        app_state.pending_spool = {
+            "uid": "aabbccdd",
+            "spoolman_id": 42,
+            "color_hex": "FF0000",
+            "material": "PLA",
+            "remaining_g": 200.0,
+        }
+
+    def _post(self, payload: dict):
+        return client.post("/api/assign-tool", json=payload)
+
+    def test_matching_uid_assigns(self):
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        mock_gcode.assert_called_once()
+
+    def test_uid_match_is_case_insensitive(self):
+        # Mobile sends uppercase hex; middleware stores lowercase elsewhere
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "AABBCCDD"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        mock_gcode.assert_called_once()
+
+    def test_mismatched_uid_returns_409(self):
+        # A second scan replaced pending_spool after this client scanned
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "11223344"})
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("rescan", resp.json()["detail"].lower())
+        # Must reject before any gcode goes out — never assign the wrong spool
+        mock_gcode.assert_not_called()
+
+    def test_omitted_uid_preserves_old_behavior(self):
+        # Old mobile clients send only {"toolhead": ...} — no binding check
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        mock_gcode.assert_called_once()
+
+    def test_uid_with_no_pending_returns_409(self):
+        app_state.pending_spool = None
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
+        self.assertEqual(resp.status_code, 409)
+        mock_gcode.assert_not_called()
+
+    def test_pending_record_without_uid_returns_409(self):
+        # Pending record lacks a uid — binding can't be verified, refuse to guess
+        app_state.pending_spool = {"spoolman_id": 42}
+        with patch("rest_api.send_gcode") as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
+        self.assertEqual(resp.status_code, 409)
+        mock_gcode.assert_not_called()
+
+    def test_spool_id_accepted(self):
+        # spool_id rides along for the mobile half — accepted without error;
+        # response spool_id still comes from the pending record
+        with patch("rest_api.send_gcode"):
+            resp = self._post({"toolhead": "T0", "uid": "aabbccdd", "spool_id": 42})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["spool_id"], 42)
+
+    def test_mismatch_rejected_before_moonraker_call(self):
+        # If the check ran after the gcode call, a stale uid would surface as
+        # 502 (Moonraker down) instead of 409 — pin the ordering
+        with patch("rest_api.send_gcode", side_effect=Exception("unreachable")) as mock_gcode:
+            resp = self._post({"toolhead": "T0", "uid": "deadbeef"})
+        self.assertEqual(resp.status_code, 409)
+        mock_gcode.assert_not_called()
+
+
 class TestUnlockTarget(unittest.TestCase):
     """POST /api/unlock/{target} — explicit unlock for #76."""
 

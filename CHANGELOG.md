@@ -4,6 +4,30 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.1] - 2026-07-08
+
+### Added
+
+- **MQTT event stream** — every scan, activation, and staging event is
+  published as JSON to `spoolsense/events/<action>` (QoS 1, not retained).
+  Home Assistant, Node-RED, and anything else on the broker can now react to
+  filament activity with no SpoolSense-specific code — trigger on material,
+  scanner, or tool. Wildcard-subscribe `spoolsense/events/#` for everything.
+  On by default; `publish_events: false` disables. Each event carries
+  spool_id, action, target, color, material, weight, temps, the source
+  scanner id, and a timestamp. (#93)
+
+### Fixed
+
+- **Mobile assign-tool could bind the wrong spool** — the mobile flow scans
+  (caches a pending spool) and assigns (`POST /api/assign-tool`) in two calls.
+  A scan landing between them replaced the pending record, silently assigning
+  the wrong spool. `assign-tool` now accepts the scanned `uid`/`spool_id` and
+  returns `409` if the pending record changed since the scan, before any gcode
+  is sent. (#96)
+
+---
+
 ## [1.8.0] - 2026-07-05
 
 ### Added

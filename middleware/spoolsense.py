@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.8.0"
+__version__ = "1.8.1"
 """
 SpoolSense NFC Middleware
 =========================
@@ -45,6 +45,7 @@ from activation import publish_lock
 from afc_status import AfcStatusSync
 from publisher_manager import PublisherManager
 from publishers.klipper import KlipperPublisher
+from publishers.mqtt_events import MqttEventPublisher
 from toolchanger_status import ToolchangerStatusSync
 from toolhead_status import ToolheadStatusSync
 from filament_usage import FilamentUsageSync
@@ -301,9 +302,10 @@ def main() -> None:
     # Load and validate config — exits on invalid config (strict validation)
     app_state.cfg = load_config()
 
-    # Publishers handle output to printer platforms (only Klipper today)
+    # Publishers handle output — Klipper is primary; MQTT events secondary (#93)
     app_state.publisher_manager = PublisherManager()
     app_state.publisher_manager.register(KlipperPublisher(app_state.cfg))
+    app_state.publisher_manager.register(MqttEventPublisher(app_state.cfg))
 
     if args.check_config:
         _print_config_summary()

@@ -35,5 +35,10 @@ scanners:
 
 scanner_topic_prefix: "spoolsense"
 
+# ---- Event publishing (optional) ----------------------------
+# Every scan/activation is published as JSON to spoolsense/events/<action>
+# for Home Assistant automations. On by default; uncomment to disable.
+# publish_events: false
+
 # ---- Tag Writeback (optional) ------------------------------
 # tag_writeback_enabled: false

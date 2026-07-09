@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 import paho.mqtt.client as mqtt
 
 import app_state
-from activation import activate_spool, publish_lock, _activate_from_scan
+from activation import activate_spool, notify_observers, publish_lock, _activate_from_scan
+from publishers.base import Action, SpoolEvent
 from publishers.klipper import display_spoolcolor
 from config import has_afc_scanners
 import moonraker_client
@@ -94,6 +95,26 @@ def _record_spool_tracking(
 
 # ── UID-only tag handling ────────────────────────────────────────────────────
 
+def _uid_only_event(action: str, target: str, spool_id: int, color_hex: str,
+                    material: str, remaining: float | None,
+                    device_id: str | None) -> SpoolEvent:
+    """Build a SpoolEvent for observer notification from UID-only scan data."""
+    return SpoolEvent(
+        spool_id=spool_id,
+        action=Action(action),
+        target=target,
+        color=color_hex,
+        material=material,
+        weight=remaining,
+        nozzle_temp_min=None,
+        nozzle_temp_max=None,
+        bed_temp_min=None,
+        bed_temp_max=None,
+        scanner_id=device_id or "",
+        tag_only=False,
+    )
+
+
 def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic: str) -> None:
     """UID-only tag (e.g. NTAG215) — no filament data on tag, look up spool in Spoolman via NFC ID."""
     target_id = _get_scanner_target(scanner_cfg) or _extract_scanner_device_id(topic) or "unknown"
@@ -127,7 +148,9 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
     # no cache, no lock.
     if action == "happy_hare_stage":
         from happy_hare import bind_spool_to_current_gate
-        bind_spool_to_current_gate(spool_id)
+        if bind_spool_to_current_gate(spool_id):
+            notify_observers(_uid_only_event(action, "", spool_id, color_hex,
+                                             material, remaining, device_id))
         # Still drive low-spool LED feedback on the scanner so users loading
         # multiple spools into MMU gates see when one is nearly empty.
         if device_id and remaining is not None:
@@ -146,10 +169,16 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
                 "spoolman_id": spool_id,
             }
         logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
+        # Observer channels (MQTT event stream) still see staged scans even
+        # though no printer command fires yet (#93)
+        notify_observers(_uid_only_event(action, "", spool_id, color_hex,
+                                         material, remaining, device_id))
         return
 
     # Dedicated scanners — activate immediately
-    if not activate_spool(spool_id, action, target):
+    if not activate_spool(spool_id, action, target, color=color_hex,
+                          material=material, weight=remaining,
+                          scanner_id=device_id or "legacy"):
         return
 
     if target:
@@ -228,10 +257,10 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
 
         # Enrich from Spoolman (best-effort), then activate
         spool_info = _enrich_from_spoolman(scan, topic)
-        _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
+        device_id = _extract_scanner_device_id(topic)
+        _activate_from_scan(scanner_cfg, scan, spool_info=spool_info, device_id=device_id)
 
         # Record initial weight for UPDATE_TAG filament deduction
-        device_id = _extract_scanner_device_id(topic)
         # tag_format comes from the scanner payload — tells us if this tag supports weight writes
         tag_format = payload.get("tag_format", "unknown")
         _record_spool_tracking(

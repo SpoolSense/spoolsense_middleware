@@ -336,5 +336,67 @@ class TestOnMessageLockBehavior(unittest.TestCase):
         assert app_state.lane_locks["T0"] is False
 
 
+class TestUidOnlyObserverEvents(unittest.TestCase):
+    """UID-only scan paths that bypass PublisherManager still emit observer
+    events for the MQTT event stream (#93)."""
+
+    def setUp(self):
+        _reset_app_state(
+            scanners={"ecb338": {"action": "afc_stage"}},
+        )
+        app_state.DISPATCHER_AVAILABLE = True
+        spool = {
+            "id": 17,
+            "filament": {"name": "Purple", "color_hex": "EE33FF", "material": "PLA"},
+            "remaining_weight": 500.0,
+        }
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = spool
+
+    def _scan(self, uid="aabbccdd"):
+        from mqtt_handler import _handle_uid_only_tag
+        _handle_uid_only_tag(
+            MagicMock(), app_state.cfg["scanners"]["ecb338"], uid,
+            "spoolsense/ecb338/tag/state",
+        )
+
+    def test_staged_uid_only_scan_notifies_observers(self):
+        with patch("mqtt_handler.notify_observers") as mock_notify:
+            self._scan()
+        mock_notify.assert_called_once()
+        event = mock_notify.call_args.args[0]
+        self.assertEqual(event.action.value, "afc_stage")
+        self.assertEqual(event.spool_id, 17)
+        self.assertEqual(event.scanner_id, "ecb338")
+
+    def test_happy_hare_uid_only_notifies_on_successful_bind(self):
+        app_state.cfg["scanners"]["ecb338"] = {"action": "happy_hare_stage"}
+        with patch("mqtt_handler.notify_observers") as mock_notify, \
+             patch("happy_hare.bind_spool_to_current_gate", return_value=True):
+            self._scan()
+        mock_notify.assert_called_once()
+        self.assertEqual(mock_notify.call_args.args[0].action.value, "happy_hare_stage")
+
+    def test_dedicated_uid_only_event_carries_resolved_metadata(self):
+        # afc_lane/toolhead UID-only scans flow through activate_spool — the
+        # event must carry Spoolman-resolved color/material/weight and the
+        # real scanner id, not the bare "legacy" placeholder (#93)
+        app_state.cfg["scanners"]["ecb338"] = {"action": "afc_lane", "lane": "lane1"}
+        with patch("mqtt_handler.activate_spool", return_value=True) as mock_activate:
+            self._scan()
+        kwargs = mock_activate.call_args.kwargs
+        self.assertEqual(kwargs["color"], "EE33FF")
+        self.assertEqual(kwargs["material"], "PLA")
+        self.assertEqual(kwargs["weight"], 500.0)
+        self.assertEqual(kwargs["scanner_id"], "ecb338")
+
+    def test_happy_hare_uid_only_no_event_on_failed_bind(self):
+        app_state.cfg["scanners"]["ecb338"] = {"action": "happy_hare_stage"}
+        with patch("mqtt_handler.notify_observers") as mock_notify, \
+             patch("happy_hare.bind_spool_to_current_gate", return_value=False):
+            self._scan()
+        mock_notify.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

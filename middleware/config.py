@@ -34,6 +34,7 @@ DEFAULTS: dict = {
     "scanner_topic_prefix": "spoolsense",
     "scanners": {},
     "tag_writeback_enabled": False,
+    "publish_events": True,
 }
 
 # Legacy keys that trigger auto-migration

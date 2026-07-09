@@ -89,9 +89,14 @@ def _resolve_scan_data(scan: ScanEvent, spool_info: SpoolInfo | None) -> tuple[s
 def _build_spool_event(
     scanner_cfg: dict, action_enum: Action, target: str | None,
     spoolman_id: int | None, color_hex: str, filament_label: str,
-    remaining: float | None, scan: ScanEvent,
+    remaining: float | None, scan: ScanEvent, device_id: str | None = None,
 ) -> SpoolEvent:
     """Build a SpoolEvent from resolved scan data."""
+    # scanner_id source order: the device_id the caller resolved from the MQTT
+    # topic (or "mobile" for REST scans) → an explicit device_id in the config
+    # dict (not normally present) → the target → "unknown". The topic-derived
+    # device_id is what lets event-stream (#93) consumers tell scanners apart.
+    scanner_id = device_id or scanner_cfg.get("device_id") or target or "unknown"
     return SpoolEvent(
         spool_id=spoolman_id,
         action=action_enum,
@@ -103,7 +108,7 @@ def _build_spool_event(
         nozzle_temp_max=getattr(scan, "nozzle_temp_max", None),
         bed_temp_min=getattr(scan, "bed_temp_min", None),
         bed_temp_max=getattr(scan, "bed_temp_max", None),
-        scanner_id=scanner_cfg.get("device_id", target or "unknown"),
+        scanner_id=scanner_id,
         tag_only=spoolman_id is None,
     )
 
@@ -125,7 +130,7 @@ def _try_spoolman_activation(event: SpoolEvent, spoolman_id: int, target: str | 
 
 def _route_staged(action_enum: Action, spoolman_activated: bool,
                   color_hex: str, filament_label: str, remaining: float | None,
-                  spoolman_id: int | None) -> None:
+                  spoolman_id: int | None, event: SpoolEvent) -> None:
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
     _cache_pending_spool(color_hex, filament_label, remaining, spoolman_id)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"
@@ -133,9 +138,21 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
         logger.info(f"[{stage_name}] Spool staged with Spoolman ID, scanner remains unlocked")
     else:
         logger.info(f"[{stage_name}] Tag data cached, waiting for assignment. Scanner remains unlocked")
+    if spoolman_id is None:
+        # Tag-only staged scans never reach the publisher chain — the event
+        # stream still gets them via the observer path (#93)
+        notify_observers(event)
 
 
-def _route_happy_hare(spoolman_id: int | None) -> None:
+def notify_observers(event: SpoolEvent) -> None:
+    """Fan an event out to secondary (observer) publishers only — never the
+    primary, so no printer commands fire. No-op when the manager isn't wired."""
+    manager = app_state.publisher_manager
+    if manager is not None:
+        manager.notify(event)
+
+
+def _route_happy_hare(spoolman_id: int | None, event: SpoolEvent) -> None:
     """Handle happy_hare_stage — bind the scanned spool to the currently-selected
     MMU gate via Spoolman extras + Happy Hare sync trigger. No lock, no cache."""
     if spoolman_id is None:
@@ -143,7 +160,8 @@ def _route_happy_hare(spoolman_id: int | None) -> None:
                        "The scanned tag must be registered in Spoolman first.")
         return
     from happy_hare import bind_spool_to_current_gate
-    bind_spool_to_current_gate(spoolman_id)
+    if bind_spool_to_current_gate(spoolman_id):
+        notify_observers(event)
 
 
 def _route_dedicated(action_enum: Action, spoolman_activated: bool,
@@ -162,10 +180,14 @@ def _route_dedicated(action_enum: Action, spoolman_activated: bool,
 
 # ── UID-only activation path ────────────────────────────────────────────────
 
-def activate_spool(spool_id: int, action: str, target: str | None = None) -> bool:
+def activate_spool(spool_id: int, action: str, target: str | None = None,
+                   color: str | None = None, material: str | None = None,
+                   weight: float | None = None,
+                   scanner_id: str = "legacy") -> bool:
     """
     UID-only fallback path — called when tag has no embedded data but maps to a Spoolman spool.
-    Builds a minimal SpoolEvent and routes through publisher_manager.
+    Builds a SpoolEvent (with whatever Spoolman-resolved metadata the caller
+    has) and routes through publisher_manager.
     Returns True if the primary publisher succeeded.
     """
     # Targeted actions need a target (lane or toolhead name)
@@ -183,10 +205,10 @@ def activate_spool(spool_id: int, action: str, target: str | None = None) -> boo
         spool_id=spool_id,
         action=action_enum,
         target=target or "",
-        color=None, material=None, weight=None,
+        color=color, material=material, weight=weight,
         nozzle_temp_min=None, nozzle_temp_max=None,
         bed_temp_min=None, bed_temp_max=None,
-        scanner_id="legacy",
+        scanner_id=scanner_id,
         tag_only=False,
     )
     return _publish_event(event)
@@ -198,6 +220,7 @@ def _activate_from_scan(
     scanner_cfg: dict,
     scan: ScanEvent,
     spool_info: SpoolInfo | None = None,
+    device_id: str | None = None,
 ) -> None:
     """
     Main activation entry point for rich-data tags.
@@ -205,6 +228,9 @@ def _activate_from_scan(
     Two concerns handled separately:
       1. Spool-ID activation (Spoolman-backed) — only when spoolman_id is available
       2. Action routing (always) — stage/cache or lock based on scanner action
+
+    device_id is the scanner that produced the scan (topic-derived, or "mobile"
+    for REST scans); it becomes the event stream's scanner_id (#93).
     """
     action_str = scanner_cfg["action"]
     target     = scanner_cfg.get("lane") or scanner_cfg.get("toolhead")
@@ -220,12 +246,12 @@ def _activate_from_scan(
     spoolman_id = spool_info.spoolman_id if spool_info else None
 
     event = _build_spool_event(scanner_cfg, action_enum, target, spoolman_id,
-                               color_hex, filament_label, remaining, scan)
+                               color_hex, filament_label, remaining, scan, device_id)
 
     # Happy Hare has its own binding path — skip the generic publisher chain
     # so a no-op publisher call doesn't burn a round trip for every scan.
     if action_enum == Action.HAPPY_HARE_STAGE:
-        _route_happy_hare(spoolman_id)
+        _route_happy_hare(spoolman_id, event)
         if remaining is not None and remaining <= app_state.cfg["low_spool_threshold"]:
             logger.warning(f"Low spool: {filament_label} ({remaining:.1f}g) on {target or 'staged'}")
         return
@@ -243,7 +269,8 @@ def _activate_from_scan(
 
     # Route by action type
     if action_enum in (Action.AFC_STAGE, Action.TOOLHEAD_STAGE):
-        _route_staged(action_enum, spoolman_activated, color_hex, filament_label, remaining, spoolman_id)
+        _route_staged(action_enum, spoolman_activated, color_hex, filament_label,
+                      remaining, spoolman_id, event)
     elif action_enum in (Action.AFC_LANE, Action.TOOLHEAD):
         _route_dedicated(action_enum, spoolman_activated, spoolman_id, target, event)
 
