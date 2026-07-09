@@ -257,10 +257,10 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
 
         # Enrich from Spoolman (best-effort), then activate
         spool_info = _enrich_from_spoolman(scan, topic)
-        _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
+        device_id = _extract_scanner_device_id(topic)
+        _activate_from_scan(scanner_cfg, scan, spool_info=spool_info, device_id=device_id)
 
         # Record initial weight for UPDATE_TAG filament deduction
-        device_id = _extract_scanner_device_id(topic)
         # tag_format comes from the scanner payload — tells us if this tag supports weight writes
         tag_format = payload.get("tag_format", "unknown")
         _record_spool_tracking(

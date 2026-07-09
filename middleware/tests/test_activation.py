@@ -202,5 +202,33 @@ class TestStagedObserverEvents(unittest.TestCase):
         mock_notify.assert_not_called()
 
 
+class TestBuildSpoolEventScannerId(unittest.TestCase):
+    """scanner_id must carry the source scanner so event-stream (#93)
+    consumers can tell scanners apart — regression for the live finding
+    where rich staged scans published scanner_id="unknown"."""
+
+    def _event(self, scanner_cfg, target, device_id):
+        from activation import _build_spool_event
+        from publishers.base import Action
+        scan = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                         bed_temp_min=None, bed_temp_max=None)
+        return _build_spool_event(scanner_cfg, Action.TOOLHEAD_STAGE, target,
+                                  None, "FF0000", "PLA", 500.0, scan,
+                                  device_id=device_id)
+
+    def test_topic_device_id_wins(self):
+        # Stage scanner (no target) — device_id from the topic must show up
+        ev = self._event({"action": "toolhead_stage"}, None, "f3d360")
+        self.assertEqual(ev.scanner_id, "f3d360")
+
+    def test_falls_back_to_target_when_no_device_id(self):
+        ev = self._event({"action": "toolhead"}, "T0", None)
+        self.assertEqual(ev.scanner_id, "T0")
+
+    def test_unknown_only_when_nothing_available(self):
+        ev = self._event({"action": "toolhead_stage"}, None, None)
+        self.assertEqual(ev.scanner_id, "unknown")
+
+
 if __name__ == "__main__":
     unittest.main()

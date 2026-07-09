@@ -217,7 +217,7 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
         except Exception:
             logger.exception("Spoolman sync failed for mobile scan — continuing with tag-only")
 
-    _activate_from_scan(scanner_cfg, scan, spool_info=spool_info)
+    _activate_from_scan(scanner_cfg, scan, spool_info=spool_info, device_id="mobile")
 
     # Record for UPDATE_TAG deduction tracking — device_id="" signals mobile-scanned
     target = _get_scanner_target(scanner_cfg)
