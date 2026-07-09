@@ -305,7 +305,9 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
         with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post({"toolhead": "T0", "uid": "11223344"})
         self.assertEqual(resp.status_code, 409)
-        self.assertIn("rescan", resp.json()["detail"].lower())
+        detail = resp.json()["detail"]
+        self.assertEqual(detail["code"], "pending_spool_changed")
+        self.assertIn("rescan", detail["message"].lower())
         # Must reject before any gcode goes out — never assign the wrong spool
         mock_gcode.assert_not_called()
 
