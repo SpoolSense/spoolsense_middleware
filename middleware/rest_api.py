@@ -259,7 +259,14 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
     with app_state.state_lock:
         pending = app_state.pending_spool
         if not pending:
-            raise HTTPException(status_code=409, detail="No pending spool — scan a tag first")
+            # detail carries a machine-readable code for clients that parse
+            # error bodies. The shipped iOS 1.0.0 build ignores non-2xx bodies
+            # entirely (status code only), so this is free to evolve; the
+            # status codes themselves are the frozen contract.
+            raise HTTPException(status_code=409, detail={
+                "code": "no_pending_spool",
+                "message": "No pending spool — scan a tag first",
+            })
         # Spool binding (spoolsense-mobile #31): newer clients echo back the uid
         # they scanned. pending_spool is a single last-write-wins slot, so a scan
         # from any phone landing between mobile-scan and assign-tool would hand
@@ -267,10 +274,10 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         # Case-insensitive: mobile sends uppercase hex, parsers store lowercase.
         # Omitted uid = legacy client, keep the old unchecked behavior.
         if req.uid and req.uid.lower() != (pending.get("uid") or "").lower():
-            raise HTTPException(
-                status_code=409,
-                detail="Pending spool changed since scan — rescan and try again",
-            )
+            raise HTTPException(status_code=409, detail={
+                "code": "pending_spool_changed",
+                "message": "Pending spool changed since scan — rescan and try again",
+            })
         # Don't clear pending_spool here — toolchanger_status.py watcher
         # consumes it when it detects the ASSIGN_SPOOL macro variable change
 
