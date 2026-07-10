@@ -26,7 +26,7 @@ cd spoolsense_middleware/docker
 docker compose up -d
 ```
 
-The first start seeds `./spoolsense-data/` with the config examples and stops.
+The first start seeds `./spoolsense-data/` with the config examples and waits.
 Create your config from the example matching your printer:
 
 ```bash
@@ -41,10 +41,10 @@ Edit `spoolsense-data/config.yaml` — at minimum:
 - `spoolman_url` — e.g. `http://192.168.1.32:7912` (optional, tag-only mode without it)
 - `scanners` — your scanner device IDs and actions
 
-Then start it for real:
+The waiting container starts the middleware automatically within a few
+seconds of `config.yaml` appearing — no restart needed:
 
 ```bash
-docker compose up -d
 docker compose logs -f     # watch it come up
 ```
 

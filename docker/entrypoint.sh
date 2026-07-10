@@ -22,14 +22,23 @@ if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
     echo ""
     echo " Config examples have been copied into the volume."
     echo " On the host, copy the one matching your printer to"
-    echo " config.yaml, edit it (MQTT broker, Moonraker URL, scanners),"
-    echo " then restart this container:"
+    echo " config.yaml and edit it (MQTT broker, Moonraker URL,"
+    echo " scanners):"
     echo ""
     echo "   cp spoolsense-data/config.example.single.yaml \\"
     echo "      spoolsense-data/config.yaml"
-    echo "   docker compose up -d"
+    echo ""
+    echo " The middleware starts automatically once config.yaml"
+    echo " appears — no restart needed. Waiting..."
     echo "============================================================"
-    exit 1
+    # Waiting (not exiting) avoids a restart/backoff loop under
+    # restart: unless-stopped. Trap so `docker stop` works promptly
+    # while we're PID 1 in the wait loop.
+    trap 'exit 0' TERM INT
+    while [ ! -f "$CONFIG_DIR/config.yaml" ]; do
+        sleep 5
+    done
+    echo "config.yaml detected — starting middleware"
 fi
 
 exec "$@"

@@ -2,10 +2,10 @@
 #
 # First run:
 #   cd docker && docker compose up -d
-#   # the container seeds ./spoolsense-data/ with config examples and stops
+#   # the container seeds ./spoolsense-data/ with config examples and waits
 #   cp spoolsense-data/config.example.single.yaml spoolsense-data/config.yaml
 #   # edit config.yaml: MQTT broker, Moonraker URL, Spoolman URL, scanners
-#   docker compose up -d
+#   # the middleware starts automatically once config.yaml appears
 #
 # Upgrading:
 #   git pull && docker compose up -d --build
@@ -29,3 +29,10 @@ services:
       # REST API + web panel — only served if mobile.enabled in config.yaml.
       # Remove this mapping if you don't use the mobile app or web panel.
       - "5001:5001"
+    logging:
+      # Middleware also keeps a rotated log file in the volume; cap Docker's
+      # own capture so container logs can't grow unbounded.
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
