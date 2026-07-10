@@ -4,6 +4,20 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.2] - 2026-07-10
+
+### Added
+
+- **Docker deployment** — run the middleware in a container on any machine on
+  the printer's LAN (home server, NAS, the box running Spoolman). Useful when
+  the printer host can't run it directly (e.g. Snapmaker U1). `cd docker &&
+  docker compose up -d`; the first run seeds config examples into the volume
+  and starts automatically once `config.yaml` is created. Full guide in
+  `docker/README.md`. The web panel's save-and-restart works in-container
+  (clean self-restart via the container restart policy). (#102)
+
+---
+
 ## [1.8.1.1] - 2026-07-09
 
 ### Changed

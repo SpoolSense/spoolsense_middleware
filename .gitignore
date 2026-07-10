@@ -28,6 +28,9 @@ venv/
 # Ollama suggestions (local dev notes)
 ollama_suggestions.md
 
+# Docker volume data (user config/state, never committed)
+docker/spoolsense-data/
+
 # OS
 .DS_Store
 Thumbs.db
