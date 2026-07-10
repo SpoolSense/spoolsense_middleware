@@ -399,5 +399,55 @@ class TestUnlockTarget(unittest.TestCase):
         self.assertTrue(app_state.lane_locks["lane1"])
 
 
+class TestSaveConfigDockerRestart(unittest.TestCase):
+    """In Docker (SPOOLSENSE_IN_DOCKER set), save-config self-terminates via
+    SIGTERM so the container restart policy relaunches with the new config —
+    systemctl doesn't exist there (#102)."""
+
+    def _post_save(self):
+        return client.post("/api/save-config", json={
+            "moonraker_url": "http://moonraker:7125",
+            "spoolman_url": "",
+            "mqtt": {"broker": "192.168.1.167"},
+        })
+
+    def test_docker_env_schedules_self_sigterm_not_systemctl(self):
+        import tempfile, yaml as yamlmod  # noqa: F401
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("moonraker_url: http://old:7125\n")
+            tmp = f.name
+        try:
+            with patch("rest_api.CONFIG_PATH", tmp), \
+                 patch.dict(os.environ, {"SPOOLSENSE_IN_DOCKER": "1"}), \
+                 patch("rest_api.threading.Timer") as mock_timer, \
+                 patch("rest_api.subprocess.Popen") as mock_popen:
+                resp = self._post_save()
+            self.assertEqual(resp.status_code, 200)
+            self.assertTrue(resp.json()["success"])
+            mock_timer.assert_called_once()
+            mock_timer.return_value.start.assert_called_once()
+            mock_popen.assert_not_called()
+        finally:
+            os.unlink(tmp)
+
+    def test_bare_install_uses_systemctl(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("moonraker_url: http://old:7125\n")
+            tmp = f.name
+        try:
+            env = {k: v for k, v in os.environ.items() if k != "SPOOLSENSE_IN_DOCKER"}
+            with patch("rest_api.CONFIG_PATH", tmp), \
+                 patch.dict(os.environ, env, clear=True), \
+                 patch("rest_api.threading.Timer") as mock_timer, \
+                 patch("rest_api.subprocess.Popen") as mock_popen:
+                resp = self._post_save()
+            self.assertEqual(resp.status_code, 200)
+            mock_popen.assert_called_once()
+            mock_timer.assert_not_called()
+        finally:
+            os.unlink(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()

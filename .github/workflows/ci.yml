@@ -32,3 +32,35 @@ jobs:
 
       - name: Test
         run: pytest middleware/tests/ -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f docker/Dockerfile -t spoolsense-middleware .
+
+      - name: Smoke test — missing config seeds examples and exits with instructions
+        run: |
+          set +e
+          OUT=$(docker run --rm -v /tmp/ssdata-empty:/home/spoolsense/SpoolSense spoolsense-middleware 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          test $CODE -ne 0
+          echo "$OUT" | grep -q "No config.yaml found"
+          sudo test -f /tmp/ssdata-empty/config.example.single.yaml
+
+      - name: Smoke test — --check-config passes with a valid config
+        run: |
+          mkdir -p /tmp/ssdata
+          cat > /tmp/ssdata/config.yaml <<'YAML'
+          mqtt:
+            broker: 127.0.0.1
+          moonraker_url: http://127.0.0.1:7125
+          scanners:
+            aabbcc:
+              action: toolhead_stage
+          YAML
+          docker run --rm -v /tmp/ssdata:/home/spoolsense/SpoolSense spoolsense-middleware python middleware/spoolsense.py --check-config

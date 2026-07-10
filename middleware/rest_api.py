@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -417,14 +419,20 @@ def save_config(req: SaveConfigRequest) -> dict[str, Any]:
         os.replace(tmp_path, CONFIG_PATH)
         logger.info("Web panel: config saved to %s", CONFIG_PATH)
 
-        # Restart the middleware service
-        try:
-            subprocess.Popen(
-                ["sudo", "systemctl", "restart", "spoolsense"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            logger.warning("Web panel: could not restart spoolsense service")
+        # Restart so the new config takes effect. In Docker there is no
+        # systemctl — a clean self-terminate lets the container's restart
+        # policy relaunch with the new config (SPOOLSENSE_IN_DOCKER is set
+        # by the image). The short delay lets this response reach the client.
+        if os.environ.get("SPOOLSENSE_IN_DOCKER"):
+            threading.Timer(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+        else:
+            try:
+                subprocess.Popen(
+                    ["sudo", "systemctl", "restart", "spoolsense"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                logger.warning("Web panel: could not restart spoolsense service")
 
         return {"success": True, "message": "Config saved — restarting"}
     except Exception as e:
