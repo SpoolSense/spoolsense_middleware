@@ -1,0 +1,17 @@
+# Keep the image to runtime code only
+.git
+.github
+.venv
+docs
+esphome
+scripts
+middleware/tests
+middleware/docs
+middleware/static/*.map
+**/__pycache__
+*.pyc
+docker/spoolsense-data
+docker/compose.yaml
+docker/README.md
+CHANGELOG.md
+*.md

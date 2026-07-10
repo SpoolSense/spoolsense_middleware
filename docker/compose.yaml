@@ -1,0 +1,38 @@
+# SpoolSense middleware — run on any machine on the printer's LAN (#102).
+#
+# First run:
+#   cd docker && docker compose up -d
+#   # the container seeds ./spoolsense-data/ with config examples and waits
+#   cp spoolsense-data/config.example.single.yaml spoolsense-data/config.yaml
+#   # edit config.yaml: MQTT broker, Moonraker URL, Spoolman URL, scanners
+#   # the middleware starts automatically once config.yaml appears
+#
+# Upgrading:
+#   git pull && docker compose up -d --build
+#
+# NOTE: run exactly ONE middleware instance per printer/broker. A second
+# instance (e.g. one on the printer host AND this container) will fight over
+# the retained MQTT status topics and double-process every scan.
+
+services:
+  spoolsense:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: spoolsense-middleware
+    restart: unless-stopped
+    volumes:
+      # config.yaml, spoolsense.log, deductions.json all live here —
+      # same layout as ~/SpoolSense on a bare install
+      - ./spoolsense-data:/home/spoolsense/SpoolSense
+    ports:
+      # REST API + web panel — only served if mobile.enabled in config.yaml.
+      # Remove this mapping if you don't use the mobile app or web panel.
+      - "5001:5001"
+    logging:
+      # Middleware also keeps a rotated log file in the volume; cap Docker's
+      # own capture so container logs can't grow unbounded.
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
