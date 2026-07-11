@@ -99,13 +99,3 @@ class SpoolInfo:
         """Helper to easily convert to JSON for Moonraker/MQTT"""
         return asdict(self)
 
-@dataclass
-class SpoolAssignment:
-    target_type: str      # 'single_tool', 'tool', 'afc_lane'
-    target_id: str        # 'default', 'T0', 'lane3'
-    spool_uid: str
-    active: bool
-    assigned_at: Optional[str] = None
-
-    def to_dict(self):
-        return asdict(self)

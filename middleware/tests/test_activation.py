@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -28,7 +28,8 @@ def _setup_app_state(moonraker_url="http://moonraker:7125"):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
 
 
@@ -200,6 +201,65 @@ class TestStagedObserverEvents(unittest.TestCase):
             _route_staged(Action.AFC_STAGE, True, "FF0000", "PLA", 500.0,
                           42, MagicMock())
         mock_notify.assert_not_called()
+
+
+class TestBuildSpoolEventTemps(unittest.TestCase):
+    """SpoolEvent temps must come from ScanEvent's *_c fields — the old
+    suffixless getattr silently produced None for every rich scan."""
+
+    def test_temps_copied_from_scan_c_fields(self):
+        from activation import _build_spool_event
+        from publishers.base import Action
+        from state.models import ScanEvent
+        scan = ScanEvent(
+            source="spoolsense_scanner", target_id="T0", scanned_at="now",
+            uid="AA", present=True, tag_data_valid=True,
+            nozzle_temp_min_c=240, nozzle_temp_max_c=260,
+            bed_temp_min_c=90, bed_temp_max_c=110,
+        )
+        event = _build_spool_event({"action": "toolhead_stage"}, Action.TOOLHEAD_STAGE,
+                                   None, 42, "FF0000", "ASA", 500.0, scan)
+        self.assertEqual(event.nozzle_temp_min, 240)
+        self.assertEqual(event.nozzle_temp_max, 260)
+        self.assertEqual(event.bed_temp_min, 90)
+        self.assertEqual(event.bed_temp_max, 110)
+
+
+class TestPendingSlotIsolation(unittest.TestCase):
+    """A scan staged for AFC must land in the AFC slot and never be visible
+    to the toolchanger consumer, and vice versa — the shared-slot race this
+    split exists to kill."""
+
+    def setUp(self):
+        _setup_app_state()
+
+    def _stage(self, action):
+        from activation import _route_staged
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(action, True, "FF0000", "PLA", 500.0, 42, event)
+
+    def test_afc_scan_fills_only_afc_slot(self):
+        from publishers.base import Action
+        self._stage(Action.AFC_STAGE)
+        self.assertIsNotNone(app_state.pending_spool_afc)
+        self.assertIsNone(app_state.pending_spool_toolhead)
+
+    def test_toolhead_scan_fills_only_toolhead_slot(self):
+        from publishers.base import Action
+        self._stage(Action.TOOLHEAD_STAGE)
+        self.assertIsNone(app_state.pending_spool_afc)
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
+
+    def test_mixed_scans_do_not_clobber_each_other(self):
+        from publishers.base import Action
+        self._stage(Action.AFC_STAGE)
+        self._stage(Action.TOOLHEAD_STAGE)
+        self.assertEqual(app_state.pending_spool_afc["spoolman_id"], 42)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 42)
+        self.assertIsNot(app_state.pending_spool_afc,
+                         app_state.pending_spool_toolhead)
 
 
 class TestBuildSpoolEventScannerId(unittest.TestCase):

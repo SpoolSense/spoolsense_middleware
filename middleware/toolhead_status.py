@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 import app_state
 import moonraker_client
@@ -136,6 +135,7 @@ class ToolheadStatusSync:
 
         if prev is not None and current_spool_id is None:
             # Spool was ejected — find which toolhead had it and clear the lock
+            ejected: str | None = None
             with app_state.state_lock:
                 for toolhead, spool_id in list(app_state.active_spools.items()):
                     if spool_id == prev:
@@ -144,17 +144,29 @@ class ToolheadStatusSync:
                         )
                         publish_lock(toolhead, "clear")
                         app_state.active_spools[toolhead] = None
-                        return
+                        ejected = toolhead
+                        break
+            if ejected is not None:
+                # Drop the deduction baseline too — persisting it past the
+                # eject would let UPDATE_TAG deduct from an unmounted spool
+                from tracking_store import clear_tracking
+                clear_tracking(ejected)
+                return
 
             # If no toolhead matched, clear all toolhead locks as a fallback
             logger.info(f"Toolhead status: spool #{prev} ejected, clearing all toolhead locks")
             scanners = app_state.cfg.get("scanners", {})
+            cleared: list[str] = []
             for scanner_cfg in scanners.values():
                 action = scanner_cfg.get("action", "")
                 if action in ("toolhead", "toolhead_stage"):
                     target = scanner_cfg.get("toolhead", "")
                     if target and app_state.lane_locks.get(target):
                         publish_lock(target, "clear")
+                        cleared.append(target)
+            if cleared:
+                from tracking_store import clear_tracking
+                clear_tracking(*cleared)
 
         elif prev is None and current_spool_id is not None:
             # Spool was set externally (not via scanner) — just track it
@@ -173,9 +185,20 @@ class ToolheadStatusSync:
                         was_locked = bool(app_state.lane_locks.get(target))
                         if was_locked:
                             publish_lock(target, "clear")
+                        # A scan writes active_spools before this poll can see
+                        # the new id — unequal means the swap came from outside
+                        externally_driven = (
+                            app_state.active_spools.get(target) != current_spool_id
+                        )
                         # Track the new spool_id regardless of lock state so
                         # consecutive Mainsail swaps stay consistent.
                         app_state.active_spools[target] = current_spool_id
+                    if externally_driven:
+                        # The old baseline describes the removed spool — drop
+                        # it until the next scan; a scan-driven swap keeps the
+                        # baseline the scan just recorded
+                        from tracking_store import clear_tracking
+                        clear_tracking(target)
                     if was_locked:
                         logger.info(
                             f"Toolhead status: single-toolhead spool swap #{prev} → "

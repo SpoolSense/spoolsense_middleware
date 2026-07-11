@@ -85,6 +85,9 @@ def _record_spool_tracking(
             density=density or 1.24,
             tag_format=tag_format or "unknown",
         )
+    # Persist so the deduction baseline survives restarts (#91)
+    from tracking_store import save_tracking
+    save_tracking()
 
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same
@@ -161,13 +164,17 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
 
     # Shared scanners — cache for later assignment, don't activate yet
     if action in ("toolhead_stage", "afc_stage"):
+        pending = {
+            "color_hex": color_hex,
+            "material": material,
+            "remaining_g": remaining,
+            "spoolman_id": spool_id,
+        }
         with app_state.state_lock:
-            app_state.pending_spool = {
-                "color_hex": color_hex,
-                "material": material,
-                "remaining_g": remaining,
-                "spoolman_id": spool_id,
-            }
+            if action == "afc_stage":
+                app_state.pending_spool_afc = pending
+            else:
+                app_state.pending_spool_toolhead = pending
         logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
         # Observer channels (MQTT event stream) still see staged scans even
         # though no printer command fires yet (#93)

@@ -67,8 +67,11 @@ def _reset_app_state(
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
+    import tempfile
+    app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
     app_state.spoolman_client = None
 
 
@@ -177,16 +180,39 @@ class TestMobileScan(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertTrue(data["pending"])
         # Pending spool was stored in app_state
-        self.assertIsNotNone(app_state.pending_spool)
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
 
     def test_toolhead_stage_replaced_flag_set_on_second_scan(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
         # Pre-populate a pending spool to simulate scanning twice
-        app_state.pending_spool = {"uid": "00000000", "spoolman_id": 1}
+        app_state.pending_spool_toolhead = {"uid": "00000000", "spoolman_id": 1}
         scan = _make_scan_event()
         with patch("rest_api.detect_and_parse", return_value=scan):
             resp = self._post({"uid": "aabbccdd", "present": True, "tag_data_valid": True})
         self.assertTrue(resp.json()["replaced"])
+
+    def test_ios_temp_and_length_fields_reach_the_parser(self):
+        # The shipped app sends these; the model silently dropped them (#101)
+        captured = {}
+        def fake_parse(payload, target_id, topic=""):
+            captured.update(payload)
+            return _make_scan_event()
+        with (
+            patch("rest_api.detect_and_parse", side_effect=fake_parse),
+            patch("rest_api._activate_from_scan"),
+        ):
+            resp = self._post({
+                "uid": "AABB", "present": True, "tag_data_valid": True,
+                "min_print_temp": 190, "max_print_temp": 220,
+                "min_bed_temp": 50, "max_bed_temp": 60,
+                "filament_length_m": 240.0,
+            })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["min_print_temp"], 190)
+        self.assertEqual(captured["max_print_temp"], 220)
+        self.assertEqual(captured["min_bed_temp"], 50)
+        self.assertEqual(captured["max_bed_temp"], 60)
+        self.assertEqual(captured["filament_length_m"], 240.0)
 
     def test_parse_error_returns_failure_not_500(self):
         with patch("rest_api.detect_and_parse", side_effect=ValueError("bad format")):
@@ -204,7 +230,7 @@ class TestAssignTool(unittest.TestCase):
     def setUp(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
         # Pre-populate a pending spool so assign-tool has something to work with
-        app_state.pending_spool = {
+        app_state.pending_spool_toolhead = {
             "uid": "aabbccdd",
             "spoolman_id": 42,
             "color_hex": "FF0000",
@@ -252,7 +278,8 @@ class TestAssignTool(unittest.TestCase):
         self.assertFalse(resp.json()["success"])
 
     def test_no_pending_spool_returns_409(self):
-        app_state.pending_spool = None
+        app_state.pending_spool_afc = None
+        app_state.pending_spool_toolhead = None
         resp = self._post("T0")
         self.assertEqual(resp.status_code, 409)
 
@@ -274,7 +301,7 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
 
     def setUp(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
-        app_state.pending_spool = {
+        app_state.pending_spool_toolhead = {
             "uid": "aabbccdd",
             "spoolman_id": 42,
             "color_hex": "FF0000",
@@ -320,7 +347,8 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
         mock_gcode.assert_called_once()
 
     def test_uid_with_no_pending_returns_409(self):
-        app_state.pending_spool = None
+        app_state.pending_spool_afc = None
+        app_state.pending_spool_toolhead = None
         with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
         self.assertEqual(resp.status_code, 409)
@@ -328,7 +356,7 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
 
     def test_pending_record_without_uid_returns_409(self):
         # Pending record lacks a uid — binding can't be verified, refuse to guess
-        app_state.pending_spool = {"spoolman_id": 42}
+        app_state.pending_spool_toolhead = {"spoolman_id": 42}
         with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
         self.assertEqual(resp.status_code, 409)

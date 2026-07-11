@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.8.2"
+__version__ = "1.8.3"
 """
 SpoolSense NFC Middleware
 =========================
@@ -332,6 +332,10 @@ def main() -> None:
     # Load pending mobile deductions before sync services start — avoids race with UPDATE_TAG
     from rest_api import _load_deductions
     _load_deductions()
+
+    # Restore deduction baselines so mounted spools survive restarts (#91)
+    from tracking_store import load_tracking
+    load_tracking()
 
     _start_sync_services(use_ws)                                                # AFC, toolchanger, toolhead status
     _start_rest_api()                                                           # mobile app scanning (if enabled)

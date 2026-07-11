@@ -18,7 +18,7 @@ Required Klipper macro (user adds to their printer.cfg):
 Data flow:
     poll_loop() → GET /printer/objects/query?gcode_macro ASSIGN_SPOOL
                     → pending_tool changed from ""?
-                        → yes + pending_spool → assign to that tool
+                        → yes + pending toolhead spool → assign to that tool
                         → clear pending_tool via SET_GCODE_VARIABLE
                     → no → sleep and poll again
 
@@ -95,7 +95,8 @@ def _activate_spoolman(moonraker: str, macro: str, tool_number_str: str, spoolma
 
 def _publish_tool_lane_data(moonraker: str, macro: str, tool_number_str: str,
                             spoolman_id: int | None, color_hex: str, material: str,
-                            remaining_g: float | None) -> None:
+                            remaining_g: float | None,
+                            temps: dict | None = None) -> None:
     """Write spool data to Moonraker's lane_data DB for slicer integration (Orca Slicer, etc.).
     AFC handles this for its lanes; for toolhead assignments we write directly."""
     safe_color = ""
@@ -108,12 +109,18 @@ def _publish_tool_lane_data(moonraker: str, macro: str, tool_number_str: str,
     if material and material != "Unknown":
         safe_material = material.replace(" ", "_")
 
+    temps = temps or {}
     lane_value = {
         "color": safe_color,
         "material": safe_material,
         "weight": round(remaining_g) if remaining_g else 0,
-        "nozzle_temp": None,
-        "bed_temp": None,
+        # Legacy single-temp keys stay = max for existing consumers (#36)
+        "nozzle_temp": temps.get("nozzle_temp_max"),
+        "bed_temp": temps.get("bed_temp_max"),
+        "nozzle_temp_min": temps.get("nozzle_temp_min"),
+        "nozzle_temp_max": temps.get("nozzle_temp_max"),
+        "bed_temp_min": temps.get("bed_temp_min"),
+        "bed_temp_max": temps.get("bed_temp_max"),
         "spool_id": spoolman_id,
         "lane": tool_number_str,
     }
@@ -166,7 +173,8 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
 
     # Lane data for slicer integration (opt-in via publish_lane_data config)
     if app_state.cfg.get("publish_lane_data", False):
-        _publish_tool_lane_data(moonraker, macro, tool_number_str, spoolman_id, color_hex, material, remaining_g)
+        _publish_tool_lane_data(moonraker, macro, tool_number_str, spoolman_id,
+                                color_hex, material, remaining_g, temps=pending)
 
 
 def _fetch_pending_tool() -> str | None:
@@ -225,9 +233,9 @@ class ToolchangerStatusSync:
 
         pending: dict | None = None
         with app_state.state_lock:
-            if app_state.pending_spool:
-                pending = app_state.pending_spool
-                app_state.pending_spool = None
+            if app_state.pending_spool_toolhead:
+                pending = app_state.pending_spool_toolhead
+                app_state.pending_spool_toolhead = None
 
         if pending:
             logger.info(f"Macro assign WS: assigning cached spool data to {tool_name}")
@@ -299,9 +307,9 @@ class ToolchangerStatusSync:
                     # Check for pending spool data
                     pending: dict | None = None
                     with app_state.state_lock:
-                        if app_state.pending_spool:
-                            pending = app_state.pending_spool
-                            app_state.pending_spool = None
+                        if app_state.pending_spool_toolhead:
+                            pending = app_state.pending_spool_toolhead
+                            app_state.pending_spool_toolhead = None
 
                     if pending:
                         logger.info(
