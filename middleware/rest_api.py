@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -396,10 +397,11 @@ def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> De
     and reconcile before posting, rather than blindly reposting.
     """
     uid_lower = uid.lower()
-    applied_g = (body or {}).get("applied_g")
 
-    if applied_g is None:
-        # Legacy full clear
+    if not body:
+        # Legacy full clear — only an absent or empty body qualifies. A
+        # nonempty body without a valid applied_g is rejected below so a
+        # misspelled field can't silently clear everything.
         with app_state.state_lock:
             cleared = app_state.pending_mobile_deductions.pop(uid_lower, 0.0)
         if cleared > 0:
@@ -408,14 +410,17 @@ def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> De
         return DeductionConfirmResponse(success=True, cleared_g=cleared,
                                         remaining_pending_g=0.0)
 
-    # bool is an int subclass — reject it along with everything non-numeric
+    applied_g = body.get("applied_g")
+    # bool is an int subclass — reject it along with everything non-numeric.
+    # NaN/Infinity pass numeric comparisons, so require a finite value before
+    # any state is touched.
     if isinstance(applied_g, bool) or not isinstance(applied_g, (int, float)) \
-            or applied_g <= 0:
+            or not math.isfinite(applied_g) or applied_g <= 0:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "invalid_applied_g",
-                "message": "applied_g must be a number greater than 0",
+                "message": "applied_g must be a finite number greater than 0",
             },
         )
 

@@ -498,18 +498,29 @@ class TestDeductionApplied(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_non_numeric_applied_rejected(self) -> None:
-        for bad in ("10.0", True, [10]):
+        for bad in ("10.0", True, [10], None):
             resp = client.post("/api/deductions/AABB11/applied",
                                json={"applied_g": bad})
             self.assertEqual(resp.status_code, 400, f"bad value: {bad!r}")
         self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
 
-    def test_explicit_null_applied_is_legacy_clear(self) -> None:
-        # JSON null is indistinguishable from an absent key — legacy clear
+    def test_non_finite_applied_rejected(self) -> None:
+        # Python's JSON parser accepts bare NaN/Infinity tokens — they pass
+        # numeric comparisons and would corrupt the stored pending value
+        for bad in ("NaN", "Infinity", "-Infinity"):
+            resp = client.post("/api/deductions/AABB11/applied",
+                               content='{"applied_g": %s}' % bad,
+                               headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.status_code, 400, f"bad value: {bad}")
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
+    def test_nonempty_body_without_applied_g_rejected(self) -> None:
+        # A misspelled field must not silently clear the full pending value —
+        # only an absent or empty body means legacy full clear
         resp = client.post("/api/deductions/AABB11/applied",
-                           json={"applied_g": None})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["cleared_g"], 25.5)
+                           json={"appliedG": 10.0})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
 
     def test_repeated_partial_posts_subtract_again(self) -> None:
         # Documented semantics: NOT idempotent — a retry must re-GET first
