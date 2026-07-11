@@ -333,6 +333,10 @@ def main() -> None:
     from rest_api import _load_deductions
     _load_deductions()
 
+    # Restore deduction baselines so mounted spools survive restarts (#91)
+    from tracking_store import load_tracking
+    load_tracking()
+
     _start_sync_services(use_ws)                                                # AFC, toolchanger, toolhead status
     _start_rest_api()                                                           # mobile app scanning (if enabled)
 

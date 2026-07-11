@@ -360,5 +360,24 @@ class TestKlipperPublisherEdgeCases(unittest.TestCase):
         mock_post.assert_not_called()
 
 
+class TestLaneDataAllTemps(unittest.TestCase):
+    """_publish_toolhead_lane_data writes all four temps + legacy keys (#36)."""
+
+    @patch("publishers.klipper.set_database_item")
+    def test_four_temps_written(self, mock_db):
+        from publishers.klipper import _publish_toolhead_lane_data
+        event = _make_event(action=Action.TOOLHEAD, target="T0",
+                            nozzle_temp_min=200, nozzle_temp_max=230,
+                            bed_temp_min=55, bed_temp_max=65)
+        _publish_toolhead_lane_data("http://moonraker:7125", event)
+        value = mock_db.call_args.args[3]
+        self.assertEqual(value["nozzle_temp"], 230)
+        self.assertEqual(value["bed_temp"], 65)
+        self.assertEqual(value["nozzle_temp_min"], 200)
+        self.assertEqual(value["nozzle_temp_max"], 230)
+        self.assertEqual(value["bed_temp_min"], 55)
+        self.assertEqual(value["bed_temp_max"], 65)
+
+
 if __name__ == "__main__":
     unittest.main()

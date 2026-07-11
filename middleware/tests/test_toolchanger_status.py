@@ -28,7 +28,8 @@ def _reset_app_state(moonraker_url="http://moonraker:7125"):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
 
 
@@ -247,6 +248,47 @@ class TestAssignSpoolToTool(unittest.TestCase):
             if "json" in c[1] and c[1]["json"].get("namespace") == "lane_data"
         ]
         assert len(lane_data_calls) == 0
+
+
+class TestLaneDataTemps(unittest.TestCase):
+    """lane_data writes carry all four temps from the pending scan — the
+    single legacy keys stay populated with max for existing consumers (#36)."""
+
+    def setUp(self):
+        _reset_app_state()
+        app_state.cfg["publish_lane_data"] = True
+
+    @patch("toolchanger_status.set_database_item")
+    @patch("toolchanger_status.send_gcode")
+    def test_temps_flow_from_pending_into_lane_data(self, mock_gcode, mock_db):
+        pending = {
+            "color_hex": "FF0000", "material": "ASA", "remaining_g": 500.0,
+            "spoolman_id": 42,
+            "nozzle_temp_min": 240, "nozzle_temp_max": 260,
+            "bed_temp_min": 90, "bed_temp_max": 110,
+        }
+        with patch("toolchanger_status.set_active_spool_id"):
+            _assign_spool_to_tool("T1", pending)
+        mock_db.assert_called_once()
+        value = mock_db.call_args.args[3]
+        self.assertEqual(value["nozzle_temp"], 260)      # legacy = max
+        self.assertEqual(value["bed_temp"], 110)         # legacy = max
+        self.assertEqual(value["nozzle_temp_min"], 240)
+        self.assertEqual(value["nozzle_temp_max"], 260)
+        self.assertEqual(value["bed_temp_min"], 90)
+        self.assertEqual(value["bed_temp_max"], 110)
+
+    @patch("toolchanger_status.set_database_item")
+    @patch("toolchanger_status.send_gcode")
+    def test_pending_without_temps_writes_nulls(self, mock_gcode, mock_db):
+        # Old-shape pending dicts (or uid-only scans) — keys present, values None
+        pending = {"color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": 500.0, "spoolman_id": 42}
+        with patch("toolchanger_status.set_active_spool_id"):
+            _assign_spool_to_tool("T1", pending)
+        value = mock_db.call_args.args[3]
+        self.assertIsNone(value["nozzle_temp_max"])
+        self.assertIsNone(value["nozzle_temp"])
 
 
 if __name__ == "__main__":
