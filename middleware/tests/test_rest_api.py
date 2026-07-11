@@ -514,6 +514,29 @@ class TestDeductionApplied(unittest.TestCase):
             self.assertEqual(resp.status_code, 400, f"bad value: {bad}")
         self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
 
+    def test_top_level_null_body_rejected(self) -> None:
+        # Explicit `null` is malformed, not a legacy clear — pending survives
+        resp = client.post("/api/deductions/AABB11/applied",
+                           content="null",
+                           headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
+    def test_malformed_json_body_rejected(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied",
+                           content='{"applied_g": ',
+                           headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
+    def test_oversized_integer_rejected(self) -> None:
+        # A JSON integer too large for float conversion must 400, not 500
+        resp = client.post("/api/deductions/AABB11/applied",
+                           content='{"applied_g": %s}' % ("9" * 400),
+                           headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
     def test_nonempty_body_without_applied_g_rejected(self) -> None:
         # A misspelled field must not silently clear the full pending value —
         # only an absent or empty body means legacy full clear

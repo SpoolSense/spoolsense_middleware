@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -379,7 +379,7 @@ def get_deduction(uid: str) -> DeductionResponse:
 
 
 @app.post("/api/deductions/{uid}/applied", response_model=DeductionConfirmResponse)
-def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> DeductionConfirmResponse:
+async def confirm_deduction(uid: str, request: Request) -> DeductionConfirmResponse:
     """Acknowledge a pending deduction after the mobile app writes the tag.
 
     No body / empty ``{}``: clear the full pending value (legacy behavior —
@@ -398,6 +398,26 @@ def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> De
     """
     uid_lower = uid.lower()
 
+    # Parse the body by hand: FastAPI binds a top-level JSON `null` to the
+    # parameter default, making it indistinguishable from an absent body —
+    # and a malformed payload must never alias the destructive legacy clear.
+    raw = await request.body()
+    if not raw or not raw.strip():
+        body: dict = {}
+    else:
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = None  # type: ignore[assignment]
+        if not isinstance(body, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_body",
+                    "message": "body must be a JSON object",
+                },
+            )
+
     if not body:
         # Legacy full clear — only an absent or empty body qualifies. A
         # nonempty body without a valid applied_g is rejected below so a
@@ -410,12 +430,18 @@ def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> De
         return DeductionConfirmResponse(success=True, cleared_g=cleared,
                                         remaining_pending_g=0.0)
 
-    applied_g = body.get("applied_g")
+    raw_applied = body.get("applied_g")
     # bool is an int subclass — reject it along with everything non-numeric.
-    # NaN/Infinity pass numeric comparisons, so require a finite value before
-    # any state is touched.
-    if isinstance(applied_g, bool) or not isinstance(applied_g, (int, float)) \
-            or not math.isfinite(applied_g) or applied_g <= 0:
+    # NaN/Infinity pass numeric comparisons and an arbitrarily large JSON
+    # integer overflows float conversion, so normalize to a finite float
+    # before any state is touched.
+    applied: Optional[float] = None
+    if not isinstance(raw_applied, bool) and isinstance(raw_applied, (int, float)):
+        try:
+            applied = float(raw_applied)
+        except OverflowError:
+            applied = None
+    if applied is None or not math.isfinite(applied) or applied <= 0:
         raise HTTPException(
             status_code=400,
             detail={
@@ -426,7 +452,7 @@ def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> De
 
     with app_state.state_lock:
         pending = app_state.pending_mobile_deductions.get(uid_lower, 0.0)
-        cleared = min(float(applied_g), pending)
+        cleared = min(applied, pending)
         remaining = pending - cleared
         if remaining <= 1e-9:  # float dust from the subtraction is a full clear
             remaining = 0.0
