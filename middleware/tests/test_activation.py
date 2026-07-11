@@ -203,6 +203,28 @@ class TestStagedObserverEvents(unittest.TestCase):
         mock_notify.assert_not_called()
 
 
+class TestBuildSpoolEventTemps(unittest.TestCase):
+    """SpoolEvent temps must come from ScanEvent's *_c fields — the old
+    suffixless getattr silently produced None for every rich scan."""
+
+    def test_temps_copied_from_scan_c_fields(self):
+        from activation import _build_spool_event
+        from publishers.base import Action
+        from state.models import ScanEvent
+        scan = ScanEvent(
+            source="spoolsense_scanner", target_id="T0", scanned_at="now",
+            uid="AA", present=True, tag_data_valid=True,
+            nozzle_temp_min_c=240, nozzle_temp_max_c=260,
+            bed_temp_min_c=90, bed_temp_max_c=110,
+        )
+        event = _build_spool_event({"action": "toolhead_stage"}, Action.TOOLHEAD_STAGE,
+                                   None, 42, "FF0000", "ASA", 500.0, scan)
+        self.assertEqual(event.nozzle_temp_min, 240)
+        self.assertEqual(event.nozzle_temp_max, 260)
+        self.assertEqual(event.bed_temp_min, 90)
+        self.assertEqual(event.bed_temp_max, 110)
+
+
 class TestPendingSlotIsolation(unittest.TestCase):
     """A scan staged for AFC must land in the AFC slot and never be visible
     to the toolchanger consumer, and vice versa — the shared-slot race this

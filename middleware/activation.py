@@ -116,10 +116,13 @@ def _build_spool_event(
         color=color_hex,
         material=filament_label,
         weight=remaining,
-        nozzle_temp_min=getattr(scan, "nozzle_temp_min", None),
-        nozzle_temp_max=getattr(scan, "nozzle_temp_max", None),
-        bed_temp_min=getattr(scan, "bed_temp_min", None),
-        bed_temp_max=getattr(scan, "bed_temp_max", None),
+        # ScanEvent temp fields carry a _c suffix — the old getattr on the
+        # suffixless names silently returned None for every rich scan,
+        # nulling temps in events and lane_data since the publisher split.
+        nozzle_temp_min=getattr(scan, "nozzle_temp_min_c", None),
+        nozzle_temp_max=getattr(scan, "nozzle_temp_max_c", None),
+        bed_temp_min=getattr(scan, "bed_temp_min_c", None),
+        bed_temp_max=getattr(scan, "bed_temp_max_c", None),
         scanner_id=scanner_id,
         tag_only=spoolman_id is None,
     )

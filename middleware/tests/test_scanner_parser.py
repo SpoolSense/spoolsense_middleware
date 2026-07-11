@@ -263,6 +263,19 @@ class TestLengthMapping(unittest.TestCase):
             {"present": True, "tag_data_valid": True, "uid": "AA"}, "T0")
         self.assertIsNone(scan.remaining_length_mm)
 
+    def test_zero_length_preserved(self):
+        # An empty spool legitimately reports 0 — must not fall through to None
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "filament_length_m": 0}, "T0")
+        self.assertEqual(scan.remaining_length_mm, 0)
+
+    def test_boolean_length_ignored(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "filament_length_m": True}, "T0")
+        self.assertIsNone(scan.remaining_length_mm)
+
     def test_non_numeric_length_ignored(self):
         scan = scan_event_from_spoolsense_scanner(
             {"present": True, "tag_data_valid": True, "uid": "AA",
