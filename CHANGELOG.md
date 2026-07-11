@@ -4,6 +4,51 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.3] - 2026-07-11
+
+### Added
+
+- **Filament deductions survive restarts** — the deduction baseline recorded
+  at scan time (weight, uid, tag format) now persists to
+  `~/SpoolSense/tracking.json` and is restored on startup, so a middleware
+  restart between a scan and `UPDATE_TAG` no longer loses the deduction. The
+  baseline is dropped when a spool ejects, unloads, or is swapped from
+  outside (Mainsail/AFC), so a stale record can never deduct from the wrong
+  spool. In Docker the file lives in the existing data volume. (#91)
+
+- **Bondtech INDX example config** — `config.example.indx.yaml` covering a
+  toolhead-stage scanner with per-tool assignment (T0–T3) and the macro set
+  INDX setups need. (#91)
+
+- **Mobile scans carry temps and length** — `/api/mobile-scan` now accepts
+  the `min/max_print_temp`, `min/max_bed_temp`, and `filament_length_m`
+  fields the iOS app has sent since 1.0.0; previously they were dropped.
+  Temps ride along to the assigned tool's `lane_data`. (#101)
+
+### Changed
+
+- **lane_data now includes all four temperatures** — `nozzle_temp_min/max`
+  and `bed_temp_min/max` are published alongside the legacy `nozzle_temp` /
+  `bed_temp` keys (which now carry the max instead of `None` on toolhead
+  targets), so slicer-profile consumers get real ranges. (#36)
+
+- **Separate pending-spool slots per consumer** — an AFC-staged scan and a
+  mobile/toolhead-staged scan no longer overwrite each other. `/api/status`
+  adds `pending_spool_afc` and `pending_spool_toolhead`; the legacy
+  `pending_spool` key is unchanged for the web panel and shipped iOS app.
+
+### Fixed
+
+- **Rich-scan temperatures were always null** in the MQTT event stream and
+  `lane_data` — the event builder read the wrong field names, silently
+  nulling temps on every rich scan since 1.8.1.
+
+- **Explicit zero-length tags preserved** — a tag reporting `0 m` remaining
+  was treated as "no data"; boolean and negative values are now rejected
+  instead of becoming bogus lengths.
+
+---
+
 ## [1.8.2] - 2026-07-10
 
 ### Added
