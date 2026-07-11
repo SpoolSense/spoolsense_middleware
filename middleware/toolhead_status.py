@@ -185,13 +185,20 @@ class ToolheadStatusSync:
                         was_locked = bool(app_state.lane_locks.get(target))
                         if was_locked:
                             publish_lock(target, "clear")
+                        # A scan writes active_spools before this poll can see
+                        # the new id — unequal means the swap came from outside
+                        externally_driven = (
+                            app_state.active_spools.get(target) != current_spool_id
+                        )
                         # Track the new spool_id regardless of lock state so
                         # consecutive Mainsail swaps stay consistent.
                         app_state.active_spools[target] = current_spool_id
-                    # The swap came from outside (no scan) — the old baseline
-                    # describes the removed spool; drop it until the next scan
-                    from tracking_store import clear_tracking
-                    clear_tracking(target)
+                    if externally_driven:
+                        # The old baseline describes the removed spool — drop
+                        # it until the next scan; a scan-driven swap keeps the
+                        # baseline the scan just recorded
+                        from tracking_store import clear_tracking
+                        clear_tracking(target)
                     if was_locked:
                         logger.info(
                             f"Toolhead status: single-toolhead spool swap #{prev} → "

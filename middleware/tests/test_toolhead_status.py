@@ -216,6 +216,39 @@ class TestCheckTransition(unittest.TestCase):
         self.assertEqual(app_state.active_spools["T0"], 9)
 
     @patch("toolhead_status.publish_lock")
+    def test_external_swap_clears_tracking_baseline(self, mock_publish_lock: MagicMock) -> None:
+        # active_spools still holds the old id — nobody scanned, so the swap
+        # is external and the stale baseline must go
+        app_state.cfg["scanners"] = {
+            "scanner_t0": {"action": "toolhead", "toolhead": "T0"},
+        }
+        app_state.active_spools["T0"] = 3
+        app_state.active_spool_tracking = {
+            "T0": app_state.ActiveSpool(uid="aaa", weight_g=500.0)}
+        sync = self._make_sync(last_spool_id=3)
+
+        sync._check_transition(9)
+
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+
+    @patch("toolhead_status.publish_lock")
+    def test_scan_driven_swap_keeps_tracking_baseline(self, mock_publish_lock: MagicMock) -> None:
+        # A scan set active_spools=9 and recorded the baseline before the
+        # poll noticed the moonraker id change — the fresh baseline must
+        # survive the swap detection
+        app_state.cfg["scanners"] = {
+            "scanner_t0": {"action": "toolhead", "toolhead": "T0"},
+        }
+        app_state.active_spools["T0"] = 9
+        app_state.active_spool_tracking = {
+            "T0": app_state.ActiveSpool(uid="bbb", weight_g=800.0)}
+        sync = self._make_sync(last_spool_id=3)
+
+        sync._check_transition(9)
+
+        self.assertIn("T0", app_state.active_spool_tracking)
+
+    @patch("toolhead_status.publish_lock")
     def test_global_spool_change_single_toolhead_no_lock_to_clear(self, mock_publish_lock: MagicMock) -> None:
         # Single-toolhead, but the toolhead isn't locked — transition does not
         # try to clear a lock that isn't there, BUT it still updates tracked

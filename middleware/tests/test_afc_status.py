@@ -17,13 +17,19 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 sys.modules.setdefault("watchdog.events", MagicMock())
 
 import app_state  # noqa: E402
-from afc_status import _sync_lane_state, _fetch_afc_status, resync_lock_state  # noqa: E402
+from afc_status import (  # noqa: E402
+    _sync_lane_state,
+    _sync_lane_state_single,
+    _fetch_afc_status,
+    resync_lock_state,
+)
 
 
 def _reset_app_state():
     app_state.cfg = {"moonraker_url": "http://moonraker:7125", "low_spool_threshold": 100}
     app_state.lane_locks = {}
     app_state.active_spools = {}
+    app_state.active_spool_tracking = {}
     app_state.lane_statuses = {}
     app_state.lane_load_states = {}
     app_state.pending_spool_afc = None
@@ -170,6 +176,56 @@ class TestSyncLaneState(unittest.TestCase):
         with patch("afc_status.publish_lock"):
             _sync_lane_state(data)
         assert app_state.active_spools.get("lane1") == 7
+
+
+class TestSwapClearsTracking(unittest.TestCase):
+    """An externally-driven spool swap (Mainsail SET_SPOOL_ID, no scan) must
+    drop the lane's deduction baseline — it describes the removed spool. A
+    scan-driven change updates active_spools first, so the incoming id matches
+    and the fresh baseline must survive."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    def _baseline(self, lane="lane1"):
+        app_state.active_spool_tracking[lane] = app_state.ActiveSpool(
+            uid="aaa", weight_g=500.0)
+
+    def test_ws_external_swap_clears_baseline(self):
+        app_state.active_spools["lane1"] = 3
+        self._baseline()
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state_single("lane1", {"spool_id": 9})
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+        self.assertEqual(app_state.active_spools["lane1"], 9)
+
+    def test_ws_scan_driven_id_keeps_baseline(self):
+        # The scan already wrote active_spools=9 and the baseline — the
+        # delta echoing the same id must not destroy it
+        app_state.active_spools["lane1"] = 9
+        self._baseline()
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state_single("lane1", {"spool_id": 9})
+        self.assertIn("lane1", app_state.active_spool_tracking)
+
+    def test_poll_external_swap_clears_baseline(self):
+        app_state.lane_locks["lane1"] = True
+        app_state.active_spools["lane1"] = 3
+        self._baseline()
+        data = _make_afc_data(spool_id=9, load=True)
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state(data)
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+        self.assertEqual(app_state.active_spools["lane1"], 9)
+
+    def test_poll_scan_driven_id_keeps_baseline(self):
+        app_state.lane_locks["lane1"] = True
+        app_state.active_spools["lane1"] = 9
+        self._baseline()
+        data = _make_afc_data(spool_id=9, load=True)
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state(data)
+        self.assertIn("lane1", app_state.active_spool_tracking)
 
 
 class TestResyncLockState(unittest.TestCase):

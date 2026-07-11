@@ -143,16 +143,23 @@ def _sync_lane_state(data: dict) -> None:
             action: str | None   = None
             pending: dict | None = None
             newly_loaded: bool   = False
+            swapped: bool        = False
 
             with app_state.state_lock:
                 was_loaded = app_state.lane_load_states.get(lane_name, False)
                 is_locked  = app_state.lane_locks.get(lane_name, False)
+                prev_spool = app_state.active_spools.get(lane_name)
                 app_state.lane_statuses[lane_name]    = status
                 app_state.lane_load_states[lane_name] = lane_is_loaded
 
                 if spool_id is not None:
                     if not is_locked:
                         action = "lock"
+                    # Externally-driven swap — same rule as the websocket
+                    # path: a scan updates active_spools first, so unequal
+                    # means the change came from outside
+                    if spool_id and prev_spool and spool_id != prev_spool:
+                        swapped = True
                     app_state.active_spools[lane_name] = spool_id
                 elif lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
                     # Lane transitioned unloaded → loaded with pending afc_stage data
@@ -164,9 +171,9 @@ def _sync_lane_state(data: dict) -> None:
                         action = "clear"
                     app_state.active_spools[lane_name] = None
 
-            if action == "clear":
-                # Spool left the lane — drop its deduction baseline so a
-                # restart can't resurrect it (#91)
+            if action == "clear" or swapped:
+                # Spool left the lane (or was swapped from outside) — drop its
+                # deduction baseline so a restart can't resurrect it (#91)
                 from tracking_store import clear_tracking
                 clear_tracking(lane_name)
 
@@ -183,6 +190,7 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
     action: str | None   = None
     pending: dict | None = None
     newly_loaded: bool   = False
+    swapped: bool        = False
 
     with app_state.state_lock:
         prev_spool = app_state.active_spools.get(lane_name)
@@ -197,8 +205,12 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
                 app_state.active_spools.pop(lane_name, None)
                 action = "clear"
             elif spool_id and spool_id != prev_spool:
+                # Externally-driven swap (a scan updates active_spools before
+                # this delta arrives, so unequal means the change came from
+                # outside) — the old baseline describes the removed spool
                 app_state.active_spools[lane_name] = spool_id
                 action = "lock"
+                swapped = True
 
         # Track load transitions
         if load_state is not None:
@@ -216,7 +228,7 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         if status is not None:
             app_state.lane_statuses[lane_name] = status
 
-    if action == "clear":
+    if action == "clear" or swapped:
         from tracking_store import clear_tracking
         clear_tracking(lane_name)
 
