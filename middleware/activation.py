@@ -59,22 +59,28 @@ def _publish_tag_only(event: SpoolEvent, target: str) -> None:
 
 
 def _cache_pending_spool(
+    slot: str,
     color_hex: str, material: str, remaining: float | None, spoolman_id: int | None,
     nozzle_temp_min: int | None = None, nozzle_temp_max: int | None = None,
     bed_temp_min: int | None = None, bed_temp_max: int | None = None,
 ) -> None:
-    """Store tag data for later consumption by afc_status (lane load) or toolchanger_status (tool pickup)."""
+    """Store tag data in the per-consumer pending slot ("afc" is consumed by
+    afc_status on lane load; "toolhead" by toolchanger_status on ASSIGN_SPOOL)."""
+    pending = {
+        "color_hex": color_hex,
+        "material": material,
+        "remaining_g": remaining,
+        "spoolman_id": spoolman_id,
+        "nozzle_temp_min": nozzle_temp_min,
+        "nozzle_temp_max": nozzle_temp_max,
+        "bed_temp_min": bed_temp_min,
+        "bed_temp_max": bed_temp_max,
+    }
     with app_state.state_lock:
-        app_state.pending_spool = {
-            "color_hex": color_hex,
-            "material": material,
-            "remaining_g": remaining,
-            "spoolman_id": spoolman_id,
-            "nozzle_temp_min": nozzle_temp_min,
-            "nozzle_temp_max": nozzle_temp_max,
-            "bed_temp_min": bed_temp_min,
-            "bed_temp_max": bed_temp_max,
-        }
+        if slot == "afc":
+            app_state.pending_spool_afc = pending
+        else:
+            app_state.pending_spool_toolhead = pending
 
 
 # ── Event building ───────────────────────────────────────────────────────────
@@ -138,7 +144,8 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
                   color_hex: str, filament_label: str, remaining: float | None,
                   spoolman_id: int | None, event: SpoolEvent) -> None:
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
-    _cache_pending_spool(color_hex, filament_label, remaining, spoolman_id,
+    slot = "afc" if action_enum == Action.AFC_STAGE else "toolhead"
+    _cache_pending_spool(slot, color_hex, filament_label, remaining, spoolman_id,
                          event.nozzle_temp_min, event.nozzle_temp_max,
                          event.bed_temp_min, event.bed_temp_max)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"

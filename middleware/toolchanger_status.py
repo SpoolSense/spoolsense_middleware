@@ -18,7 +18,7 @@ Required Klipper macro (user adds to their printer.cfg):
 Data flow:
     poll_loop() → GET /printer/objects/query?gcode_macro ASSIGN_SPOOL
                     → pending_tool changed from ""?
-                        → yes + pending_spool → assign to that tool
+                        → yes + pending toolhead spool → assign to that tool
                         → clear pending_tool via SET_GCODE_VARIABLE
                     → no → sleep and poll again
 
@@ -233,9 +233,9 @@ class ToolchangerStatusSync:
 
         pending: dict | None = None
         with app_state.state_lock:
-            if app_state.pending_spool:
-                pending = app_state.pending_spool
-                app_state.pending_spool = None
+            if app_state.pending_spool_toolhead:
+                pending = app_state.pending_spool_toolhead
+                app_state.pending_spool_toolhead = None
 
         if pending:
             logger.info(f"Macro assign WS: assigning cached spool data to {tool_name}")
@@ -307,9 +307,9 @@ class ToolchangerStatusSync:
                     # Check for pending spool data
                     pending: dict | None = None
                     with app_state.state_lock:
-                        if app_state.pending_spool:
-                            pending = app_state.pending_spool
-                            app_state.pending_spool = None
+                        if app_state.pending_spool_toolhead:
+                            pending = app_state.pending_spool_toolhead
+                            app_state.pending_spool_toolhead = None
 
                     if pending:
                         logger.info(

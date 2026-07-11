@@ -56,17 +56,13 @@ lane_statuses: dict = {}
 # Protected by state_lock.
 lane_load_states: dict[str, bool] = {}
 
-# Pending spool data from afc_stage or toolhead_stage scans.
-# Set by _activate_from_scan(), consumed by afc_status (on lane load)
-# or toolchanger_status (on tool pickup). Protected by state_lock.
-#
-# NOTE: This is a single shared slot. If a user has both afc_stage and
-# toolhead_stage scanners in the same config, a scan on one could be
-# consumed by the other's poller. In practice this is unlikely — the user
-# would need to scan on an AFC scanner then pick up a toolhead (or vice
-# versa) before the first action completes. If this becomes a reported
-# issue, split into pending_spool_afc and pending_spool_toolchanger.
-pending_spool: dict | None = None
+# Pending spool data from staged scans, one slot per consumer so a scan
+# meant for AFC can never be consumed by the toolchanger poller (or vice
+# versa) in mixed-scanner configs. afc_status consumes the AFC slot on
+# lane load; toolchanger_status (and the mobile assign flow) consume the
+# toolhead slot on ASSIGN_SPOOL. Protected by state_lock.
+pending_spool_afc: dict | None = None
+pending_spool_toolhead: dict | None = None
 
 # Tag writeback cooldown — tracks recent writes to prevent loops.
 # Maps uid → timestamp of the last write command sent.

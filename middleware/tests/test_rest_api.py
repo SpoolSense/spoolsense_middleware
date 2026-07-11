@@ -67,7 +67,8 @@ def _reset_app_state(
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
     import tempfile
     app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
@@ -179,12 +180,12 @@ class TestMobileScan(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertTrue(data["pending"])
         # Pending spool was stored in app_state
-        self.assertIsNotNone(app_state.pending_spool)
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
 
     def test_toolhead_stage_replaced_flag_set_on_second_scan(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
         # Pre-populate a pending spool to simulate scanning twice
-        app_state.pending_spool = {"uid": "00000000", "spoolman_id": 1}
+        app_state.pending_spool_toolhead = {"uid": "00000000", "spoolman_id": 1}
         scan = _make_scan_event()
         with patch("rest_api.detect_and_parse", return_value=scan):
             resp = self._post({"uid": "aabbccdd", "present": True, "tag_data_valid": True})
@@ -229,7 +230,7 @@ class TestAssignTool(unittest.TestCase):
     def setUp(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
         # Pre-populate a pending spool so assign-tool has something to work with
-        app_state.pending_spool = {
+        app_state.pending_spool_toolhead = {
             "uid": "aabbccdd",
             "spoolman_id": 42,
             "color_hex": "FF0000",
@@ -277,7 +278,8 @@ class TestAssignTool(unittest.TestCase):
         self.assertFalse(resp.json()["success"])
 
     def test_no_pending_spool_returns_409(self):
-        app_state.pending_spool = None
+        app_state.pending_spool_afc = None
+        app_state.pending_spool_toolhead = None
         resp = self._post("T0")
         self.assertEqual(resp.status_code, 409)
 
@@ -299,7 +301,7 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
 
     def setUp(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
-        app_state.pending_spool = {
+        app_state.pending_spool_toolhead = {
             "uid": "aabbccdd",
             "spoolman_id": 42,
             "color_hex": "FF0000",
@@ -345,7 +347,8 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
         mock_gcode.assert_called_once()
 
     def test_uid_with_no_pending_returns_409(self):
-        app_state.pending_spool = None
+        app_state.pending_spool_afc = None
+        app_state.pending_spool_toolhead = None
         with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
         self.assertEqual(resp.status_code, 409)
@@ -353,7 +356,7 @@ class TestAssignToolSpoolBinding(unittest.TestCase):
 
     def test_pending_record_without_uid_returns_409(self):
         # Pending record lacks a uid — binding can't be verified, refuse to guess
-        app_state.pending_spool = {"spoolman_id": 42}
+        app_state.pending_spool_toolhead = {"spoolman_id": 42}
         with patch("rest_api.send_gcode") as mock_gcode:
             resp = self._post({"toolhead": "T0", "uid": "aabbccdd"})
         self.assertEqual(resp.status_code, 409)

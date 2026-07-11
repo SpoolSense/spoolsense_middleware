@@ -28,7 +28,8 @@ def _reset_app_state(moonraker_url="http://moonraker:7125"):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
 
 

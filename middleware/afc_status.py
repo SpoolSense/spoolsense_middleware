@@ -154,11 +154,11 @@ def _sync_lane_state(data: dict) -> None:
                     if not is_locked:
                         action = "lock"
                     app_state.active_spools[lane_name] = spool_id
-                elif lane_is_loaded and not was_loaded and app_state.pending_spool:
+                elif lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
                     # Lane transitioned unloaded → loaded with pending afc_stage data
                     newly_loaded = True
-                    pending = app_state.pending_spool
-                    app_state.pending_spool = None
+                    pending = app_state.pending_spool_afc
+                    app_state.pending_spool_afc = None
                 else:
                     if is_locked:
                         action = "clear"
@@ -201,9 +201,9 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
             app_state.lane_load_states[lane_name] = load_state
 
         # Consume pending afc_stage data on load transition
-        if newly_loaded and app_state.pending_spool:
-            pending = app_state.pending_spool
-            app_state.pending_spool = None
+        if newly_loaded and app_state.pending_spool_afc:
+            pending = app_state.pending_spool_afc
+            app_state.pending_spool_afc = None
 
         # Update lane status if present in delta
         status = data.get("status")

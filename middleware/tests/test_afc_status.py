@@ -26,7 +26,7 @@ def _reset_app_state():
     app_state.active_spools = {}
     app_state.lane_statuses = {}
     app_state.lane_load_states = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
     app_state.state_lock = threading.Lock()
 
 
@@ -79,7 +79,7 @@ class TestSyncLaneState(unittest.TestCase):
 
     def test_newly_loaded_lane_with_pending_spool_sends_data(self):
         app_state.lane_load_states["lane1"] = False  # was unloaded
-        app_state.pending_spool = {
+        app_state.pending_spool_afc = {
             "color_hex": "FF0000",
             "material": "PLA",
             "remaining_g": 250.0,
@@ -101,11 +101,11 @@ class TestSyncLaneState(unittest.TestCase):
                     _sync_lane_state(data)
                 mock_send.assert_called_once_with("http://moonraker:7125", "lane1", "FF0000", "PLA", 250.0)
         # pending_spool consumed
-        assert app_state.pending_spool is None
+        assert app_state.pending_spool_afc is None
 
     def test_already_loaded_lane_no_false_trigger(self):
         app_state.lane_load_states["lane1"] = True  # already loaded
-        app_state.pending_spool = {
+        app_state.pending_spool_afc = {
             "color_hex": "00FF00",
             "material": "PETG",
             "remaining_g": 150.0,
@@ -118,7 +118,7 @@ class TestSyncLaneState(unittest.TestCase):
             # Already loaded — no send triggered
             mock_send.assert_not_called()
         # pending_spool should remain untouched
-        assert app_state.pending_spool is not None
+        assert app_state.pending_spool_afc is not None
 
     def test_system_key_skipped(self):
         data = {

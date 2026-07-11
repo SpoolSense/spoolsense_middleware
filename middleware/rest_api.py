@@ -108,12 +108,16 @@ def get_config() -> dict[str, Any]:
 def get_status() -> dict[str, Any]:
     with app_state.state_lock:
         active = dict(app_state.active_spools)
-        pending = app_state.pending_spool.copy() if app_state.pending_spool else None
+        pending_afc = app_state.pending_spool_afc.copy() if app_state.pending_spool_afc else None
+        pending_toolhead = app_state.pending_spool_toolhead.copy() if app_state.pending_spool_toolhead else None
         locked = [k for k, v in app_state.lane_locks.items() if v]
 
     return {
         "active_spools": active,
-        "pending_spool": pending,
+        # Legacy combined view (web panel pending dot) + explicit slots
+        "pending_spool": pending_toolhead or pending_afc,
+        "pending_spool_afc": pending_afc,
+        "pending_spool_toolhead": pending_toolhead,
         "locked_targets": locked,
     }
 
@@ -192,8 +196,8 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
     # toolhead_stage: cache as pending, phone picks toolhead next
     if action == "toolhead_stage":
         with app_state.state_lock:
-            replaced = app_state.pending_spool is not None
-            app_state.pending_spool = {
+            replaced = app_state.pending_spool_toolhead is not None
+            app_state.pending_spool_toolhead = {
                 "color_hex": scan.color_hex or "FFFFFF",
                 "material": scan.material_name or scan.material_type or "Unknown",
                 "remaining_g": scan.remaining_weight_g,
@@ -267,7 +271,7 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
         )
 
     with app_state.state_lock:
-        pending = app_state.pending_spool
+        pending = app_state.pending_spool_toolhead
         if not pending:
             # detail carries a machine-readable code for clients that parse
             # error bodies. The shipped iOS 1.0.0 build ignores non-2xx bodies
@@ -278,7 +282,7 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
                 "message": "No pending spool — scan a tag first",
             })
         # Spool binding (spoolsense-mobile #31): newer clients echo back the uid
-        # they scanned. pending_spool is a single last-write-wins slot, so a scan
+        # they scanned. The toolhead pending slot is last-write-wins, so a scan
         # from any phone landing between mobile-scan and assign-tool would hand
         # this assignment the wrong spool — reject before any gcode goes out.
         # Case-insensitive: mobile sends uppercase hex, parsers store lowercase.
@@ -288,7 +292,7 @@ def assign_tool(req: AssignToolRequest) -> ApiResponse:
                 "code": "pending_spool_changed",
                 "message": "Pending spool changed since scan — rescan and try again",
             })
-        # Don't clear pending_spool here — toolchanger_status.py watcher
+        # Don't clear the pending slot here — toolchanger_status.py watcher
         # consumes it when it detects the ASSIGN_SPOOL macro variable change
 
     moonraker = app_state.cfg.get("moonraker_url", "")

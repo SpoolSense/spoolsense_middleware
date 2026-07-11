@@ -57,7 +57,8 @@ def _reset_app_state(prefix="spoolsense", scanners=None):
     app_state.lane_locks = {}
     app_state.active_spools = {}
     app_state.active_spool_tracking = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
     import tempfile
     app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")

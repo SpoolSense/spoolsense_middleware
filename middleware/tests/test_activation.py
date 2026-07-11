@@ -28,7 +28,8 @@ def _setup_app_state(moonraker_url="http://moonraker:7125"):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
-    app_state.pending_spool = None
+    app_state.pending_spool_afc = None
+    app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
 
 
@@ -200,6 +201,44 @@ class TestStagedObserverEvents(unittest.TestCase):
             _route_staged(Action.AFC_STAGE, True, "FF0000", "PLA", 500.0,
                           42, MagicMock())
         mock_notify.assert_not_called()
+
+
+class TestPendingSlotIsolation(unittest.TestCase):
+    """A scan staged for AFC must land in the AFC slot and never be visible
+    to the toolchanger consumer, and vice versa — the shared-slot race this
+    split exists to kill."""
+
+    def setUp(self):
+        _setup_app_state()
+
+    def _stage(self, action):
+        from activation import _route_staged
+        from publishers.base import Action
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(action, True, "FF0000", "PLA", 500.0, 42, event)
+
+    def test_afc_scan_fills_only_afc_slot(self):
+        from publishers.base import Action
+        self._stage(Action.AFC_STAGE)
+        self.assertIsNotNone(app_state.pending_spool_afc)
+        self.assertIsNone(app_state.pending_spool_toolhead)
+
+    def test_toolhead_scan_fills_only_toolhead_slot(self):
+        from publishers.base import Action
+        self._stage(Action.TOOLHEAD_STAGE)
+        self.assertIsNone(app_state.pending_spool_afc)
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
+
+    def test_mixed_scans_do_not_clobber_each_other(self):
+        from publishers.base import Action
+        self._stage(Action.AFC_STAGE)
+        self._stage(Action.TOOLHEAD_STAGE)
+        self.assertEqual(app_state.pending_spool_afc["spoolman_id"], 42)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 42)
+        self.assertIsNot(app_state.pending_spool_afc,
+                         app_state.pending_spool_toolhead)
 
 
 class TestBuildSpoolEventScannerId(unittest.TestCase):
