@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 import app_state
 import moonraker_client

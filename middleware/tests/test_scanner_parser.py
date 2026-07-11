@@ -242,5 +242,33 @@ class TestEdgeCases(unittest.TestCase):
         self.assertTrue(event.present)
 
 
+class TestLengthMapping(unittest.TestCase):
+    """filament_length_m (mobile) / remaining_m (tag CBOR) map to
+    remaining_length_mm — previously silently dropped (#101)."""
+
+    def test_filament_length_m_converted_to_mm(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "filament_length_m": 240.5}, "T0")
+        self.assertEqual(scan.remaining_length_mm, 240500)
+
+    def test_remaining_m_fallback(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "remaining_m": 100}, "T0")
+        self.assertEqual(scan.remaining_length_mm, 100000)
+
+    def test_absent_length_is_none(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA"}, "T0")
+        self.assertIsNone(scan.remaining_length_mm)
+
+    def test_non_numeric_length_ignored(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "filament_length_m": "junk"}, "T0")
+        self.assertIsNone(scan.remaining_length_mm)
+
+
 if __name__ == "__main__":
     unittest.main()

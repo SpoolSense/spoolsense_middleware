@@ -54,6 +54,12 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
     if spoolman_id == -1:
         spoolman_id = None
 
+    # Length arrives as meters (mobile sends filament_length_m; tag CBOR uses
+    # remaining_m — firmware doesn't publish either today, so this is None on
+    # MQTT scans). ScanEvent stores millimeters.
+    length_m = payload.get("filament_length_m") or payload.get("remaining_m")
+    remaining_length_mm = length_m * 1000 if isinstance(length_m, (int, float)) else None
+
     uid = payload.get("uid") or None
     present = bool(payload.get("present", True))
     tag_data_valid = bool(payload.get("tag_data_valid", False))
@@ -94,5 +100,6 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
         bed_temp_max_c=payload.get("max_bed_temp"),
         diameter_mm=payload.get("diameter_mm"),
         density=payload.get("density"),
+        remaining_length_mm=remaining_length_mm,
         raw=payload,
     )

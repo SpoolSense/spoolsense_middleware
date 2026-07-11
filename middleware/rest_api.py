@@ -12,14 +12,12 @@ import logging
 import os
 import signal
 import subprocess
-import sys
 import threading
 from pathlib import Path
 from typing import Any, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -55,6 +53,12 @@ class MobileScanRequest(BaseModel):
     spoolman_id: Optional[int] = None
     density: Optional[float] = None
     diameter_mm: Optional[float] = None
+    # Sent by the iOS app since 1.0.0 — previously ignored by this model (#101)
+    min_print_temp: Optional[int] = None
+    max_print_temp: Optional[int] = None
+    min_bed_temp: Optional[int] = None
+    max_bed_temp: Optional[int] = None
+    filament_length_m: Optional[float] = None
 
 
 class AssignToolRequest(BaseModel):

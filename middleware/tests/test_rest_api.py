@@ -188,6 +188,29 @@ class TestMobileScan(unittest.TestCase):
             resp = self._post({"uid": "aabbccdd", "present": True, "tag_data_valid": True})
         self.assertTrue(resp.json()["replaced"])
 
+    def test_ios_temp_and_length_fields_reach_the_parser(self):
+        # The shipped app sends these; the model silently dropped them (#101)
+        captured = {}
+        def fake_parse(payload, target_id, topic=""):
+            captured.update(payload)
+            return _make_scan_event()
+        with (
+            patch("rest_api.detect_and_parse", side_effect=fake_parse),
+            patch("rest_api._activate_from_scan"),
+        ):
+            resp = self._post({
+                "uid": "AABB", "present": True, "tag_data_valid": True,
+                "min_print_temp": 190, "max_print_temp": 220,
+                "min_bed_temp": 50, "max_bed_temp": 60,
+                "filament_length_m": 240.0,
+            })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["min_print_temp"], 190)
+        self.assertEqual(captured["max_print_temp"], 220)
+        self.assertEqual(captured["min_bed_temp"], 50)
+        self.assertEqual(captured["max_bed_temp"], 60)
+        self.assertEqual(captured["filament_length_m"], 240.0)
+
     def test_parse_error_returns_failure_not_500(self):
         with patch("rest_api.detect_and_parse", side_effect=ValueError("bad format")):
             resp = self._post({"uid": "aabbccdd", "present": True, "tag_data_valid": True})
