@@ -59,7 +59,9 @@ def _publish_tag_only(event: SpoolEvent, target: str) -> None:
 
 
 def _cache_pending_spool(
-    color_hex: str, material: str, remaining: float | None, spoolman_id: int | None
+    color_hex: str, material: str, remaining: float | None, spoolman_id: int | None,
+    nozzle_temp_min: int | None = None, nozzle_temp_max: int | None = None,
+    bed_temp_min: int | None = None, bed_temp_max: int | None = None,
 ) -> None:
     """Store tag data for later consumption by afc_status (lane load) or toolchanger_status (tool pickup)."""
     with app_state.state_lock:
@@ -68,6 +70,10 @@ def _cache_pending_spool(
             "material": material,
             "remaining_g": remaining,
             "spoolman_id": spoolman_id,
+            "nozzle_temp_min": nozzle_temp_min,
+            "nozzle_temp_max": nozzle_temp_max,
+            "bed_temp_min": bed_temp_min,
+            "bed_temp_max": bed_temp_max,
         }
 
 
@@ -132,7 +138,9 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
                   color_hex: str, filament_label: str, remaining: float | None,
                   spoolman_id: int | None, event: SpoolEvent) -> None:
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
-    _cache_pending_spool(color_hex, filament_label, remaining, spoolman_id)
+    _cache_pending_spool(color_hex, filament_label, remaining, spoolman_id,
+                         event.nozzle_temp_min, event.nozzle_temp_max,
+                         event.bed_temp_min, event.bed_temp_max)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"
     if spoolman_activated:
         logger.info(f"[{stage_name}] Spool staged with Spoolman ID, scanner remains unlocked")

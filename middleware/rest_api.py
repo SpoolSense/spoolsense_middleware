@@ -199,6 +199,10 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
                 "remaining_g": scan.remaining_weight_g,
                 "spoolman_id": scan.scanner_spoolman_id,
                 "uid": scan.uid,
+                "nozzle_temp_min": scan.nozzle_temp_min_c,
+                "nozzle_temp_max": scan.nozzle_temp_max_c,
+                "bed_temp_min": scan.bed_temp_min_c,
+                "bed_temp_max": scan.bed_temp_max_c,
             }
 
         msg = (

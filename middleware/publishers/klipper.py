@@ -169,8 +169,13 @@ def _publish_toolhead_lane_data(moonraker: str, event: SpoolEvent) -> None:
         "color": color,
         "material": material,
         "weight": round(event.weight) if event.weight else 0,
+        # Legacy single-temp keys stay = max for existing consumers (#36)
         "nozzle_temp": event.nozzle_temp_max,
         "bed_temp": event.bed_temp_max,
+        "nozzle_temp_min": event.nozzle_temp_min,
+        "nozzle_temp_max": event.nozzle_temp_max,
+        "bed_temp_min": event.bed_temp_min,
+        "bed_temp_max": event.bed_temp_max,
         "spool_id": event.spool_id,
         "lane": lane,
     }
