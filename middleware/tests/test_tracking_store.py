@@ -76,5 +76,46 @@ class TestTrackingStore(unittest.TestCase):
         save_tracking()  # must not raise
 
 
+class TestClearTracking(unittest.TestCase):
+    """Eject/clear paths must drop the persisted baseline — otherwise a
+    restart resurrects it and UPDATE_TAG deducts from an unmounted spool."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        self.tmp.close()
+        os.unlink(self.tmp.name)
+        app_state.TRACKING_FILE = self.tmp.name
+        app_state.state_lock = threading.Lock()
+        app_state.active_spool_tracking = {
+            "T0": app_state.ActiveSpool(uid="aaa", weight_g=500.0),
+            "lane1": app_state.ActiveSpool(uid="bbb", weight_g=750.0),
+        }
+
+    def tearDown(self):
+        if os.path.exists(self.tmp.name):
+            os.unlink(self.tmp.name)
+
+    def test_clear_removes_record_and_persists(self):
+        from tracking_store import clear_tracking, load_tracking
+        clear_tracking("T0")
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+        # The FILE must not resurrect it either
+        app_state.active_spool_tracking = {}
+        load_tracking()
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+        self.assertIn("lane1", app_state.active_spool_tracking)
+
+    def test_clear_missing_target_is_noop_without_file_write(self):
+        from tracking_store import clear_tracking
+        app_state.active_spool_tracking = {}
+        clear_tracking("lane1")   # nothing tracked → nothing removed
+        self.assertFalse(os.path.exists(self.tmp.name))
+
+    def test_clear_multiple_targets(self):
+        from tracking_store import clear_tracking
+        clear_tracking("T0", "lane1", "not-tracked")
+        self.assertEqual(app_state.active_spool_tracking, {})
+
+
 if __name__ == "__main__":
     unittest.main()

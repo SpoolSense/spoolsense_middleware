@@ -69,6 +69,10 @@ def on_ws_save_variables(variables: dict) -> None:
                 app_state.active_spools[t] = spool_id
 
         if changed:
+            # Any externally-driven change means the tracked baseline no
+            # longer describes what's mounted — drop it until the next scan
+            from tracking_store import clear_tracking
+            clear_tracking(t)
             if spool_id is None:
                 logger.info(f"Klipper sync: {t} cleared")
             else:

@@ -51,6 +51,20 @@ def load_tracking() -> None:
         logger.exception("tracking_store: failed to load %s", app_state.TRACKING_FILE)
 
 
+def clear_tracking(*targets: str) -> None:
+    """Remove tracking records for targets whose spool was ejected/cleared,
+    and persist if anything was removed. Callers must NOT hold state_lock.
+    A no-op for targets with no record, so poll loops can call it every
+    cycle without file churn."""
+    removed = False
+    with app_state.state_lock:
+        for target in targets:
+            if app_state.active_spool_tracking.pop(target, None) is not None:
+                removed = True
+    if removed:
+        save_tracking()
+
+
 def save_tracking() -> None:
     """Persist the current tracking dict. Never raises."""
     try:

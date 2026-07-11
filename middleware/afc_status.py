@@ -164,6 +164,12 @@ def _sync_lane_state(data: dict) -> None:
                         action = "clear"
                     app_state.active_spools[lane_name] = None
 
+            if action == "clear":
+                # Spool left the lane — drop its deduction baseline so a
+                # restart can't resurrect it (#91)
+                from tracking_store import clear_tracking
+                clear_tracking(lane_name)
+
             _publish_lane_actions(lane_name, action, pending, newly_loaded, "Sync")
 
 
@@ -209,6 +215,10 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         status = data.get("status")
         if status is not None:
             app_state.lane_statuses[lane_name] = status
+
+    if action == "clear":
+        from tracking_store import clear_tracking
+        clear_tracking(lane_name)
 
     _publish_lane_actions(lane_name, action, pending, newly_loaded, "WS")
 

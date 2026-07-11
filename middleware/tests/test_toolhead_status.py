@@ -138,6 +138,18 @@ class TestCheckTransition(unittest.TestCase):
         return sync
 
     @patch("toolhead_status.publish_lock")
+    def test_eject_clears_tracking_baseline(self, mock_publish_lock: MagicMock) -> None:
+        # Persisted baselines must die with the eject (#91 staleness)
+        import tempfile as _tf
+        app_state.TRACKING_FILE = os.path.join(_tf.gettempdir(), "ss-test-tracking.json")
+        app_state.active_spools["T0"] = 5
+        app_state.active_spool_tracking = {
+            "T0": app_state.ActiveSpool(uid="aaa", weight_g=500.0)}
+        sync = self._make_sync(last_spool_id=5)
+        sync._check_transition(None)
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+
+    @patch("toolhead_status.publish_lock")
     def test_detects_spool_change_clears_toolhead_lock(self, mock_publish_lock: MagicMock) -> None:
         # Transition from spool 5 → None should clear whichever toolhead held spool 5
         app_state.active_spools["T0"] = 5
