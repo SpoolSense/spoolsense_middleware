@@ -216,6 +216,7 @@ def _handle_afc() -> None:
     if not lane_weights:
         logger.info("UPDATE_TAG: no AFC lane weights available — skipping")
         return
+    rebaselined = False
 
     # Snapshot state under lock
     with app_state.state_lock:
@@ -253,6 +254,11 @@ def _handle_afc() -> None:
             live = app_state.active_spool_tracking.get(lane)
             if live is not None:
                 live.weight_g = current_weight
+                rebaselined = True
+
+    if rebaselined:
+        # One write for the whole deduction pass — per-lane saves would
+        # rewrite the file N times for an N-lane AFC
         from tracking_store import save_tracking
         save_tracking()
 

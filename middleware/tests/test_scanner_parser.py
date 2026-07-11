@@ -282,6 +282,12 @@ class TestLengthMapping(unittest.TestCase):
              "filament_length_m": "junk"}, "T0")
         self.assertIsNone(scan.remaining_length_mm)
 
+    def test_negative_length_ignored(self):
+        scan = scan_event_from_spoolsense_scanner(
+            {"present": True, "tag_data_valid": True, "uid": "AA",
+             "filament_length_m": -5}, "T0")
+        self.assertIsNone(scan.remaining_length_mm)
+
 
 if __name__ == "__main__":
     unittest.main()

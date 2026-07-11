@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -235,7 +235,6 @@ class TestPendingSlotIsolation(unittest.TestCase):
 
     def _stage(self, action):
         from activation import _route_staged
-        from publishers.base import Action
         event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
                           bed_temp_min=None, bed_temp_max=None)
         with patch("activation.notify_observers"):

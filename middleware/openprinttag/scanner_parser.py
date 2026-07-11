@@ -61,7 +61,7 @@ def scan_event_from_spoolsense_scanner(payload: dict, target_id: str, topic: str
     if length_m is None:
         length_m = payload.get("remaining_m")
     # bool is an int subclass — exclude it so `true` doesn't become 1000 mm
-    if isinstance(length_m, bool) or not isinstance(length_m, (int, float)):
+    if isinstance(length_m, bool) or not isinstance(length_m, (int, float)) or length_m < 0:
         remaining_length_mm = None
     else:
         remaining_length_mm = length_m * 1000
