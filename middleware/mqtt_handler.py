@@ -85,6 +85,9 @@ def _record_spool_tracking(
             density=density or 1.24,
             tag_format=tag_format or "unknown",
         )
+    # Persist so the deduction baseline survives restarts (#91)
+    from tracking_store import save_tracking
+    save_tracking()
 
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same

@@ -253,6 +253,8 @@ def _handle_afc() -> None:
             live = app_state.active_spool_tracking.get(lane)
             if live is not None:
                 live.weight_g = current_weight
+        from tracking_store import save_tracking
+        save_tracking()
 
 
 def _fetch_tool_filament_used() -> dict[str, float] | None:

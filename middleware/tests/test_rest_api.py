@@ -69,6 +69,8 @@ def _reset_app_state(
     app_state.active_spools = {}
     app_state.pending_spool = None
     app_state.state_lock = threading.Lock()
+    import tempfile
+    app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
     app_state.spoolman_client = None
 
 

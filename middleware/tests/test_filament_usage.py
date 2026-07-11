@@ -38,6 +38,8 @@ def _reset_app_state():
         "low_spool_threshold": 100,
     }
     app_state.state_lock = threading.Lock()
+    import tempfile
+    app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
     app_state.active_spool_tracking = {}
     app_state.low_spool_latched = {}
     app_state.mqtt_client = MagicMock()

@@ -111,3 +111,9 @@ service_health: dict[str, str] = {
 # Protected by state_lock.
 pending_mobile_deductions: dict[str, float] = {}
 DEDUCTIONS_FILE: str = os.path.expanduser("~/SpoolSense/deductions.json")
+
+# active_spool_tracking persistence (#91) — deduction baselines survive
+# middleware restarts. Spools can stay mounted for weeks (toolchangers,
+# INDX); losing the baseline on every service restart silently broke
+# deduction until the next rescan.
+TRACKING_FILE: str = os.path.expanduser("~/SpoolSense/tracking.json")

@@ -1,0 +1,56 @@
+# =============================================================
+# SpoolSense NFC Middleware — Configuration (Bondtech INDX)
+# =============================================================
+# Copy this file to ~/SpoolSense/config.yaml and fill in your values.
+#
+#   cp config.example.indx.yaml ~/SpoolSense/config.yaml
+#
+# INDX on Klipper presents as a plain toolchanger (T0-T9). One shared
+# scanner stages a spool; assign it to a tool with the keypad, web UI,
+# mobile app, or by running ASSIGN_SPOOL TOOL=Tn in the console.
+# Spool-to-tool assignments persist in Klipper save_variables and are
+# restored on boot. Deduction baselines persist across middleware
+# restarts (tracking.json) — INDX spools stay mounted for weeks.
+# =============================================================
+
+# ---- MQTT Broker --------------------------------------------
+mqtt:
+  broker: "YOUR_MQTT_BROKER_IP"
+  port: 1883
+  username: "your_mqtt_username"
+  password: "your_mqtt_password"
+
+# ---- Spoolman URL (optional) -------------------------------
+spoolman_url: "http://YOUR_SPOOLMAN_IP:7912"
+
+# ---- Moonraker URL ------------------------------------------
+moonraker_url: "http://YOUR_KLIPPER_IP"
+
+# ---- Low Spool Threshold ------------------------------------
+low_spool_threshold: 100
+
+# ---- Scanners ------------------------------------------------
+# One shared scanner. Scan a spool, then assign it to a tool.
+scanners:
+  "YOUR_DEVICE_ID":
+    action: "toolhead_stage"
+
+# Tools the assign flow accepts. INDX supports 2-10 tools (T0-T9);
+# list the ones your machine has.
+toolheads: ["T0", "T1", "T2", "T3"]
+
+scanner_topic_prefix: "spoolsense"
+
+# ---- Required Klipper macros --------------------------------
+# Add the SpoolSense macro set to your printer.cfg — see
+# middleware/klipper/spoolsense.cfg in this repo. You need:
+#
+#   [gcode_macro ASSIGN_SPOOL]     assignment entry point
+#   [gcode_macro UPDATE_TAG]       end-of-print deduction trigger
+#   variable_spool_id on each tool macro (T0..Tn)
+#   [delayed_gcode RESTORE_SPOOL_IDS]  restores assignments on boot
+#
+# Per-tool usage deduction during multi-tool prints additionally needs
+# klipper-toolchanger's per-tool filament tracking (tool T<n> objects
+# exposing filament_used). Without it, deduction falls back to slicer
+# estimates.
