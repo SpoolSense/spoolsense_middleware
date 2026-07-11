@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -364,6 +364,9 @@ class DeductionResponse(BaseModel):
 class DeductionConfirmResponse(BaseModel):
     success: bool
     cleared_g: float
+    # New in 1.8.4 — shipped mobile 1.0.0 requires success + cleared_g to stay;
+    # extra fields are ignored by its decoder
+    remaining_pending_g: float = 0.0
 
 
 @app.get("/api/deductions/{uid}", response_model=DeductionResponse)
@@ -375,15 +378,64 @@ def get_deduction(uid: str) -> DeductionResponse:
 
 
 @app.post("/api/deductions/{uid}/applied", response_model=DeductionConfirmResponse)
-def confirm_deduction(uid: str) -> DeductionConfirmResponse:
-    """Clear a pending deduction after the mobile app confirms the tag write succeeded."""
+def confirm_deduction(uid: str, body: Optional[dict] = Body(default=None)) -> DeductionConfirmResponse:
+    """Acknowledge a pending deduction after the mobile app writes the tag.
+
+    No body / empty ``{}``: clear the full pending value (legacy behavior —
+    shipped mobile 1.0.0 posts an empty body and expects a full clear).
+
+    ``{"applied_g": <float>}``: subtract only what the app actually applied
+    and retain the remainder as still-pending, so a partial tag write no
+    longer forfeits (or double-counts on retry) the rest. An ``applied_g``
+    above the pending value clears everything — clock skew between the
+    phone's apply and a concurrent scanner deduction makes small overshoots
+    legitimate — and can never drive pending negative.
+
+    NOT idempotent: each post subtracts again. A retry after an ambiguous
+    outcome (timeout, transport error) must re-GET /api/deductions/{uid}
+    and reconcile before posting, rather than blindly reposting.
+    """
     uid_lower = uid.lower()
+    applied_g = (body or {}).get("applied_g")
+
+    if applied_g is None:
+        # Legacy full clear
+        with app_state.state_lock:
+            cleared = app_state.pending_mobile_deductions.pop(uid_lower, 0.0)
+        if cleared > 0:
+            _save_deductions()
+            logger.info(f"Mobile deduction: cleared {cleared:.1f}g for {uid_lower}")
+        return DeductionConfirmResponse(success=True, cleared_g=cleared,
+                                        remaining_pending_g=0.0)
+
+    # bool is an int subclass — reject it along with everything non-numeric
+    if isinstance(applied_g, bool) or not isinstance(applied_g, (int, float)) \
+            or applied_g <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_applied_g",
+                "message": "applied_g must be a number greater than 0",
+            },
+        )
+
     with app_state.state_lock:
-        cleared = app_state.pending_mobile_deductions.pop(uid_lower, 0.0)
+        pending = app_state.pending_mobile_deductions.get(uid_lower, 0.0)
+        cleared = min(float(applied_g), pending)
+        remaining = pending - cleared
+        if remaining <= 1e-9:  # float dust from the subtraction is a full clear
+            remaining = 0.0
+            app_state.pending_mobile_deductions.pop(uid_lower, None)
+        else:
+            app_state.pending_mobile_deductions[uid_lower] = remaining
     if cleared > 0:
         _save_deductions()
-        logger.info(f"Mobile deduction: cleared {cleared:.1f}g for {uid_lower}")
-    return DeductionConfirmResponse(success=True, cleared_g=cleared)
+        logger.info(
+            f"Mobile deduction: applied {cleared:.1f}g for {uid_lower} "
+            f"({remaining:.1f}g still pending)"
+        )
+    return DeductionConfirmResponse(success=True, cleared_g=cleared,
+                                    remaining_pending_g=remaining)
 
 
 # ── Web config panel endpoints ───────────────────────────────────────────────

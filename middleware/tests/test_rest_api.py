@@ -427,6 +427,99 @@ class TestUnlockTarget(unittest.TestCase):
         self.assertTrue(app_state.lane_locks["lane1"])
 
 
+class TestDeductionApplied(unittest.TestCase):
+    """POST /api/deductions/{uid}/applied — legacy full clear (empty body,
+    shipped mobile 1.0.0) and partial acknowledgment via applied_g (#94)."""
+
+    def setUp(self) -> None:
+        _reset_app_state()
+        app_state.pending_mobile_deductions = {"aabb11": 25.5}
+
+    def test_empty_body_clears_all_legacy(self) -> None:
+        # Shipped 1.0.0 posts `{}` and expects a full clear
+        resp = client.post("/api/deductions/AABB11/applied", json={})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["cleared_g"], 25.5)
+        self.assertEqual(data["remaining_pending_g"], 0.0)
+        self.assertNotIn("aabb11", app_state.pending_mobile_deductions)
+
+    def test_no_body_clears_all_legacy(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cleared_g"], 25.5)
+        self.assertNotIn("aabb11", app_state.pending_mobile_deductions)
+
+    def test_partial_apply_retains_remainder(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": 10.0})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["cleared_g"], 10.0)
+        self.assertEqual(data["remaining_pending_g"], 15.5)
+        # Remainder visible on the read endpoint
+        get_resp = client.get("/api/deductions/AABB11")
+        self.assertEqual(get_resp.json()["pending_g"], 15.5)
+
+    def test_full_amount_clears_entry(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": 25.5})
+        self.assertEqual(resp.json()["cleared_g"], 25.5)
+        self.assertEqual(resp.json()["remaining_pending_g"], 0.0)
+        self.assertNotIn("aabb11", app_state.pending_mobile_deductions)
+
+    def test_overshoot_clamps_to_pending(self) -> None:
+        # Clock skew vs a concurrent scanner deduction — clamp, don't error
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": 30.0})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cleared_g"], 25.5)
+        self.assertEqual(resp.json()["remaining_pending_g"], 0.0)
+        self.assertNotIn("aabb11", app_state.pending_mobile_deductions)
+
+    def test_apply_against_no_pending_is_noop(self) -> None:
+        resp = client.post("/api/deductions/UNSEEN99/applied",
+                           json={"applied_g": 5.0})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cleared_g"], 0.0)
+        self.assertEqual(resp.json()["remaining_pending_g"], 0.0)
+
+    def test_zero_applied_rejected(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": 0})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
+    def test_negative_applied_rejected(self) -> None:
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": -5.0})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_non_numeric_applied_rejected(self) -> None:
+        for bad in ("10.0", True, [10]):
+            resp = client.post("/api/deductions/AABB11/applied",
+                               json={"applied_g": bad})
+            self.assertEqual(resp.status_code, 400, f"bad value: {bad!r}")
+        self.assertEqual(app_state.pending_mobile_deductions["aabb11"], 25.5)
+
+    def test_explicit_null_applied_is_legacy_clear(self) -> None:
+        # JSON null is indistinguishable from an absent key — legacy clear
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": None})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cleared_g"], 25.5)
+
+    def test_repeated_partial_posts_subtract_again(self) -> None:
+        # Documented semantics: NOT idempotent — a retry must re-GET first
+        client.post("/api/deductions/AABB11/applied", json={"applied_g": 10.0})
+        resp = client.post("/api/deductions/AABB11/applied",
+                           json={"applied_g": 10.0})
+        self.assertEqual(resp.json()["cleared_g"], 10.0)
+        self.assertEqual(resp.json()["remaining_pending_g"], 5.5)
+
+
 class TestSaveConfigDockerRestart(unittest.TestCase):
     """In Docker (SPOOLSENSE_IN_DOCKER set), save-config self-terminates via
     SIGTERM so the container restart policy relaunches with the new config —
