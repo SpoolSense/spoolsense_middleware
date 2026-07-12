@@ -338,6 +338,7 @@ def _save_deductions() -> None:
     with app_state.state_lock:
         snapshot = dict(app_state.pending_mobile_deductions)
     try:
+        os.makedirs(os.path.dirname(app_state.DEDUCTIONS_FILE), exist_ok=True)
         tmp_path = app_state.DEDUCTIONS_FILE + ".tmp"
         with open(tmp_path, "w") as f:
             json.dump(snapshot, f)
