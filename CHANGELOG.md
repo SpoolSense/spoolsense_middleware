@@ -4,6 +4,35 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.4] - 2026-07-12
+
+### Added
+
+- **Partial deduction acknowledgment** — `POST /api/deductions/{uid}/applied`
+  now accepts an optional `{"applied_g": <float>}` body so a client can
+  confirm exactly what it wrote to the tag. The middleware subtracts that
+  amount and keeps the remainder pending, instead of the previous all-or-
+  nothing clear. An empty body still clears the full pending value, so
+  existing clients are unaffected. The response gains `remaining_pending_g`.
+  (#94)
+
+### Fixed
+
+- **spoolman-cleanup could offer unrelated filaments for deletion** — the
+  duplicate-detection key was never empty, so filaments with no vendor,
+  material, or color were grouped together and listed as duplicates. It now
+  only groups filaments that share at least one identity field, and every
+  request carries a timeout. (#111)
+- **First mobile deduction save on a fresh install** — `_save_deductions`
+  now creates `~/SpoolSense/` before writing, so the first save can't crash
+  when the directory doesn't exist yet. (#111)
+- **File-logging setup no longer runs at import** — configuring the rotating
+  log file is deferred to startup and tolerates a read-only or missing log
+  directory, so import (tests, `--check-config`, containers) can't crash on
+  it. (#111)
+
+---
+
 ## [1.8.3] - 2026-07-11
 
 ### Added
