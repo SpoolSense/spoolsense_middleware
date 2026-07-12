@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.8.3"
+__version__ = "1.8.4"
 """
 SpoolSense NFC Middleware
 =========================
@@ -58,14 +58,30 @@ LOG_FILE         = os.path.expanduser('~/SpoolSense/middleware/spoolsense.log')
 LOG_MAX_BYTES    = 5 * 1024 * 1024                                              # 5MB per log file
 LOG_BACKUP_COUNT = 3                                                            # keep 3 rotated copies
 
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
-_file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-_file_handler.setLevel(logging.INFO)
-logging.getLogger().addHandler(_file_handler)
-
 logger = logging.getLogger(__name__)
+
+
+def _configure_logging(log_file: str = LOG_FILE) -> None:
+    """Add rotating file logging without making module import touch the disk."""
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+    root_logger = logging.getLogger()
+    if any(getattr(handler, "_spoolsense_handler", False)
+           for handler in root_logger.handlers):
+        return
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+        )
+    except OSError:
+        logger.warning("File logging unavailable at %s", log_file, exc_info=True)
+        return
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.setLevel(logging.INFO)
+    file_handler._spoolsense_handler = True
+    root_logger.addHandler(file_handler)
 
 
 # ── Shutdown ─────────────────────────────────────────────────────────────────
@@ -298,6 +314,8 @@ def main() -> None:
     parser.add_argument("--check-config", action="store_true",
                         help="Validate config and print a summary, then exit.")
     args = parser.parse_args()
+
+    _configure_logging()
 
     # Load and validate config — exits on invalid config (strict validation)
     app_state.cfg = load_config()

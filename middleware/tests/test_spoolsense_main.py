@@ -26,8 +26,6 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 
 sys.modules.setdefault("watchdog.events", MagicMock())
 
-# spoolsense.py configures file logging at import time — redirect to avoid
-# creating ~/SpoolSense/middleware/spoolsense.log during tests
 sys.modules.setdefault("uvicorn", MagicMock())
 
 import app_state  # noqa: E402

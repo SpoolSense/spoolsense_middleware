@@ -24,18 +24,21 @@ Features:
 import requests
 import sys
 
+REQUEST_TIMEOUT = 10
+
+
 def get_all_spools(url):
-    response = requests.get(f"{url}/api/v1/spool")
+    response = requests.get(f"{url}/api/v1/spool", timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
 def get_all_filaments(url):
-    response = requests.get(f"{url}/api/v1/filament")
+    response = requests.get(f"{url}/api/v1/filament", timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
 def get_all_vendors(url):
-    response = requests.get(f"{url}/api/v1/vendor")
+    response = requests.get(f"{url}/api/v1/vendor", timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
@@ -44,10 +47,17 @@ def strip_quotes(s):
         return s[1:-1]
     return s
 
+
+def normalize_key(value):
+    """Normalize optional API text fields for duplicate comparisons."""
+    return str(value).strip().lower() if value is not None else ''
+
+
 def find_duplicate_spools(spools):
     groups = {}
     for spool in spools:
-        nfc_id = strip_quotes(spool.get('extra', {}).get('nfc_id', ''))
+        extra = spool.get('extra') or {}
+        nfc_id = normalize_key(strip_quotes(extra.get('nfc_id', '')))
         if not nfc_id:
             continue
         if nfc_id not in groups:
@@ -58,12 +68,14 @@ def find_duplicate_spools(spools):
 def find_duplicate_filaments(filaments):
     groups = {}
     for filament in filaments:
-        vendor = filament.get('vendor', {}).get('name', '').lower()
-        material = filament.get('material', '').lower()
-        color = filament.get('color_hex', '').lower()
-        key = f"{vendor}::{material}::{color}"
-        if not key:
+        vendor = normalize_key((filament.get('vendor') or {}).get('name'))
+        material = normalize_key(filament.get('material'))
+        color = normalize_key(filament.get('color_hex'))
+        # The old string key was "::::" when every field was absent, so all
+        # unknown filaments were incorrectly offered for deletion as duplicates.
+        if not any((vendor, material, color)):
             continue
+        key = (vendor, material, color)
         if key not in groups:
             groups[key] = []
         groups[key].append(filament)
@@ -72,7 +84,7 @@ def find_duplicate_filaments(filaments):
 def find_duplicate_vendors(vendors):
     groups = {}
     for vendor in vendors:
-        name = vendor.get('name', '').lower()
+        name = normalize_key(vendor.get('name'))
         if not name:
             continue
         if name not in groups:
@@ -116,7 +128,10 @@ def get_user_choice():
             return choice
 
 def delete_entity(url, entity_type, entity_id):
-    response = requests.delete(f"{url}/api/v1/{entity_type}/{entity_id}")
+    response = requests.delete(
+        f"{url}/api/v1/{entity_type}/{entity_id}",
+        timeout=REQUEST_TIMEOUT,
+    )
     response.raise_for_status()
 
 def main():
