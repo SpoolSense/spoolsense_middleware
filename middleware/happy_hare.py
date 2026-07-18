@@ -189,22 +189,38 @@ def bind_spool_to_current_gate(spool_id: int) -> bool:
 
 def on_ws_mmu(data: dict) -> None:
     """
-    Websocket callback for printer.mmu deltas — tracks the live gate so
-    /api/status can report it as `active_tool` (the mobile staging board's
-    "printing" highlight). Happy Hare manages Spoolman's active spool itself
-    in pull mode, so this only updates local state: no gcode, no HTTP.
+    Websocket callback for printer.mmu deltas — feeds /api/status for the
+    mobile staging board. Happy Hare manages Spoolman itself in pull mode,
+    so this only updates local state: no gcode, no HTTP.
 
-    Gate values: >= 0 is a real gate; -1 (unknown/unloaded) and -2 (bypass)
-    map to None. Deltas are partial — an absent gate key means unchanged.
+    Two fields are mirrored (deltas are partial; absent key = unchanged):
+    - `gate` -> active_tool: >= 0 is a real gate; -1 (unknown/unloaded)
+      and -2 (bypass) map to None.
+    - `gate_spool_id` -> active_spools["G<i>"]: HH's authoritative per-gate
+      spool map, so occupancy reflects binds from ANY source (middleware,
+      MMU_GATE_MAP, HH UI). -1 means unassigned.
     """
-    if not isinstance(data, dict) or "gate" not in data:
+    if not isinstance(data, dict):
         return
+
     gate = data.get("gate")
-    if isinstance(gate, bool) or not isinstance(gate, int):
+    has_gate = ("gate" in data and not isinstance(gate, bool)
+                and isinstance(gate, int))
+    if "gate" in data and not has_gate:
         logger.debug("Happy Hare: ignoring non-integer mmu gate %r", gate)
+
+    spool_ids = data.get("gate_spool_id")
+    has_map = isinstance(spool_ids, list)
+
+    if not has_gate and not has_map:
         return
     with app_state.state_lock:
-        app_state.indx_active_tool = gate if gate >= 0 else None
+        if has_gate:
+            app_state.indx_active_tool = gate if gate >= 0 else None
+        if has_map:
+            for i, sid in enumerate(spool_ids):
+                valid = not isinstance(sid, bool) and isinstance(sid, int) and sid > 0
+                app_state.active_spools[f"G{i}"] = sid if valid else None
 
 
 def _reset_mode_cache_for_testing() -> None:

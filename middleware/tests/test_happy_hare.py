@@ -290,6 +290,24 @@ class TestOnWsMmu(unittest.TestCase):
         happy_hare.on_ws_mmu({"filament": "loaded"})
         assert app_state.indx_active_tool == 2
 
+
+    def test_gate_spool_id_map_mirrors_occupancy(self):
+        app_state.active_spools = {}
+        happy_hare.on_ws_mmu({"gate_spool_id": [42, -1, 7, -1]})
+        assert app_state.active_spools == {"G0": 42, "G1": None, "G2": 7, "G3": None}
+
+    def test_gate_map_delta_without_gate_key_updates_occupancy_only(self):
+        app_state.active_spools = {}
+        app_state.indx_active_tool = 1
+        happy_hare.on_ws_mmu({"gate_spool_id": [5]})
+        assert app_state.active_spools["G0"] == 5
+        assert app_state.indx_active_tool == 1
+
+    def test_garbage_gate_map_entries_become_none(self):
+        app_state.active_spools = {}
+        happy_hare.on_ws_mmu({"gate_spool_id": [0, True, "x", 9]})
+        assert app_state.active_spools == {"G0": None, "G1": None, "G2": None, "G3": 9}
+
     def test_garbage_gate_ignored(self):
         app_state.indx_active_tool = 2
         happy_hare.on_ws_mmu({"gate": "three"})
