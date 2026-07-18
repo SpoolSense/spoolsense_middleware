@@ -175,15 +175,21 @@ def _sync_lane_state(data: dict) -> None:
                     if spool_id and prev_spool and spool_id != prev_spool:
                         swapped = True
                     app_state.active_spools[lane_name] = spool_id
-                elif lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
-                    # Lane transitioned unloaded → loaded with pending afc_stage data
-                    newly_loaded = True
-                    pending = app_state.pending_spool_afc
-                    app_state.pending_spool_afc = None
-                else:
+                elif not (lane_is_loaded and not was_loaded
+                          and app_state.pending_spool_afc):
                     if is_locked:
                         action = "clear"
                     app_state.active_spools[lane_name] = None
+
+                # Consume staged afc_stage data on any unloaded → loaded
+                # transition. A Spoolman-backed staged load reports load=true
+                # AND a spool_id in the same poll (SET_NEXT_SPOOL_ID landed
+                # first), so consumption can't live in an else-branch keyed
+                # off spool_id being absent.
+                if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
+                    newly_loaded = True
+                    pending = app_state.pending_spool_afc
+                    app_state.pending_spool_afc = None
 
             # Unload transition must clear independently of lock/spool-id
             # state: tag-only staged lanes (#109) have neither, so the

@@ -291,6 +291,26 @@ class TestStagedCarriesTrackingFields(unittest.TestCase):
         self.assertEqual(pending["diameter_mm"], 1.75)
         self.assertEqual(pending["tag_format"], "openprinttag")
 
+    def test_opentag3d_format_derived_from_source(self):
+        # Direct OpenTag3D payloads have no tag_format key — the parser puts
+        # the format in scan.source; storing "unknown" would make
+        # _is_writable_tag silently skip every deduction after assignment
+        from activation import _route_staged
+        from publishers.base import Action
+        from state.models import ScanEvent
+        scan = ScanEvent(
+            source="opentag3d", target_id="T0", scanned_at="now",
+            uid="AABB11", present=True, tag_data_valid=True,
+            raw={"opentag_version": 1},
+        )
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(Action.TOOLHEAD_STAGE, True, "FF0000", "PLA", 500.0,
+                          42, event, scan, "f3d360")
+        self.assertEqual(app_state.pending_spool_toolhead["tag_format"],
+                         "opentag3d")
+
     def test_no_scan_defaults_are_harmless(self):
         from activation import _route_staged
         from publishers.base import Action

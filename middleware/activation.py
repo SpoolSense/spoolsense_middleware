@@ -169,6 +169,10 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
     slot = "afc" if action_enum == Action.AFC_STAGE else "toolhead"
     raw = getattr(scan, "raw", None) or {}
+    # spoolsense_scanner payloads carry the format in the payload; direct
+    # OpenTag3D/OpenPrintTag payloads have no such key — their parser puts
+    # the format name in scan.source, which matches _WRITABLE_FORMATS
+    tag_format = raw.get("tag_format") or getattr(scan, "source", None)
     _cache_pending_spool(slot, color_hex, filament_label, remaining, spoolman_id,
                          event.nozzle_temp_min, event.nozzle_temp_max,
                          event.bed_temp_min, event.bed_temp_max,
@@ -176,7 +180,7 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
                          device_id=device_id or "",
                          diameter_mm=getattr(scan, "diameter_mm", None),
                          density=getattr(scan, "density", None),
-                         tag_format=raw.get("tag_format"))
+                         tag_format=tag_format)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"
     if spoolman_activated:
         logger.info(f"[{stage_name}] Spool staged with Spoolman ID, scanner remains unlocked")

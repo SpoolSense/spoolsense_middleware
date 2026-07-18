@@ -212,7 +212,7 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
             device_id="",
             diameter_mm=scan.diameter_mm,
             density=scan.density,
-            tag_format=req.tag_format,
+            tag_format=req.tag_format or scan.source,
         )
 
         msg = (

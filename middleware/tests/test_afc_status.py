@@ -248,6 +248,26 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
             _sync_lane_state_single("lane1", {"load": False})
         self.assertNotIn("lane1", app_state.active_spool_tracking)
 
+    def test_poll_spoolman_backed_load_consumes_pending(self):
+        # SET_NEXT_SPOOL_ID lands before the poll sees load=true, so the
+        # same poll reports BOTH — staged data must still be consumed and
+        # the baseline recorded, not left for a later lane to steal
+        app_state.lane_load_states["lane1"] = False
+        app_state.pending_spool_afc = {
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": 250.0,
+            "spoolman_id": 42, "uid": "AABBCC", "device_id": "4d9620",
+            "tag_format": "openprinttag",
+        }
+        data = _make_afc_data(spool_id=42, load=True)
+        with patch("afc_status.threading.Timer"):
+            with patch("afc_status.publish_lock"):
+                _sync_lane_state(data)
+        self.assertIsNone(app_state.pending_spool_afc)
+        rec = app_state.active_spool_tracking.get("lane1")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.uid, "aabbcc")
+        self.assertEqual(app_state.active_spools.get("lane1"), 42)
+
 
 class TestSwapClearsTracking(unittest.TestCase):
     """An externally-driven spool swap (Mainsail SET_SPOOL_ID, no scan) must
