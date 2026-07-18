@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 import app_state
 from adapters.dispatcher import detect_and_parse
-from activation import _activate_from_scan
+from activation import _activate_from_scan, _cache_pending_spool
 from moonraker_client import send_gcode
 from mqtt_handler import _record_spool_tracking, _get_scanner_target
 from config import CONFIG_PATH
@@ -198,19 +198,22 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
 
     # toolhead_stage: cache as pending, phone picks toolhead next
     if action == "toolhead_stage":
-        with app_state.state_lock:
-            replaced = app_state.pending_spool_toolhead is not None
-            app_state.pending_spool_toolhead = {
-                "color_hex": scan.color_hex or "FFFFFF",
-                "material": scan.material_name or scan.material_type or "Unknown",
-                "remaining_g": scan.remaining_weight_g,
-                "spoolman_id": scan.scanner_spoolman_id,
-                "uid": scan.uid,
-                "nozzle_temp_min": scan.nozzle_temp_min_c,
-                "nozzle_temp_max": scan.nozzle_temp_max_c,
-                "bed_temp_min": scan.bed_temp_min_c,
-                "bed_temp_max": scan.bed_temp_max_c,
-            }
+        replaced = _cache_pending_spool(
+            "toolhead",
+            scan.color_hex or "FFFFFF",
+            scan.material_name or scan.material_type or "Unknown",
+            scan.remaining_weight_g,
+            scan.scanner_spoolman_id,
+            scan.nozzle_temp_min_c,
+            scan.nozzle_temp_max_c,
+            scan.bed_temp_min_c,
+            scan.bed_temp_max_c,
+            uid=scan.uid,
+            device_id="",
+            diameter_mm=scan.diameter_mm,
+            density=scan.density,
+            tag_format=req.tag_format,
+        )
 
         msg = (
             "Previous pending spool replaced — select a toolhead to assign"

@@ -17,7 +17,11 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 sys.modules.setdefault("watchdog.events", MagicMock())
 
 import app_state  # noqa: E402
-from toolchanger_status import _fetch_pending_tool, _assign_spool_to_tool  # noqa: E402
+from toolchanger_status import (  # noqa: E402
+    _fetch_pending_tool,
+    _assign_spool_to_tool,
+    _process_pending_tool,
+)
 
 
 def _reset_app_state(moonraker_url="http://moonraker:7125"):
@@ -28,6 +32,7 @@ def _reset_app_state(moonraker_url="http://moonraker:7125"):
     }
     app_state.lane_locks = {}
     app_state.active_spools = {}
+    app_state.active_spool_tracking = {}
     app_state.pending_spool_afc = None
     app_state.pending_spool_toolhead = None
     app_state.state_lock = threading.Lock()
@@ -248,6 +253,115 @@ class TestAssignSpoolToTool(unittest.TestCase):
             if "json" in c[1] and c[1]["json"].get("namespace") == "lane_data"
         ]
         assert len(lane_data_calls) == 0
+
+
+class TestProcessPendingTool(unittest.TestCase):
+    """A failed ASSIGN_SPOOL must not eat the staged spool (#108): the slot is
+    restored on failure unless a newer scan already took it."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    @patch("toolchanger_status._assign_spool_to_tool", return_value=False)
+    def test_failed_assignment_restores_pending_spool(self, mock_assign):
+        pending = {"spoolman_id": 7, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": 300.0}
+        app_state.pending_spool_toolhead = pending
+
+        _process_pending_tool("T0", "Macro assign")
+
+        mock_assign.assert_called_once_with("T0", pending)
+        self.assertIs(app_state.pending_spool_toolhead, pending)
+
+    @patch("toolchanger_status._assign_spool_to_tool")
+    def test_failed_assignment_does_not_overwrite_newer_scan(self, mock_assign):
+        old = {"spoolman_id": 7, "color_hex": "FF0000", "material": "PLA",
+               "remaining_g": 300.0}
+        new = {"spoolman_id": 9, "color_hex": "00FF00", "material": "PETG",
+               "remaining_g": 800.0}
+        app_state.pending_spool_toolhead = old
+
+        def assign_and_stage_newer(tool_name, pending):
+            # A scan lands while the (slow) assign network call is running
+            app_state.pending_spool_toolhead = new
+            return False
+
+        mock_assign.side_effect = assign_and_stage_newer
+        _process_pending_tool("T0", "Macro assign")
+
+        self.assertIs(app_state.pending_spool_toolhead, new)
+
+    @patch("toolchanger_status._assign_spool_to_tool", return_value=True)
+    def test_successful_assignment_leaves_slot_empty(self, mock_assign):
+        app_state.pending_spool_toolhead = {"spoolman_id": 7, "color_hex": "FF0000",
+                                            "material": "PLA", "remaining_g": 300.0}
+
+        _process_pending_tool("T0", "Macro assign WS")
+
+        self.assertIsNone(app_state.pending_spool_toolhead)
+
+    @patch("toolchanger_status._assign_spool_to_tool")
+    def test_no_pending_spool_does_not_assign(self, mock_assign):
+        _process_pending_tool("T0", "Macro assign")
+        mock_assign.assert_not_called()
+
+
+class TestAssignRecordsTracking(unittest.TestCase):
+    """A staged scan consumed by ASSIGN_SPOOL records a deduction baseline —
+    previously only dedicated toolhead/afc_lane scans got one (#109)."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    @patch("requests.post")
+    def test_success_records_baseline_with_lowercased_uid(self, mock_post):
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": 300.0, "uid": "AABB11", "device_id": "f3d360",
+                   "diameter_mm": 1.75, "density": 1.24,
+                   "tag_format": "openprinttag"}
+
+        result = _assign_spool_to_tool("T0", pending)
+
+        self.assertTrue(result)
+        rec = app_state.active_spool_tracking.get("T0")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.uid, "aabb11")
+        self.assertEqual(rec.weight_g, 300.0)
+        self.assertEqual(rec.tag_format, "openprinttag")
+
+    @patch("requests.post")
+    def test_no_uid_records_nothing(self, mock_post):
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": 300.0}
+
+        _assign_spool_to_tool("T0", pending)
+
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+
+    @patch("requests.post")
+    def test_no_weight_records_nothing(self, mock_post):
+        # A baseline without a weight can't drive a deduction — skip it
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": None, "uid": "AABB11"}
+
+        _assign_spool_to_tool("T0", pending)
+
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+
+    @patch("requests.post")
+    def test_failed_activation_records_nothing(self, mock_post):
+        import requests as req
+        mock_post.side_effect = req.ConnectionError("refused")
+        pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": 300.0, "uid": "AABB11"}
+
+        result = _assign_spool_to_tool("T0", pending)
+
+        self.assertFalse(result)
+        self.assertNotIn("T0", app_state.active_spool_tracking)
 
 
 class TestLaneDataTemps(unittest.TestCase):

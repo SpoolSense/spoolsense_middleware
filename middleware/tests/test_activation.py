@@ -262,6 +262,48 @@ class TestPendingSlotIsolation(unittest.TestCase):
                          app_state.pending_spool_toolhead)
 
 
+class TestStagedCarriesTrackingFields(unittest.TestCase):
+    """Staged scans carry uid + filament props into the pending slot so the
+    consumer can record a deduction baseline on assignment (#109). The uid is
+    stored as-sent — /api/status echoes this dict to the shipped mobile app."""
+
+    def setUp(self):
+        _setup_app_state()
+
+    def test_rich_scan_fields_land_in_pending_slot(self):
+        from activation import _route_staged
+        from publishers.base import Action
+        from state.models import ScanEvent
+        scan = ScanEvent(
+            source="spoolsense_scanner", target_id="T0", scanned_at="now",
+            uid="AABB11", present=True, tag_data_valid=True,
+            diameter_mm=1.75, density=1.24,
+            raw={"tag_format": "openprinttag"},
+        )
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(Action.TOOLHEAD_STAGE, True, "FF0000", "PLA", 500.0,
+                          42, event, scan, "f3d360")
+        pending = app_state.pending_spool_toolhead
+        self.assertEqual(pending["uid"], "AABB11")
+        self.assertEqual(pending["device_id"], "f3d360")
+        self.assertEqual(pending["diameter_mm"], 1.75)
+        self.assertEqual(pending["tag_format"], "openprinttag")
+
+    def test_no_scan_defaults_are_harmless(self):
+        from activation import _route_staged
+        from publishers.base import Action
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(Action.AFC_STAGE, True, "FF0000", "PLA", 500.0,
+                          42, event)
+        pending = app_state.pending_spool_afc
+        self.assertIsNone(pending["uid"])
+        self.assertEqual(pending["tag_format"], "unknown")
+
+
 class TestBuildSpoolEventScannerId(unittest.TestCase):
     """scanner_id must carry the source scanner so event-stream (#93)
     consumers can tell scanners apart — regression for the live finding

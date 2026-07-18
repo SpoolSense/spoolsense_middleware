@@ -178,6 +178,47 @@ class TestSyncLaneState(unittest.TestCase):
         assert app_state.active_spools.get("lane1") == 7
 
 
+class TestLaneLoadRecordsTracking(unittest.TestCase):
+    """An afc_stage scan consumed on lane load records a deduction baseline
+    for that lane — previously only dedicated afc_lane scans got one (#109)."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    def _load_lane_with_pending(self, pending):
+        app_state.lane_load_states["lane1"] = False
+        app_state.pending_spool_afc = pending
+        data = _make_afc_data(spool_id=None, load=True)
+        with patch("afc_status.threading.Timer"):
+            with patch("afc_status.publish_lock"):
+                _sync_lane_state(data)
+
+    def test_staged_scan_with_uid_records_baseline(self):
+        self._load_lane_with_pending({
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": 250.0,
+            "spoolman_id": None, "uid": "AABBCC", "device_id": "4d9620",
+            "diameter_mm": 1.75, "density": 1.24, "tag_format": "openprinttag",
+        })
+        rec = app_state.active_spool_tracking.get("lane1")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.uid, "aabbcc")
+        self.assertEqual(rec.weight_g, 250.0)
+
+    def test_staged_scan_without_uid_records_nothing(self):
+        self._load_lane_with_pending({
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": 250.0,
+            "spoolman_id": None,
+        })
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+
+    def test_staged_scan_without_weight_records_nothing(self):
+        self._load_lane_with_pending({
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": None,
+            "spoolman_id": 5, "uid": "AABBCC",
+        })
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+
+
 class TestSwapClearsTracking(unittest.TestCase):
     """An externally-driven spool swap (Mainsail SET_SPOOL_ID, no scan) must
     drop the lane's deduction baseline — it describes the removed spool. A

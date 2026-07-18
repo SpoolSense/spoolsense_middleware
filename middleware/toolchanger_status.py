@@ -131,11 +131,15 @@ def _publish_tool_lane_data(moonraker: str, macro: str, tool_number_str: str,
         logger.exception(f"[toolhead_stage] Failed to publish lane_data for {macro}")
 
 
-def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
-    """Pushes cached spool data to the specified tool via Klipper gcode commands."""
+def _assign_spool_to_tool(tool_name: str, pending: dict) -> bool:
+    """Pushes cached spool data to the specified tool via Klipper gcode commands.
+
+    Returns False on hard failure (no Moonraker, Spoolman activation failed)
+    so the caller can restore the pending spool; cosmetic failures (color
+    gcode) are logged and do not fail the assignment."""
     moonraker = app_state.cfg.get("moonraker_url", "")
     if not moonraker:
-        return
+        return False
 
     macro = tool_name.upper()
     match = _TOOL_PATTERN.match(macro)
@@ -149,7 +153,7 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     # Spoolman path — activate, set gcode var, persist, with rollback on failure
     if spoolman_id is not None:
         if not _activate_spoolman(moonraker, macro, tool_number_str, spoolman_id):
-            return
+            return False
 
     # Color — always set from tag data regardless of Spoolman
     spool_color = display_spoolcolor(color_hex)
@@ -175,6 +179,49 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> None:
     if app_state.cfg.get("publish_lane_data", False):
         _publish_tool_lane_data(moonraker, macro, tool_number_str, spoolman_id,
                                 color_hex, material, remaining_g, temps=pending)
+
+    # Deduction baseline for UPDATE_TAG (#109) — staged scans carry the uid;
+    # without this, spools assigned via ASSIGN_SPOOL never get a baseline
+    uid = pending.get("uid")
+    if uid and remaining_g is not None:
+        from tracking_store import record_tracking
+        record_tracking(macro, uid, pending.get("device_id", ""), remaining_g,
+                        pending.get("diameter_mm"), pending.get("density"),
+                        pending.get("tag_format"))
+    return True
+
+
+def _process_pending_tool(tool_name: str, source: str) -> None:
+    """Claim the staged spool and assign it, restoring it on a failed assign.
+
+    The slot is cleared before the network calls so a concurrent scan can
+    stage freely; on failure the claimed spool is put back only if no newer
+    scan has taken the slot in the meantime (#108)."""
+    with app_state.state_lock:
+        pending = app_state.pending_spool_toolhead
+        app_state.pending_spool_toolhead = None
+
+    if not pending:
+        logger.warning(
+            f"{source}: {tool_name} requested but no spool scanned yet — "
+            "scan a tag first, then run ASSIGN_SPOOL"
+        )
+        return
+
+    logger.info(f"{source}: assigning cached spool data to {tool_name}")
+    if _assign_spool_to_tool(tool_name, pending):
+        return
+
+    with app_state.state_lock:
+        if app_state.pending_spool_toolhead is None:
+            app_state.pending_spool_toolhead = pending
+            restored = True
+        else:
+            restored = False
+    if restored:
+        logger.warning(f"{source}: assignment to {tool_name} failed — pending spool restored, rescan not needed")
+    else:
+        logger.warning(f"{source}: assignment to {tool_name} failed; a newer scan already replaced the pending spool")
 
 
 def _fetch_pending_tool() -> str | None:
@@ -231,19 +278,7 @@ class ToolchangerStatusSync:
         tool_name = pending_tool.strip()
         logger.info(f"Macro assign WS: tool {tool_name} requested")
 
-        pending: dict | None = None
-        with app_state.state_lock:
-            if app_state.pending_spool_toolhead:
-                pending = app_state.pending_spool_toolhead
-                app_state.pending_spool_toolhead = None
-
-        if pending:
-            logger.info(f"Macro assign WS: assigning cached spool data to {tool_name}")
-            _assign_spool_to_tool(tool_name, pending)
-        else:
-            logger.warning(
-                f"Macro assign WS: {tool_name} requested but no spool scanned yet"
-            )
+        _process_pending_tool(tool_name, "Macro assign WS")
 
         _clear_pending_tool()
 
@@ -304,23 +339,7 @@ class ToolchangerStatusSync:
                     tool_name = pending_tool.strip()
                     logger.info(f"Macro assign: tool {tool_name} requested")
 
-                    # Check for pending spool data
-                    pending: dict | None = None
-                    with app_state.state_lock:
-                        if app_state.pending_spool_toolhead:
-                            pending = app_state.pending_spool_toolhead
-                            app_state.pending_spool_toolhead = None
-
-                    if pending:
-                        logger.info(
-                            f"Macro assign: assigning cached spool data to {tool_name}"
-                        )
-                        _assign_spool_to_tool(tool_name, pending)
-                    else:
-                        logger.warning(
-                            f"Macro assign: {tool_name} requested but no spool scanned yet — "
-                            "scan a tag first, then run ASSIGN_SPOOL"
-                        )
+                    _process_pending_tool(tool_name, "Macro assign")
 
                     # Clear the macro variable
                     _clear_pending_tool()

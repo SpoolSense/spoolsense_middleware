@@ -113,6 +113,16 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         publish_lock(lane_name, "clear")
 
     if newly_loaded and pending:
+        # Deduction baseline for UPDATE_TAG (#109) — the staged scan carried
+        # the uid; recording on lane-load matches what dedicated afc_lane
+        # scanners do at scan time
+        uid = pending.get("uid")
+        if uid and pending.get("remaining_g") is not None:
+            from tracking_store import record_tracking
+            record_tracking(lane_name, uid, pending.get("device_id", ""),
+                            pending.get("remaining_g"),
+                            pending.get("diameter_mm"), pending.get("density"),
+                            pending.get("tag_format"))
         # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
         # AFC overwrites material/weight during its load process.
         logger.info(f"AFC {source}: {lane_name} just loaded — scheduling lane data (2s delay)")
