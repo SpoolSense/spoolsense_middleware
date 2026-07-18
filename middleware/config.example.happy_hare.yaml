@@ -7,7 +7,7 @@
 #
 # This config is for Happy Hare MMU users running in pull mode.
 # Workflow (physical scanner):
-#   1. Select an MMU gate (MMU_SELECT_GATE GATE=N) in Mainsail / LCD
+#   1. Select an MMU gate (MMU_SELECT GATE=N) in Mainsail / LCD
 #   2. Scan a tag on the shared scanner
 #   3. The middleware reads the selected gate from Moonraker and binds
 #      via Happy Hare's own MMU_SPOOLMAN SPOOLID=<id> GATE=<n>, which
@@ -62,7 +62,7 @@ scanner_topic_prefix: "spoolsense"
 
 # ---- Mobile app (optional) ----------------------------------
 # With action happy_hare_stage, the app scans a tag and then assigns it
-# to any gate from the picker (no MMU_SELECT_GATE needed). Requires
+# to any gate from the picker (no MMU_SELECT needed). Requires
 # happy_hare.num_gates above. The Scan tab's staging board shows gate
 # occupancy and highlights the gate that is printing.
 # mobile:

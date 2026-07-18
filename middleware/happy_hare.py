@@ -16,7 +16,7 @@ invisible to every HH version.
 
 Flows:
   - Physical scanner (`action: happy_hare_stage`): select a gate
-    (MMU_SELECT_GATE GATE=N), scan — binds to the selected gate.
+    (MMU_SELECT GATE=N), scan — binds to the selected gate.
   - Mobile (`mobile.action: happy_hare_stage`): scan on the phone, pick a
     gate from the app — binds to that gate, no selection needed.
 
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import app_state
 from moonraker_client import query_objects, send_gcode
@@ -38,6 +39,11 @@ from moonraker_client import query_objects, send_gcode
 logger = logging.getLogger(__name__)
 
 REQUIRED_MODE: str = "pull"
+
+# Bind confirmation: how long to wait for printer.mmu.gate_spool_id to
+# reflect a dispatched MMU_SPOOLMAN bind before calling it failed
+_CONFIRM_ATTEMPTS: int = 4
+_CONFIRM_DELAY_S: float = 0.5
 _KNOWN_MODES: frozenset[str] = frozenset({"pull", "push", "readonly"})
 
 # We cache only the success case (`pull`). Any other observed value re-fetches
@@ -151,8 +157,25 @@ def _bind_core(gate: int, spool_id: int, mmu_status: dict) -> bool:
                          spool_id, gate)
         return False
 
-    logger.info("Happy Hare: bound spool %s to gate %d", spool_id, gate)
-    return True
+    # The gcode dispatches to the moonraker component fire-and-forget, so
+    # acceptance is not success — a Spoolman outage inside set_spool_gate
+    # would otherwise report a bind that never happened (and the REST flow
+    # would drop the staged spool on the false positive). Confirm the gate
+    # map actually updated, briefly.
+    for _ in range(_CONFIRM_ATTEMPTS):
+        time.sleep(_CONFIRM_DELAY_S)
+        status = _fetch_mmu_status()
+        spool_ids = (status or {}).get("gate_spool_id")
+        if isinstance(spool_ids, list) and gate < len(spool_ids) \
+                and spool_ids[gate] == spool_id:
+            logger.info("Happy Hare: bound spool %s to gate %d", spool_id, gate)
+            return True
+
+    logger.error(
+        "Happy Hare: MMU_SPOOLMAN accepted but gate %d never showed spool %s "
+        "in printer.mmu.gate_spool_id — treating the bind as failed "
+        "(check moonraker.log for the mmu_server error)", gate, spool_id)
+    return False
 
 
 def bind_spool_to_gate(gate: int, spool_id: int) -> bool:
@@ -181,7 +204,7 @@ def bind_spool_to_current_gate(spool_id: int) -> bool:
     gate = mmu_status.get("gate")
     if not isinstance(gate, int) or gate < 0:
         logger.warning("Happy Hare: bind skipped — no gate selected (got %r). "
-                       "Run MMU_SELECT_GATE GATE=N before scanning.", gate)
+                       "Run MMU_SELECT GATE=N before scanning.", gate)
         return False
 
     return _bind_core(gate, spool_id, mmu_status)

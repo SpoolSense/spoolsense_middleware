@@ -24,6 +24,7 @@ from happy_hare import bind_spool_to_current_gate  # noqa: E402
 
 
 def _reset(*, enabled=True, printer_name="muffin"):
+    happy_hare._CONFIRM_DELAY_S = 0.0
     app_state.cfg = {
         "moonraker_url": "http://moonraker:7125",
         "happy_hare": {"enabled": enabled, "printer_name": printer_name},
@@ -41,6 +42,9 @@ def _mmu_status(**overrides):
         "spoolman_support": "pull",
         "gate": 4,
         "num_gates": 8,
+        # Post-bind view used by the confirmation poll: gate 4 -> spool 42,
+        # gate 2 -> spool 7 (the ids the bind tests use)
+        "gate_spool_id": [-1, -1, 7, -1, 42, -1, -1, -1],
     }
     base.update(overrides)
     return base
@@ -71,13 +75,23 @@ class TestBindHappyPath(unittest.TestCase):
             "http://moonraker:7125", "MMU_SPOOLMAN SPOOLID=42 GATE=4")
         app_state.spoolman_client.update_spool_extras.assert_not_called()
 
-    def test_single_mmu_fetch_per_bind(self):
-        # The physical flow must not pay two printer.mmu round-trips
+    def test_single_precheck_fetch_per_bind(self):
+        # One precheck fetch + one confirmation poll — the old double
+        # precheck (checks run twice) must not come back
         with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status())) as mock_get, \
              patch("happy_hare.send_gcode"):
-            bind_spool_to_current_gate(spool_id=42)
-        assert mock_get.call_count == 1
+            assert bind_spool_to_current_gate(spool_id=42) is True
+        assert mock_get.call_count == 2
+
+    def test_unconfirmed_bind_reported_as_failure(self):
+        # Gate map never shows the spool (mmu_server failed downstream) —
+        # gcode acceptance alone must not count as success
+        stale = _mmu_status(gate_spool_id=[-1] * 8)
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(stale)), \
+             patch("happy_hare.send_gcode"):
+            assert bind_spool_to_current_gate(spool_id=42) is False
 
     def test_gcode_failure_fails_bind(self):
         # The gcode IS the bind now — if it fails, nothing happened
@@ -195,9 +209,9 @@ class TestModeCheckCaching(unittest.TestCase):
         with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status())) as mock_get, \
              patch("happy_hare.send_gcode"):
-            assert bind_spool_to_current_gate(spool_id=1) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
             first_call_count = mock_get.call_count
-            assert bind_spool_to_current_gate(spool_id=2) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
             # We expect a second call (the bind path always fetches gate info)
             # but the mode-check shouldn't add an extra one — the assertion is
             # cleaner via the public flag.
@@ -216,7 +230,7 @@ class TestModeCheckCaching(unittest.TestCase):
         with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="pull"))), \
              patch("happy_hare.send_gcode"):
-            assert bind_spool_to_current_gate(spool_id=1) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
         assert happy_hare._cached_pull_mode is True
 
     def test_missing_spoolman_support_field_does_not_cache(self):
