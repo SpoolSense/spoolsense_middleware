@@ -59,28 +59,41 @@ class TestBindHappyPath(unittest.TestCase):
     def setUp(self):
         _reset()
 
-    def test_bind_patches_spoolman_with_gate_and_printer_name(self):
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare.send_gcode"):
-            result = bind_spool_to_current_gate(spool_id=42)
-        assert result is True
-        app_state.spoolman_client.update_spool_extras.assert_called_once_with(
-            42, {"mmu_gate": 4, "printer_name": "muffin"}
-        )
-
-    def test_bind_fires_mmu_spoolman_sync(self):
+    def test_bind_sends_mmu_spoolman_spoolid_gate(self):
+        # Binding goes through HH's own set_spool_gate primitive — the
+        # middleware must NOT write Spoolman extras itself (the old direct
+        # PATCH wrote extra.mmu_gate, a key no HH version reads)
         with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
              patch("happy_hare.send_gcode") as mock_gcode:
-            bind_spool_to_current_gate(spool_id=42)
-        mock_gcode.assert_called_once_with("http://moonraker:7125", "MMU_SPOOLMAN SYNC=1")
+            result = bind_spool_to_current_gate(spool_id=42)
+        assert result is True
+        mock_gcode.assert_called_once_with(
+            "http://moonraker:7125", "MMU_SPOOLMAN SPOOLID=42 GATE=4")
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
 
-    def test_bind_sync_failure_does_not_fail_overall_bind(self):
-        # The PATCH already landed; a missing sync just means Happy Hare
-        # picks it up on the next periodic pull. Still report success.
+    def test_single_mmu_fetch_per_bind(self):
+        # The physical flow must not pay two printer.mmu round-trips
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status())) as mock_get, \
+             patch("happy_hare.send_gcode"):
+            bind_spool_to_current_gate(spool_id=42)
+        assert mock_get.call_count == 1
+
+    def test_gcode_failure_fails_bind(self):
+        # The gcode IS the bind now — if it fails, nothing happened
         with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
              patch("happy_hare.send_gcode", side_effect=Exception("boom")):
             result = bind_spool_to_current_gate(spool_id=42)
+        assert result is False
+
+    def test_bind_works_without_spoolman_client(self):
+        # HH talks to Spoolman itself; the middleware needs no client to bind
+        app_state.spoolman_client = None
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode") as mock_gcode:
+            result = bind_spool_to_current_gate(spool_id=42)
         assert result is True
+        mock_gcode.assert_called_once()
 
 
 class TestBindGuards(unittest.TestCase):
@@ -98,12 +111,14 @@ class TestBindGuards(unittest.TestCase):
         assert result is False
         self._assert_no_patch_called()
 
-    def test_skipped_when_printer_name_empty(self):
+    def test_empty_printer_name_no_longer_blocks_bind(self):
+        # printer_name is legacy config — HH stamps its own printer identity
         _reset(printer_name="")
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode") as mock_gcode:
             result = bind_spool_to_current_gate(spool_id=42)
-        assert result is False
-        self._assert_no_patch_called()
+        assert result is True
+        mock_gcode.assert_called_once()
 
     def test_skipped_when_moonraker_unreachable(self):
         import requests
@@ -154,12 +169,6 @@ class TestBindGuards(unittest.TestCase):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
 
-    def test_returns_false_when_spoolman_patch_fails(self):
-        app_state.spoolman_client.update_spool_extras = MagicMock(return_value=False)
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare.send_gcode"):
-            result = bind_spool_to_current_gate(spool_id=42)
-        assert result is False
 
 
 class TestModeCheckCaching(unittest.TestCase):
@@ -235,9 +244,9 @@ class TestBindSpoolToGate(unittest.TestCase):
                    return_value=_mock_response(_mmu_status(gate=-1))), \
              patch("happy_hare.send_gcode") as mock_gcode:
             assert happy_hare.bind_spool_to_gate(2, spool_id=7) is True
-        app_state.spoolman_client.update_spool_extras.assert_called_once_with(
-            7, {"mmu_gate": 2, "printer_name": "muffin"})
-        assert any("MMU_SPOOLMAN SYNC=1" in str(c) for c in mock_gcode.call_args_list)
+        mock_gcode.assert_called_once_with(
+            "http://moonraker:7125", "MMU_SPOOLMAN SPOOLID=7 GATE=2")
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
 
     def test_gate_out_of_range_rejected(self):
         with patch("moonraker_client.requests.get",

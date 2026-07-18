@@ -98,6 +98,7 @@ def _cache_pending_spool(
         else:
             replaced = app_state.pending_spool_toolhead is not None
             app_state.pending_spool_toolhead = pending
+            app_state.pending_spool_toolhead_gen += 1
     return replaced
 
 

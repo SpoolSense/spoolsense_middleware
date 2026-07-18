@@ -414,12 +414,18 @@ class TestHappyHareNumGates(unittest.TestCase):
 class TestMobileHappyHareAction(unittest.TestCase):
     """mobile.action happy_hare_stage gating."""
 
-    def _cfg(self, scanners=None, hh_enabled=True):
-        return {
+    def _cfg(self, scanners=None, hh_enabled=True, spoolman="http://s:7912",
+             num_gates=4, toolheads=None):
+        cfg = {
             "scanners": scanners or {},
-            "happy_hare": {"enabled": hh_enabled, "printer_name": "muffin"},
+            "spoolman_url": spoolman,
+            "happy_hare": {"enabled": hh_enabled, "printer_name": "muffin",
+                           "num_gates": num_gates},
             "mobile": {"enabled": True, "action": "happy_hare_stage"},
         }
+        if toolheads:
+            cfg["toolheads"] = toolheads
+        return cfg
 
     def test_allowed_when_hh_enabled(self):
         _validate_mobile(self._cfg())
@@ -439,6 +445,59 @@ class TestMobileHappyHareAction(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _validate_mobile(self._cfg(
                 scanners={"abc": {"action": "toolhead", "toolhead": "T0"}}))
+
+    def test_rejected_with_afc_scanners(self):
+        # AFC + publish_lane_data starts the ASSIGN_SPOOL consumer that
+        # would steal the HH-staged spool; lanes also suppress gate targets
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "afc_lane", "lane": "lane1"}}))
+
+    def test_allowed_with_hh_scanners(self):
+        _validate_mobile(self._cfg(
+            scanners={"abc": {"action": "happy_hare_stage"}}))
+
+    def test_rejected_without_spoolman_url(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(spoolman=""))
+
+    def test_rejected_without_num_gates(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(num_gates=None))
+
+    def test_rejected_with_explicit_toolheads(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(toolheads=["T0", "T1"]))
+
+
+
+class TestGateDerivationEndToEnd(unittest.TestCase):
+    """load_config derives G0..G{n-1} for HH-mobile configs — the linchpin
+    of the phone gate picker, tested through the real loader."""
+
+    def _load(self, yaml_text):
+        import tempfile, config as config_mod
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_text)
+            path = f.name
+        old = config_mod.CONFIG_PATH
+        config_mod.CONFIG_PATH = path
+        try:
+            return config_mod.load_config()
+        finally:
+            config_mod.CONFIG_PATH = old
+            os.unlink(path)
+
+    def test_hh_mobile_config_derives_gate_targets(self):
+        cfg = self._load(
+            "mqtt: {broker: b, port: 1883, username: '', password: ''}\n"
+            "spoolman_url: http://s:7912\n"
+            "moonraker_url: http://m:7125\n"
+            "scanners: {vethh: {action: happy_hare_stage}}\n"
+            "happy_hare: {enabled: true, num_gates: 3}\n"
+            "mobile: {enabled: true, action: happy_hare_stage}\n"
+        )
+        self.assertEqual(cfg["toolheads"], ["G0", "G1", "G2"])
 
 
 if __name__ == "__main__":

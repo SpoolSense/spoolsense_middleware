@@ -293,8 +293,10 @@ def load_config() -> dict:
             logger.info(f"Derived toolheads from scanners: {config['toolheads']}")
 
     _validate_scanners(config)
-    _validate_mobile(config)
+    # happy_hare runs before mobile: the mobile validator reads the
+    # happy_hare section, and the type/shape guards live in the HH validator
     _validate_happy_hare(config)
+    _validate_mobile(config)
 
     # Happy Hare: gates become mobile-assignable targets G0..G{n-1}. Runs
     # after validation (num_gates is checked there). Only when no explicit/
@@ -323,13 +325,37 @@ def _validate_mobile(config: dict) -> None:
     if mobile_action == "happy_hare_stage":
         if not config.get("happy_hare", {}).get("enabled"):
             _config_error("mobile.action 'happy_hare_stage' requires happy_hare.enabled: true")
-        # The gate-assign flow stages into the shared toolhead pending slot;
-        # a toolhead/toolhead_stage scanner's ASSIGN_SPOOL consumer would
-        # steal it and assign an MMU spool to a toolchanger tool.
-        if has_toolhead_scanners(config) or has_toolhead_stage_scanners(config):
+        # Spool resolution (uid -> Spoolman id) happens at scan time; without
+        # Spoolman every scan dead-ends with a misleading not-found message
+        if not config.get("spoolman_url"):
             _config_error(
-                "mobile.action 'happy_hare_stage' cannot be combined with "
-                "toolhead or toolhead_stage scanners — the staged-assign flows conflict."
+                "mobile.action 'happy_hare_stage' requires spoolman_url — the gate "
+                "assign flow resolves scanned tags against Spoolman."
+            )
+        # The app's gate picker renders the derived G0..G{n-1} targets; without
+        # num_gates the picker is empty (or a stale fallback) and every assign fails
+        if not config.get("happy_hare", {}).get("num_gates"):
+            _config_error(
+                "mobile.action 'happy_hare_stage' requires happy_hare.num_gates — "
+                "it drives the app's gate picker (targets G0..G{n-1})."
+            )
+        # The gate-assign flow stages into the shared toolhead pending slot and
+        # derives gate names into toolheads. Any other scanner type either
+        # starts a competing pending-slot consumer (toolhead_stage; AFC with
+        # publish_lane_data) or derives lane/tool names that suppress the gate
+        # targets. Keep HH-mobile configs pure: happy_hare_stage scanners only.
+        other = [d for d, s in config.get("scanners", {}).items()
+                 if isinstance(s, dict) and s.get("action") != "happy_hare_stage"]
+        if other:
+            _config_error(
+                "mobile.action 'happy_hare_stage' can only be combined with "
+                "happy_hare_stage scanners (found other actions on: %s).",
+                ", ".join(sorted(other)),
+            )
+        if config.get("toolheads"):
+            _config_error(
+                "mobile.action 'happy_hare_stage' derives gate targets G0..G{n-1} — "
+                "remove the explicit 'toolheads' list from config.yaml."
             )
 
     mobile_port = mobile["port"]
@@ -369,12 +395,9 @@ def _validate_happy_hare(config: dict) -> None:
             "Set 'happy_hare.enabled: true' in config.yaml or change the scanner action."
         )
 
-    if enabled and not happy_hare["printer_name"]:
-        _config_error(
-            "happy_hare.enabled is true but happy_hare.printer_name is empty. "
-            "Set 'happy_hare.printer_name' to match the Printer Name configured "
-            "in Happy Hare's mmu_parameters.cfg."
-        )
+    # printer_name is legacy-tolerated but no longer required: binding goes
+    # through MMU_SPOOLMAN SPOOLID/GATE and Happy Hare stamps its own
+    # printer identity on the spool.
 
     # Happy Hare binding writes to Spoolman — the integration cannot function
     # in tag-only mode. Fail loud at config load so users don't discover this

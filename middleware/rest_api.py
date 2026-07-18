@@ -328,8 +328,10 @@ def _assign_gate(req: AssignToolRequest) -> ApiResponse:
                 "message": "Pending spool changed since scan — rescan and try again",
             })
         # Claim it — unlike the toolhead flow there is no macro watcher; the
-        # endpoint is the consumer
+        # endpoint is the consumer. Record the stage generation so a failed
+        # bind can tell "nothing changed" from "a newer scan came and went"
         app_state.pending_spool_toolhead = None
+        claimed_gen = app_state.pending_spool_toolhead_gen
 
     spool_id = pending.get("spoolman_id")
     if spool_id is None:
@@ -346,9 +348,14 @@ def _assign_gate(req: AssignToolRequest) -> ApiResponse:
                            toolhead=req.toolhead.upper(),
                            spool_id=spool_id)
 
-    # Failed bind — restore the stage unless a newer scan already took it
+    # Failed bind — restore the stage only if NOTHING was staged since the
+    # claim. An empty slot alone isn't enough: a newer scan could have been
+    # staged and consumed by a concurrent assign during our network call,
+    # and restoring then would resurrect a stale spool (assignable by
+    # legacy clients that omit the uid guard).
     with app_state.state_lock:
-        if app_state.pending_spool_toolhead is None:
+        if (app_state.pending_spool_toolhead is None
+                and app_state.pending_spool_toolhead_gen == claimed_gen):
             app_state.pending_spool_toolhead = pending
     raise HTTPException(status_code=502,
                         detail="Happy Hare bind failed — see middleware log")

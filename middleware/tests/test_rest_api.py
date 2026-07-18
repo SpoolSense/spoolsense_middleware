@@ -69,6 +69,7 @@ def _reset_app_state(
     app_state.active_spools = {}
     app_state.pending_spool_afc = None
     app_state.pending_spool_toolhead = None
+    app_state.pending_spool_toolhead_gen = 0
     app_state.state_lock = threading.Lock()
     import tempfile
     app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
@@ -553,11 +554,26 @@ class TestAssignGate(unittest.TestCase):
         newer = {"spoolman_id": 99, "uid": "CCDD22"}
         def bind_and_stage(gate, spool_id):
             app_state.pending_spool_toolhead = newer
+            app_state.pending_spool_toolhead_gen += 1
             return False
         with patch("happy_hare.bind_spool_to_gate", side_effect=bind_and_stage):
             resp = self._assign("G1")
         self.assertEqual(resp.status_code, 502)
         self.assertIs(app_state.pending_spool_toolhead, newer)
+
+    def test_failed_bind_does_not_resurrect_consumed_newer_scan(self):
+        # ABA: during our slow failing bind, a newer scan is staged AND
+        # consumed by a concurrent assign — the slot is None again, but
+        # restoring our stale claim would resurrect a ghost spool
+        def bind_stage_and_consume(gate, spool_id):
+            app_state.pending_spool_toolhead = {"spoolman_id": 99, "uid": "CCDD22"}
+            app_state.pending_spool_toolhead_gen += 1
+            app_state.pending_spool_toolhead = None   # concurrent assign consumed it
+            return False
+        with patch("happy_hare.bind_spool_to_gate", side_effect=bind_stage_and_consume):
+            resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIsNone(app_state.pending_spool_toolhead)
 
 
 class TestDeductionApplied(unittest.TestCase):
