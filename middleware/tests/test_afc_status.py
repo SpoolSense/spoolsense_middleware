@@ -300,6 +300,37 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
         self.assertIsNone(app_state.pending_spool_afc)
         self.assertIn("lane1", app_state.active_spool_tracking)
 
+    def test_poll_tag_only_staged_not_claimed_by_spoolman_lane(self):
+        # Tag-only spool staged; a lane loads an externally-assigned
+        # Spoolman spool — the staged record must not be claimed by it
+        app_state.lane_load_states["lane1"] = False
+        staged = {"color_hex": "FF0000", "material": "PLA",
+                  "remaining_g": 250.0, "spoolman_id": None, "uid": "AABBCC"}
+        app_state.pending_spool_afc = staged
+        data = _make_afc_data(spool_id=99, load=True)
+        with patch("afc_status.threading.Timer"):
+            with patch("afc_status.publish_lock"):
+                _sync_lane_state(data)
+        self.assertIs(app_state.pending_spool_afc, staged)
+
+    def test_ws_explicit_null_clears_cached_id_then_staged_consumes(self):
+        # Removal delta {"spool_id": null} must clear the cached id, so a
+        # later load-only delta can consume freshly staged data instead of
+        # being blocked by a stale id forever
+        app_state.lane_load_states["lane1"] = True
+        app_state.active_spools["lane1"] = 99
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state_single("lane1", {"spool_id": None, "load": False})
+        self.assertIsNone(app_state.active_spools.get("lane1"))
+        staged = {"color_hex": "FF0000", "material": "PLA",
+                  "remaining_g": 250.0, "spoolman_id": 42, "uid": "AABBCC",
+                  "tag_format": "openprinttag"}
+        app_state.pending_spool_afc = staged
+        with patch("afc_status.threading.Timer"):
+            with patch("afc_status.publish_lock"):
+                _sync_lane_state_single("lane1", {"load": True})
+        self.assertIsNone(app_state.pending_spool_afc)
+
     def test_poll_spoolman_backed_load_consumes_pending(self):
         # SET_NEXT_SPOOL_ID lands before the poll sees load=true, so the
         # same poll reports BOTH — staged data must still be consumed and

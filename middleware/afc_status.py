@@ -189,9 +189,13 @@ def _sync_lane_state(data: dict) -> None:
                 # Spoolman spool (assigned externally) must not eat the
                 # staged one — only consume when the ids agree or either
                 # side is tag-only.
+                # A lane reporting an id only consumes staged data whose id
+                # agrees — a tag-only staged spool must not be claimed by an
+                # externally-assigned Spoolman spool. A lane with no id yet
+                # consumes anything (SET_NEXT_SPOOL_ID may land after load).
                 if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
                     staged_id = app_state.pending_spool_afc.get("spoolman_id")
-                    if staged_id is None or spool_id is None or staged_id == spool_id:
+                    if spool_id is None or staged_id == spool_id:
                         newly_loaded = True
                         pending = app_state.pending_spool_afc
                         app_state.pending_spool_afc = None
@@ -225,8 +229,11 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         prev_spool = app_state.active_spools.get(lane_name)
         prev_load  = app_state.lane_load_states.get(lane_name, False)
 
-        # Update spool tracking
-        if spool_id is not None:
+        # Update spool tracking. Key presence matters: absent means
+        # "unchanged" (partial delta), while an explicit null/0 is a
+        # removal and must clear the cached id — otherwise a later
+        # load-only delta compares staged spools against a stale id.
+        if "spool_id" in data:
             if spool_id and not prev_spool:
                 app_state.active_spools[lane_name] = spool_id
                 action = "lock"
@@ -258,7 +265,7 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         if newly_loaded and app_state.pending_spool_afc:
             staged_id = app_state.pending_spool_afc.get("spoolman_id")
             lane_id = spool_id if "spool_id" in data else prev_spool
-            if staged_id is None or lane_id is None or staged_id == lane_id:
+            if lane_id is None or staged_id == lane_id:
                 pending = app_state.pending_spool_afc
                 app_state.pending_spool_afc = None
 
