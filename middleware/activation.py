@@ -63,9 +63,19 @@ def _cache_pending_spool(
     color_hex: str, material: str, remaining: float | None, spoolman_id: int | None,
     nozzle_temp_min: int | None = None, nozzle_temp_max: int | None = None,
     bed_temp_min: int | None = None, bed_temp_max: int | None = None,
-) -> None:
+    uid: str | None = None, device_id: str = "",
+    diameter_mm: float | None = None, density: float | None = None,
+    tag_format: str | None = None,
+) -> bool:
     """Store tag data in the per-consumer pending slot ("afc" is consumed by
-    afc_status on lane load; "toolhead" by toolchanger_status on ASSIGN_SPOOL)."""
+    afc_status on lane load; "toolhead" by toolchanger_status on ASSIGN_SPOOL).
+
+    The uid is stored exactly as the caller sent it — /api/status echoes this
+    dict and the shipped mobile app reads it back (consumers that need a
+    canonical form lowercase at their own boundary). uid and the filament
+    props let the consumer record a deduction baseline on assignment (#109).
+
+    Returns True if an earlier pending spool was replaced."""
     pending = {
         "color_hex": color_hex,
         "material": material,
@@ -75,12 +85,21 @@ def _cache_pending_spool(
         "nozzle_temp_max": nozzle_temp_max,
         "bed_temp_min": bed_temp_min,
         "bed_temp_max": bed_temp_max,
+        "uid": uid,
+        "device_id": device_id,
+        "diameter_mm": diameter_mm,
+        "density": density,
+        "tag_format": tag_format or "unknown",
     }
     with app_state.state_lock:
         if slot == "afc":
+            replaced = app_state.pending_spool_afc is not None
             app_state.pending_spool_afc = pending
         else:
+            replaced = app_state.pending_spool_toolhead is not None
             app_state.pending_spool_toolhead = pending
+            app_state.pending_spool_toolhead_gen += 1
+    return replaced
 
 
 # ── Event building ───────────────────────────────────────────────────────────
@@ -145,12 +164,28 @@ def _try_spoolman_activation(event: SpoolEvent, spoolman_id: int, target: str | 
 
 def _route_staged(action_enum: Action, spoolman_activated: bool,
                   color_hex: str, filament_label: str, remaining: float | None,
-                  spoolman_id: int | None, event: SpoolEvent) -> None:
+                  spoolman_id: int | None, event: SpoolEvent,
+                  scan: ScanEvent | None = None,
+                  device_id: str | None = None) -> None:
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
     slot = "afc" if action_enum == Action.AFC_STAGE else "toolhead"
+    raw = getattr(scan, "raw", None) or {}
+    # spoolsense_scanner payloads carry the format in the payload; direct
+    # OpenTag3D/OpenPrintTag payloads have no such key — their parser puts
+    # the format name in scan.source, which matches _WRITABLE_FORMATS
+    tag_format = raw.get("tag_format") or getattr(scan, "source", None)
+    # "mobile" is the REST marker for event attribution, not an MQTT scanner.
+    # Deduction routing keys off the tracking device_id — empty means mobile
+    # (store for GET /api/deductions), nonempty means publish to that scanner.
+    tracking_device = "" if device_id == "mobile" else (device_id or "")
     _cache_pending_spool(slot, color_hex, filament_label, remaining, spoolman_id,
                          event.nozzle_temp_min, event.nozzle_temp_max,
-                         event.bed_temp_min, event.bed_temp_max)
+                         event.bed_temp_min, event.bed_temp_max,
+                         uid=getattr(scan, "uid", None),
+                         device_id=tracking_device,
+                         diameter_mm=getattr(scan, "diameter_mm", None),
+                         density=getattr(scan, "density", None),
+                         tag_format=tag_format)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"
     if spoolman_activated:
         logger.info(f"[{stage_name}] Spool staged with Spoolman ID, scanner remains unlocked")
@@ -288,7 +323,7 @@ def _activate_from_scan(
     # Route by action type
     if action_enum in (Action.AFC_STAGE, Action.TOOLHEAD_STAGE):
         _route_staged(action_enum, spoolman_activated, color_hex, filament_label,
-                      remaining, spoolman_id, event)
+                      remaining, spoolman_id, event, scan, device_id)
     elif action_enum in (Action.AFC_LANE, Action.TOOLHEAD):
         _route_dedicated(action_enum, spoolman_activated, spoolman_id, target, event)
 

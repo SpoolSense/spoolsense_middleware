@@ -69,6 +69,7 @@ def _reset_app_state(
     app_state.active_spools = {}
     app_state.pending_spool_afc = None
     app_state.pending_spool_toolhead = None
+    app_state.pending_spool_toolhead_gen = 0
     app_state.state_lock = threading.Lock()
     import tempfile
     app_state.TRACKING_FILE = os.path.join(tempfile.gettempdir(), "ss-test-tracking.json")
@@ -181,6 +182,15 @@ class TestMobileScan(unittest.TestCase):
         self.assertTrue(data["pending"])
         # Pending spool was stored in app_state
         self.assertIsNotNone(app_state.pending_spool_toolhead)
+
+    def test_toolhead_stage_pending_uid_stored_as_sent(self):
+        # Frozen iOS contract: /api/status echoes the pending dict and the
+        # shipped app reads the uid back — it must keep the case the app sent
+        _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
+        scan = _make_scan_event(uid="AABBCCDD")
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            self._post({"uid": "AABBCCDD", "present": True, "tag_data_valid": True})
+        self.assertEqual(app_state.pending_spool_toolhead["uid"], "AABBCCDD")
 
     def test_toolhead_stage_replaced_flag_set_on_second_scan(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
@@ -425,6 +435,160 @@ class TestUnlockTarget(unittest.TestCase):
         client.post("/api/unlock/T0")
         self.assertFalse(app_state.lane_locks["T0"])
         self.assertTrue(app_state.lane_locks["lane1"])
+
+
+class TestMobileScanHappyHare(unittest.TestCase):
+    """mobile.action happy_hare_stage: scan stages for the gate picker (#82/#91
+    HH-for-mobile). The bind writes to Spoolman, so scans resolve the spool
+    at scan time and reject unknown tags with a visible message."""
+
+    def setUp(self):
+        _reset_app_state(mobile_enabled=True, mobile_action="happy_hare_stage")
+        app_state.cfg["happy_hare"] = {"enabled": True, "printer_name": "muffin",
+                                       "num_gates": 4}
+        app_state.cfg["toolheads"] = ["G0", "G1", "G2", "G3"]
+
+    def _post(self, payload):
+        return client.post("/api/mobile-scan", json=payload)
+
+    def test_scan_stages_with_uid_resolved_spool(self):
+        scan = _make_scan_event(uid="AABB11")
+        scan.scanner_spoolman_id = 42
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = {"id": 42}
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            resp = self._post({"uid": "AABB11", "present": True,
+                               "tag_data_valid": True, "spoolman_id": 42})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        self.assertTrue(resp.json()["pending"])
+        self.assertEqual(resp.json()["spool_id"], 42)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 42)
+        self.assertEqual(app_state.pending_spool_toolhead["uid"], "AABB11")
+
+    def test_uid_resolution_beats_stale_payload_id(self):
+        # A relinked tag: payload still carries the OLD spool id — the uid
+        # lookup is authoritative and must win
+        scan = _make_scan_event(uid="AABB11")
+        scan.scanner_spoolman_id = 42
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = {"id": 77}
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            resp = self._post({"uid": "AABB11", "present": True,
+                               "tag_data_valid": True, "spoolman_id": 42})
+        self.assertEqual(resp.json()["spool_id"], 77)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 77)
+
+    def test_scan_without_id_resolves_via_spoolman_lookup(self):
+        scan = _make_scan_event(uid="AABB11")
+        scan.scanner_spoolman_id = None
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = {"id": 7}
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            resp = self._post({"uid": "AABB11", "present": True,
+                               "tag_data_valid": True})
+        self.assertTrue(resp.json()["success"])
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 7)
+
+    def test_unknown_spool_rejected_with_message(self):
+        scan = _make_scan_event(uid="AABB11")
+        scan.scanner_spoolman_id = None
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = None
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            resp = self._post({"uid": "AABB11", "present": True,
+                               "tag_data_valid": True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["success"])
+        self.assertIn("Spoolman", resp.json()["message"])
+        self.assertIsNone(app_state.pending_spool_toolhead)
+
+
+class TestAssignGate(unittest.TestCase):
+    """Gate-targeted assign for happy_hare_stage — same uid/409 contract as
+    the toolhead flow; the endpoint itself consumes the stage and restores
+    it on a failed bind."""
+
+    def setUp(self):
+        _reset_app_state(mobile_enabled=True, mobile_action="happy_hare_stage")
+        app_state.cfg["happy_hare"] = {"enabled": True, "printer_name": "muffin",
+                                       "num_gates": 4}
+        app_state.cfg["toolheads"] = ["G0", "G1", "G2", "G3"]
+        self.pending = {"spoolman_id": 42, "uid": "AABB11", "color_hex": "FF0000",
+                        "material": "PLA", "remaining_g": 500.0}
+        app_state.pending_spool_toolhead = dict(self.pending)
+
+    def _assign(self, toolhead="G1", uid="AABB11"):
+        body = {"toolhead": toolhead}
+        if uid is not None:
+            body["uid"] = uid
+        return client.post("/api/assign-tool", json=body)
+
+    def test_assign_binds_and_consumes_stage(self):
+        with patch("happy_hare.bind_spool_to_gate", return_value=True) as mock_bind:
+            resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        self.assertEqual(resp.json()["toolhead"], "G1")
+        self.assertEqual(resp.json()["spool_id"], 42)
+        mock_bind.assert_called_once_with(1, 42)
+        self.assertIsNone(app_state.pending_spool_toolhead)
+
+    def test_lowercase_gate_name_accepted(self):
+        with patch("happy_hare.bind_spool_to_gate", return_value=True) as mock_bind:
+            resp = self._assign("g2")
+        self.assertTrue(resp.json()["success"])
+        mock_bind.assert_called_once_with(2, 42)
+
+    def test_no_pending_returns_409(self):
+        app_state.pending_spool_toolhead = None
+        resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["detail"]["code"], "no_pending_spool")
+
+    def test_stale_uid_returns_409_and_keeps_stage(self):
+        resp = self._assign("G1", uid="DIFFERENT")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["detail"]["code"], "pending_spool_changed")
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
+
+    def test_invalid_gate_name_rejected(self):
+        for bad in ("T0", "G9", "gate1"):
+            resp = self._assign(bad)
+            self.assertEqual(resp.status_code, 200, bad)
+            self.assertFalse(resp.json()["success"], bad)
+        self.assertIsNotNone(app_state.pending_spool_toolhead)
+
+    def test_failed_bind_restores_stage_and_returns_502(self):
+        with patch("happy_hare.bind_spool_to_gate", return_value=False):
+            resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 42)
+
+    def test_failed_bind_does_not_overwrite_newer_scan(self):
+        newer = {"spoolman_id": 99, "uid": "CCDD22"}
+        def bind_and_stage(gate, spool_id):
+            app_state.pending_spool_toolhead = newer
+            app_state.pending_spool_toolhead_gen += 1
+            return False
+        with patch("happy_hare.bind_spool_to_gate", side_effect=bind_and_stage):
+            resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIs(app_state.pending_spool_toolhead, newer)
+
+    def test_failed_bind_does_not_resurrect_consumed_newer_scan(self):
+        # ABA: during our slow failing bind, a newer scan is staged AND
+        # consumed by a concurrent assign — the slot is None again, but
+        # restoring our stale claim would resurrect a ghost spool
+        def bind_stage_and_consume(gate, spool_id):
+            app_state.pending_spool_toolhead = {"spoolman_id": 99, "uid": "CCDD22"}
+            app_state.pending_spool_toolhead_gen += 1
+            app_state.pending_spool_toolhead = None   # concurrent assign consumed it
+            return False
+        with patch("happy_hare.bind_spool_to_gate", side_effect=bind_stage_and_consume):
+            resp = self._assign("G1")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIsNone(app_state.pending_spool_toolhead)
 
 
 class TestDeductionApplied(unittest.TestCase):

@@ -113,6 +113,20 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
         publish_lock(lane_name, "clear")
 
     if newly_loaded and pending:
+        # Deduction baseline for UPDATE_TAG (#109) — the staged scan carried
+        # the uid; recording on lane-load matches what dedicated afc_lane
+        # scanners do at scan time. If the new spool can't be recorded, drop
+        # any previous baseline instead — it describes a removed spool.
+        uid = pending.get("uid")
+        if uid and pending.get("remaining_g") is not None:
+            from tracking_store import record_tracking
+            record_tracking(lane_name, uid, pending.get("device_id", ""),
+                            pending.get("remaining_g"),
+                            pending.get("diameter_mm"), pending.get("density"),
+                            pending.get("tag_format"))
+        else:
+            from tracking_store import clear_tracking
+            clear_tracking(lane_name)
         # Delayed 2s to let AFC's own load sequence finish first — if sent too early,
         # AFC overwrites material/weight during its load process.
         logger.info(f"AFC {source}: {lane_name} just loaded — scheduling lane data (2s delay)")
@@ -135,7 +149,10 @@ def _sync_lane_state(data: dict) -> None:
             if lane_name == "system" or not isinstance(lane_data, dict):
                 continue
 
-            spool_id       = lane_data.get("spool_id")
+            # AFC reports 0 for "no spool" — normalize once so the lock/
+            # clear/swap/consumption logic below all see one empty value
+            # (the websocket path already treats 0 as removal)
+            spool_id       = lane_data.get("spool_id") or None
             status         = lane_data.get("status")
             lane_is_loaded = lane_data.get("load", False)
 
@@ -161,17 +178,36 @@ def _sync_lane_state(data: dict) -> None:
                     if spool_id and prev_spool and spool_id != prev_spool:
                         swapped = True
                     app_state.active_spools[lane_name] = spool_id
-                elif lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
-                    # Lane transitioned unloaded → loaded with pending afc_stage data
-                    newly_loaded = True
-                    pending = app_state.pending_spool_afc
-                    app_state.pending_spool_afc = None
-                else:
+                elif not (lane_is_loaded and not was_loaded
+                          and app_state.pending_spool_afc):
                     if is_locked:
                         action = "clear"
                     app_state.active_spools[lane_name] = None
 
-            if action == "clear" or swapped:
+                # Consume staged afc_stage data on any unloaded → loaded
+                # transition. A Spoolman-backed staged load reports load=true
+                # AND a spool_id in the same poll (SET_NEXT_SPOOL_ID landed
+                # first), so consumption can't live in an else-branch keyed
+                # off spool_id being absent. But a lane loading a DIFFERENT
+                # Spoolman spool (assigned externally) must not eat the
+                # staged one — only consume when the ids agree or either
+                # side is tag-only.
+                # A lane reporting an id only consumes staged data whose id
+                # agrees — a tag-only staged spool must not be claimed by an
+                # externally-assigned Spoolman spool. A lane with no id yet
+                # consumes anything (SET_NEXT_SPOOL_ID may land after load).
+                if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
+                    staged_id = app_state.pending_spool_afc.get("spoolman_id")
+                    if spool_id is None or staged_id == spool_id:
+                        newly_loaded = True
+                        pending = app_state.pending_spool_afc
+                        app_state.pending_spool_afc = None
+
+            # Unload transition must clear independently of lock/spool-id
+            # state: tag-only staged lanes (#109) have neither, so the
+            # action-based clear below never fires for them
+            unloaded = was_loaded and not lane_is_loaded
+            if action == "clear" or swapped or unloaded:
                 # Spool left the lane (or was swapped from outside) — drop its
                 # deduction baseline so a restart can't resurrect it (#91)
                 from tracking_store import clear_tracking
@@ -196,8 +232,11 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         prev_spool = app_state.active_spools.get(lane_name)
         prev_load  = app_state.lane_load_states.get(lane_name, False)
 
-        # Update spool tracking
-        if spool_id is not None:
+        # Update spool tracking. Key presence matters: absent means
+        # "unchanged" (partial delta), while an explicit null/0 is a
+        # removal and must clear the cached id — otherwise a later
+        # load-only delta compares staged spools against a stale id.
+        if "spool_id" in data:
             if spool_id and not prev_spool:
                 app_state.active_spools[lane_name] = spool_id
                 action = "lock"
@@ -213,22 +252,35 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
                 swapped = True
 
         # Track load transitions
+        unloaded = False
         if load_state is not None:
             if load_state and not prev_load:
                 newly_loaded = True
+            elif prev_load and not load_state:
+                unloaded = True
             app_state.lane_load_states[lane_name] = load_state
 
-        # Consume pending afc_stage data on load transition
+        # Consume pending afc_stage data on load transition — same id-match
+        # rule as the poll path: never eat a staged spool while the lane
+        # holds a different Spoolman id. Deltas are partial: an absent
+        # spool_id key means "unchanged", so compare against the cached id;
+        # an explicit null means the lane has no spool.
         if newly_loaded and app_state.pending_spool_afc:
-            pending = app_state.pending_spool_afc
-            app_state.pending_spool_afc = None
+            staged_id = app_state.pending_spool_afc.get("spoolman_id")
+            # AFC uses 0 for "no spool" — normalize before matching
+            lane_id = (spool_id or None) if "spool_id" in data else (prev_spool or None)
+            if lane_id is None or staged_id == lane_id:
+                pending = app_state.pending_spool_afc
+                app_state.pending_spool_afc = None
 
         # Update lane status if present in delta
         status = data.get("status")
         if status is not None:
             app_state.lane_statuses[lane_name] = status
 
-    if action == "clear" or swapped:
+    # Unload must clear independently of lock/spool-id state — tag-only
+    # staged lanes (#109) have neither, so action never becomes "clear"
+    if action == "clear" or swapped or unloaded:
         from tracking_store import clear_tracking
         clear_tracking(lane_name)
 

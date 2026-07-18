@@ -24,6 +24,7 @@ from happy_hare import bind_spool_to_current_gate  # noqa: E402
 
 
 def _reset(*, enabled=True, printer_name="muffin"):
+    happy_hare._CONFIRM_DELAY_S = 0.0
     app_state.cfg = {
         "moonraker_url": "http://moonraker:7125",
         "happy_hare": {"enabled": enabled, "printer_name": printer_name},
@@ -41,6 +42,9 @@ def _mmu_status(**overrides):
         "spoolman_support": "pull",
         "gate": 4,
         "num_gates": 8,
+        # Post-bind view used by the confirmation poll: gate 4 -> spool 42,
+        # gate 2 -> spool 7 (the ids the bind tests use)
+        "gate_spool_id": [-1, -1, 7, -1, 42, -1, -1, -1],
     }
     base.update(overrides)
     return base
@@ -59,28 +63,51 @@ class TestBindHappyPath(unittest.TestCase):
     def setUp(self):
         _reset()
 
-    def test_bind_patches_spoolman_with_gate_and_printer_name(self):
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare.send_gcode"):
-            result = bind_spool_to_current_gate(spool_id=42)
-        assert result is True
-        app_state.spoolman_client.update_spool_extras.assert_called_once_with(
-            42, {"mmu_gate": 4, "printer_name": "muffin"}
-        )
-
-    def test_bind_fires_mmu_spoolman_sync(self):
+    def test_bind_sends_mmu_spoolman_spoolid_gate(self):
+        # Binding goes through HH's own set_spool_gate primitive — the
+        # middleware must NOT write Spoolman extras itself (the old direct
+        # PATCH wrote extra.mmu_gate, a key no HH version reads)
         with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
              patch("happy_hare.send_gcode") as mock_gcode:
-            bind_spool_to_current_gate(spool_id=42)
-        mock_gcode.assert_called_once_with("http://moonraker:7125", "MMU_SPOOLMAN SYNC=1")
+            result = bind_spool_to_current_gate(spool_id=42)
+        assert result is True
+        mock_gcode.assert_called_once_with(
+            "http://moonraker:7125", "MMU_SPOOLMAN SPOOLID=42 GATE=4")
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
 
-    def test_bind_sync_failure_does_not_fail_overall_bind(self):
-        # The PATCH already landed; a missing sync just means Happy Hare
-        # picks it up on the next periodic pull. Still report success.
+    def test_single_precheck_fetch_per_bind(self):
+        # One precheck fetch + one confirmation poll — the old double
+        # precheck (checks run twice) must not come back
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status())) as mock_get, \
+             patch("happy_hare.send_gcode"):
+            assert bind_spool_to_current_gate(spool_id=42) is True
+        assert mock_get.call_count == 2
+
+    def test_unconfirmed_bind_reported_as_failure(self):
+        # Gate map never shows the spool (mmu_server failed downstream) —
+        # gcode acceptance alone must not count as success
+        stale = _mmu_status(gate_spool_id=[-1] * 8)
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(stale)), \
+             patch("happy_hare.send_gcode"):
+            assert bind_spool_to_current_gate(spool_id=42) is False
+
+    def test_gcode_failure_fails_bind(self):
+        # The gcode IS the bind now — if it fails, nothing happened
         with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
              patch("happy_hare.send_gcode", side_effect=Exception("boom")):
             result = bind_spool_to_current_gate(spool_id=42)
+        assert result is False
+
+    def test_bind_works_without_spoolman_client(self):
+        # HH talks to Spoolman itself; the middleware needs no client to bind
+        app_state.spoolman_client = None
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode") as mock_gcode:
+            result = bind_spool_to_current_gate(spool_id=42)
         assert result is True
+        mock_gcode.assert_called_once()
 
 
 class TestBindGuards(unittest.TestCase):
@@ -98,12 +125,14 @@ class TestBindGuards(unittest.TestCase):
         assert result is False
         self._assert_no_patch_called()
 
-    def test_skipped_when_printer_name_empty(self):
+    def test_empty_printer_name_no_longer_blocks_bind(self):
+        # printer_name is legacy config — HH stamps its own printer identity
         _reset(printer_name="")
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())):
+        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
+             patch("happy_hare.send_gcode") as mock_gcode:
             result = bind_spool_to_current_gate(spool_id=42)
-        assert result is False
-        self._assert_no_patch_called()
+        assert result is True
+        mock_gcode.assert_called_once()
 
     def test_skipped_when_moonraker_unreachable(self):
         import requests
@@ -154,12 +183,6 @@ class TestBindGuards(unittest.TestCase):
             result = bind_spool_to_current_gate(spool_id=42)
         assert result is False
 
-    def test_returns_false_when_spoolman_patch_fails(self):
-        app_state.spoolman_client.update_spool_extras = MagicMock(return_value=False)
-        with patch("moonraker_client.requests.get", return_value=_mock_response(_mmu_status())), \
-             patch("happy_hare.send_gcode"):
-            result = bind_spool_to_current_gate(spool_id=42)
-        assert result is False
 
 
 class TestModeCheckCaching(unittest.TestCase):
@@ -186,9 +209,9 @@ class TestModeCheckCaching(unittest.TestCase):
         with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status())) as mock_get, \
              patch("happy_hare.send_gcode"):
-            assert bind_spool_to_current_gate(spool_id=1) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
             first_call_count = mock_get.call_count
-            assert bind_spool_to_current_gate(spool_id=2) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
             # We expect a second call (the bind path always fetches gate info)
             # but the mode-check shouldn't add an extra one — the assertion is
             # cleaner via the public flag.
@@ -207,7 +230,7 @@ class TestModeCheckCaching(unittest.TestCase):
         with patch("moonraker_client.requests.get",
                    return_value=_mock_response(_mmu_status(spoolman_support="pull"))), \
              patch("happy_hare.send_gcode"):
-            assert bind_spool_to_current_gate(spool_id=1) is True
+            assert bind_spool_to_current_gate(spool_id=42) is True
         assert happy_hare._cached_pull_mode is True
 
     def test_missing_spoolman_support_field_does_not_cache(self):
@@ -220,6 +243,90 @@ class TestModeCheckCaching(unittest.TestCase):
                    return_value=_mock_response(bad_status)):
             assert bind_spool_to_current_gate(spool_id=1) is False
         assert happy_hare._cached_pull_mode is False
+
+
+
+class TestBindSpoolToGate(unittest.TestCase):
+    """Gate-targeted bind (mobile assign flow) — no gate selection needed."""
+
+    def setUp(self):
+        _reset()
+
+    def test_binds_explicit_gate_ignoring_current_selection(self):
+        # Current gate is -1 (nothing selected) — explicit target still binds
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(gate=-1))), \
+             patch("happy_hare.send_gcode") as mock_gcode:
+            assert happy_hare.bind_spool_to_gate(2, spool_id=7) is True
+        mock_gcode.assert_called_once_with(
+            "http://moonraker:7125", "MMU_SPOOLMAN SPOOLID=7 GATE=2")
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
+
+    def test_gate_out_of_range_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(num_gates=4))):
+            assert happy_hare.bind_spool_to_gate(4, spool_id=7) is False
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
+
+    def test_negative_and_bool_gates_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status())):
+            assert happy_hare.bind_spool_to_gate(-1, spool_id=7) is False
+            assert happy_hare.bind_spool_to_gate(True, spool_id=7) is False
+
+    def test_wrong_mode_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(spoolman_support="push"))):
+            assert happy_hare.bind_spool_to_gate(1, spool_id=7) is False
+
+
+class TestOnWsMmu(unittest.TestCase):
+    """printer.mmu deltas drive the active_tool marker for /api/status."""
+
+    def setUp(self):
+        _reset()
+        app_state.indx_active_tool = None
+
+    def test_gate_pickup_sets_active_tool(self):
+        happy_hare.on_ws_mmu({"gate": 3})
+        assert app_state.indx_active_tool == 3
+
+    def test_unknown_and_bypass_map_to_none(self):
+        app_state.indx_active_tool = 3
+        happy_hare.on_ws_mmu({"gate": -1})
+        assert app_state.indx_active_tool is None
+        app_state.indx_active_tool = 3
+        happy_hare.on_ws_mmu({"gate": -2})
+        assert app_state.indx_active_tool is None
+
+    def test_absent_gate_key_leaves_state_unchanged(self):
+        app_state.indx_active_tool = 2
+        happy_hare.on_ws_mmu({"filament": "loaded"})
+        assert app_state.indx_active_tool == 2
+
+
+    def test_gate_spool_id_map_mirrors_occupancy(self):
+        app_state.active_spools = {}
+        happy_hare.on_ws_mmu({"gate_spool_id": [42, -1, 7, -1]})
+        assert app_state.active_spools == {"G0": 42, "G1": None, "G2": 7, "G3": None}
+
+    def test_gate_map_delta_without_gate_key_updates_occupancy_only(self):
+        app_state.active_spools = {}
+        app_state.indx_active_tool = 1
+        happy_hare.on_ws_mmu({"gate_spool_id": [5]})
+        assert app_state.active_spools["G0"] == 5
+        assert app_state.indx_active_tool == 1
+
+    def test_garbage_gate_map_entries_become_none(self):
+        app_state.active_spools = {}
+        happy_hare.on_ws_mmu({"gate_spool_id": [0, True, "x", 9]})
+        assert app_state.active_spools == {"G0": None, "G1": None, "G2": None, "G3": 9}
+
+    def test_garbage_gate_ignored(self):
+        app_state.indx_active_tool = 2
+        happy_hare.on_ws_mmu({"gate": "three"})
+        happy_hare.on_ws_mmu({"gate": True})
+        assert app_state.indx_active_tool == 2
 
 
 if __name__ == "__main__":

@@ -73,21 +73,12 @@ def _record_spool_tracking(
     density: float | None = None,
     tag_format: str | None = None,
 ) -> None:
-    """Store initial weight, UID, device, filament properties, and tag format for UPDATE_TAG deduction tracking."""
-    if not target or not uid or remaining is None:
+    """Record the UPDATE_TAG deduction baseline (via tracking_store) and run
+    the scan-time low-spool check."""
+    from tracking_store import record_tracking
+    if not record_tracking(target, uid, device_id, remaining,
+                           diameter_mm, density, tag_format):
         return
-    with app_state.state_lock:
-        app_state.active_spool_tracking[target] = app_state.ActiveSpool(
-            uid=uid,
-            device_id=device_id or "",
-            weight_g=remaining,
-            diameter_mm=diameter_mm or 1.75,
-            density=density or 1.24,
-            tag_format=tag_format or "unknown",
-        )
-    # Persist so the deduction baseline survives restarts (#91)
-    from tracking_store import save_tracking
-    save_tracking()
 
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same
@@ -164,17 +155,12 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
 
     # Shared scanners — cache for later assignment, don't activate yet
     if action in ("toolhead_stage", "afc_stage"):
-        pending = {
-            "color_hex": color_hex,
-            "material": material,
-            "remaining_g": remaining,
-            "spoolman_id": spool_id,
-        }
-        with app_state.state_lock:
-            if action == "afc_stage":
-                app_state.pending_spool_afc = pending
-            else:
-                app_state.pending_spool_toolhead = pending
+        from activation import _cache_pending_spool
+        _cache_pending_spool(
+            "afc" if action == "afc_stage" else "toolhead",
+            color_hex, material, remaining, spool_id,
+            uid=uid, device_id=device_id or "", tag_format="uid_only",
+        )
         logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
         # Observer channels (MQTT event stream) still see staged scans even
         # though no printer command fires yet (#93)

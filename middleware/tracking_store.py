@@ -23,6 +23,37 @@ import app_state
 logger = logging.getLogger(__name__)
 
 
+def record_tracking(
+    target: str,
+    uid: str,
+    device_id: str = "",
+    remaining: float | None = None,
+    diameter_mm: float | None = None,
+    density: float | None = None,
+    tag_format: str | None = None,
+) -> bool:
+    """Record the deduction baseline for the spool mounted on *target* and
+    persist it. Requires a uid and a known weight — a baseline without a
+    weight can't drive a deduction, so nothing useful would be stored.
+
+    The uid is stored lowercased: tracking records are matched against
+    scanner/mobile uids that arrive in either case."""
+    if not target or not uid or remaining is None:
+        return False
+
+    with app_state.state_lock:
+        app_state.active_spool_tracking[target] = app_state.ActiveSpool(
+            uid=uid.lower(),
+            device_id=device_id or "",
+            weight_g=remaining,
+            diameter_mm=diameter_mm or 1.75,
+            density=density or 1.24,
+            tag_format=tag_format or "unknown",
+        )
+    save_tracking()
+    return True
+
+
 def load_tracking() -> None:
     """Load persisted tracking records into app_state at startup."""
     if not os.path.exists(app_state.TRACKING_FILE):

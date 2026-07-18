@@ -6,13 +6,14 @@
 #   cp config.example.happy_hare.yaml ~/SpoolSense/config.yaml
 #
 # This config is for Happy Hare MMU users running in pull mode.
-# Workflow:
-#   1. Select an MMU gate (MMU_SELECT_GATE GATE=N) in Mainsail / LCD
+# Workflow (physical scanner):
+#   1. Select an MMU gate (MMU_SELECT GATE=N) in Mainsail / LCD
 #   2. Scan a tag on the shared scanner
-#   3. The middleware reads the selected gate from Moonraker, writes
-#      mmu_gate + printer_name to the spool's Spoolman extras, then
-#      fires MMU_SPOOLMAN SYNC=1 so Happy Hare picks up the binding
-#      immediately.
+#   3. The middleware reads the selected gate from Moonraker and binds
+#      via Happy Hare's own MMU_SPOOLMAN SPOOLID=<id> GATE=<n>, which
+#      updates Spoolman and Happy Hare's gate map in one step.
+# Workflow (mobile app): scan the tag with your phone, then pick the
+# gate in the app — no gate selection on the printer needed.
 #
 # Pull mode is required. Happy Hare reports its mode via printer.mmu
 # .spoolman_support — the middleware queries it and refuses to bind
@@ -37,20 +38,17 @@ low_spool_threshold: 100
 
 # ---- Happy Hare integration ---------------------------------
 #
-# Prerequisite: declare these extra fields in Spoolman before the first bind:
-#   Settings → Extra Fields → Spool → Add
-#     - key: mmu_gate       type: integer
-#     - key: printer_name   type: text
-# Without these declared, the PATCH will fail with HTTP 400 "Unknown extra
-# field X." (the error body is logged so you can see which field is missing).
+# Happy Hare declares its own Spoolman extra fields (mmu_gate_map,
+# printer_name) on startup — nothing to create by hand.
 happy_hare:
   enabled: true
-  # Written to each spool's extra.printer_name in Spoolman. Happy Hare uses
-  # this to identify which spools belong to this printer when syncing from
-  # Spoolman. Typically matches the "Printer Name" set in Happy Hare's
-  # mmu_parameters.cfg, but the middleware does not enforce that — anything
-  # consistent with how you've configured Happy Hare will work.
-  printer_name: "YOUR_PRINTER_NAME"
+  # Legacy, no longer required: Happy Hare stamps its own printer identity
+  # on each spool during the bind. Safe to remove.
+  # printer_name: "YOUR_PRINTER_NAME"
+  # Number of MMU gates. Drives the mobile app's gate picker (targets
+  # G0..G{n-1}) and the live staging board. Required when
+  # mobile.action is happy_hare_stage; optional for scanner-only setups.
+  num_gates: 4
 
 # ---- Scanners ------------------------------------------------
 # One shared scanner, used to bind any spool to whichever gate the user
@@ -61,3 +59,12 @@ scanners:
     action: "happy_hare_stage"
 
 scanner_topic_prefix: "spoolsense"
+
+# ---- Mobile app (optional) ----------------------------------
+# With action happy_hare_stage, the app scans a tag and then assigns it
+# to any gate from the picker (no MMU_SELECT needed). Requires
+# happy_hare.num_gates above. The Scan tab's staging board shows gate
+# occupancy and highlights the gate that is printing.
+# mobile:
+#   enabled: true
+#   action: "happy_hare_stage"

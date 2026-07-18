@@ -68,6 +68,11 @@ pending_spool_afc: dict | None = None
 indx_active_tool: int | None = None
 pending_spool_toolhead: dict | None = None
 
+# Bumped on every toolhead-slot stage. Lets a failed gate assign detect that
+# a newer scan was staged (and possibly consumed) while its network call ran,
+# so it never resurrects a stale spool into the slot. Protected by state_lock.
+pending_spool_toolhead_gen: int = 0
+
 # Tag writeback cooldown — tracks recent writes to prevent loops.
 # Maps uid → timestamp of the last write command sent.
 # Protected by state_lock.

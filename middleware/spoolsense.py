@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-__version__ = "1.8.5"
+__version__ = "1.8.6"
 """
 SpoolSense NFC Middleware
 =========================
@@ -274,6 +274,14 @@ def _start_sync_services(use_ws: bool) -> None:
                 "Klipper sync: websocket unavailable — manual spool changes in "
                 "Klipper variables will not sync until the websocket connects."
             )
+
+    # Happy Hare — follow the live gate on printer.mmu so /api/status can
+    # report it as active_tool (mobile staging board). Local state only.
+    if has_happy_hare_scanners(cfg) or cfg.get("mobile", {}).get("action") == "happy_hare_stage":
+        if use_ws:
+            from happy_hare import on_ws_mmu
+            app_state.moonraker_ws.on_mmu = on_ws_mmu
+            logger.info("Happy Hare: live gate tracking via websocket (printer.mmu)")
 
     app_state.filament_usage_sync.start(use_ws=use_ws)
 
