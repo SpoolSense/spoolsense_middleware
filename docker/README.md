@@ -71,12 +71,19 @@ Not using the mobile app or panel? Remove the `ports:` mapping from
 
 ## Upgrade
 
+The image is built locally from the repo — there is no auto-update. Pull the
+new code and rebuild:
+
 ```bash
 cd spoolsense_middleware
 git pull
 cd docker
 docker compose up -d --build
 ```
+
+The `--build` flag is required. A plain `docker compose up -d` reuses the
+existing image and silently keeps running the old version. Your config and
+state in `./spoolsense-data/` carry across the rebuild untouched.
 
 ## Logs and state
 
