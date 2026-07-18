@@ -4,6 +4,28 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.5] - 2026-07-18
+
+### Added
+
+- **Bondtech INDX live active-tool sync** — INDX's Klipper macros record the
+  mounted tool in `save_variables.active_tool`; the middleware now follows it
+  on the existing websocket stream. On every tool pickup, Spoolman's active
+  spool switches to the spool assigned to that tool (`ASSIGN_SPOOL` binding),
+  so live usage accrues to the spool actually printing during multi-tool jobs.
+  Exposed as `active_tool` in `GET /api/status`. Opt out with
+  `active_tool_sync: false`. Inert on printers that never write the variable.
+  (#91)
+
+### Changed
+
+- **INDX example config** — updated for Bondtech's published macros: INDX has
+  no Klipper `tool` objects, so per-tool deduction uses the slicer's per-tool
+  weights automatically (no extra install), and the new active-tool sync is
+  documented. (#91)
+
+---
+
 ## [1.8.4] - 2026-07-12
 
 ### Added

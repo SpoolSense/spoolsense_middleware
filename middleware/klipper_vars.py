@@ -44,6 +44,12 @@ def on_ws_save_variables(variables: dict) -> None:
     if not isinstance(variables, dict):
         return
 
+    if "active_tool" in variables:
+        # Bondtech INDX publishes the mounted tool here (see indx_status.py);
+        # inert on printers that never write the variable.
+        from indx_status import on_active_tool
+        on_active_tool(variables)
+
     for t in app_state.cfg.get("toolheads", []):
         m = _TOOLHEAD_RE.fullmatch(t)
         if not m:
