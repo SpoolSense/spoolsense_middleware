@@ -106,6 +106,33 @@ gcode:
   {% endif %}
 ```
 
+## Bondtech INDX
+
+INDX on Klipper presents as a plain toolchanger (T0–T9), so the setup is the
+toolchanger flow above with one shared scanner instead of one per tool. Start
+from `middleware/config.example.indx.yaml`.
+
+What you need in `printer.cfg`:
+
+- The `ASSIGN_SPOOL` and `UPDATE_TAG` macros from the SpoolSense macro set
+- `variable_spool_id: None` on each tool macro (`T0`..`Tn`), exactly as in
+  the toolchanger section above
+- The `RESTORE_SPOOL_IDS` delayed gcode so assignments survive reboots
+
+Workflow: scan a spool on the shared scanner, then assign it to a tool with
+the keypad, web UI, mobile app, or `ASSIGN_SPOOL TOOL=Tn` in the console.
+
+Two things work automatically on INDX:
+
+- **Per-tool deduction** — Bondtech's macros do not create Klipper `tool`
+  objects, so `UPDATE_TAG` uses the slicer's per-tool filament weights from
+  the job metadata. Nothing extra to install.
+- **Live active-spool sync** — INDX records the mounted tool in
+  `save_variables.active_tool`; on every tool pickup the middleware switches
+  Spoolman's active spool to the spool assigned to that tool, so usage
+  accrues to the spool actually printing. Disable with
+  `active_tool_sync: false` in `config.yaml`.
+
 ## Restart Klipper
 
 ```bash
