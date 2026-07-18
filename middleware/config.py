@@ -34,6 +34,9 @@ DEFAULTS: dict = {
     "scanner_topic_prefix": "spoolsense",
     "scanners": {},
     "tag_writeback_enabled": False,
+    # Bondtech INDX: mirror save_variables.active_tool to Spoolman's active
+    # spool on each tool pickup. Inert on non-INDX printers.
+    "active_tool_sync": True,
     "publish_events": True,
 }
 

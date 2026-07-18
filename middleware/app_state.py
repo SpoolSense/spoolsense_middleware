@@ -62,6 +62,10 @@ lane_load_states: dict[str, bool] = {}
 # lane load; toolchanger_status (and the mobile assign flow) consume the
 # toolhead slot on ASSIGN_SPOOL. Protected by state_lock.
 pending_spool_afc: dict | None = None
+
+# Currently mounted INDX tool (int) or None when parked / not an INDX
+# setup. Written by indx_status.on_active_tool. Protected by state_lock.
+indx_active_tool: int | None = None
 pending_spool_toolhead: dict | None = None
 
 # Tag writeback cooldown — tracks recent writes to prevent loops.

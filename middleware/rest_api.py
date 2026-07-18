@@ -112,9 +112,11 @@ def get_status() -> dict[str, Any]:
         pending_afc = app_state.pending_spool_afc.copy() if app_state.pending_spool_afc else None
         pending_toolhead = app_state.pending_spool_toolhead.copy() if app_state.pending_spool_toolhead else None
         locked = [k for k, v in app_state.lane_locks.items() if v]
+        indx_tool = app_state.indx_active_tool
 
     return {
         "active_spools": active,
+        "active_tool": indx_tool,
         # Legacy combined view (web panel pending dot) + explicit slots
         "pending_spool": pending_toolhead or pending_afc,
         "pending_spool_afc": pending_afc,
