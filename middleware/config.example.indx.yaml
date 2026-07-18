@@ -50,7 +50,11 @@ scanner_topic_prefix: "spoolsense"
 #   variable_spool_id on each tool macro (T0..Tn)
 #   [delayed_gcode RESTORE_SPOOL_IDS]  restores assignments on boot
 #
-# Per-tool usage deduction during multi-tool prints additionally needs
-# klipper-toolchanger's per-tool filament tracking (tool T<n> objects
-# exposing filament_used). Without it, deduction falls back to slicer
-# estimates.
+# Per-tool usage deduction: Bondtech's INDX macros do not create Klipper
+# `tool` objects, so per-tool deduction uses the slicer's per-tool
+# filament weights from the job metadata (automatic, nothing to install).
+#
+# Live active-spool sync: INDX records the mounted tool in Klipper
+# save_variables (`active_tool`). The middleware follows it automatically —
+# on every tool pickup, Spoolman's active spool switches to the spool
+# assigned to that tool. Disable with `active_tool_sync: false`.
