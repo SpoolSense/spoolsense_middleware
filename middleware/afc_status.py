@@ -252,10 +252,13 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
 
         # Consume pending afc_stage data on load transition — same id-match
         # rule as the poll path: never eat a staged spool while the lane
-        # reports a different Spoolman id
+        # holds a different Spoolman id. Deltas are partial: an absent
+        # spool_id key means "unchanged", so compare against the cached id;
+        # an explicit null means the lane has no spool.
         if newly_loaded and app_state.pending_spool_afc:
             staged_id = app_state.pending_spool_afc.get("spoolman_id")
-            if staged_id is None or spool_id is None or staged_id == spool_id:
+            lane_id = spool_id if "spool_id" in data else prev_spool
+            if staged_id is None or lane_id is None or staged_id == lane_id:
                 pending = app_state.pending_spool_afc
                 app_state.pending_spool_afc = None
 
