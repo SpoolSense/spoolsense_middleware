@@ -195,7 +195,8 @@ def _sync_lane_state(data: dict) -> None:
                 # consumes anything (SET_NEXT_SPOOL_ID may land after load).
                 if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
                     staged_id = app_state.pending_spool_afc.get("spoolman_id")
-                    if spool_id is None or staged_id == spool_id:
+                    lane_id = spool_id or None  # AFC uses 0 for "no spool"
+                    if lane_id is None or staged_id == lane_id:
                         newly_loaded = True
                         pending = app_state.pending_spool_afc
                         app_state.pending_spool_afc = None
@@ -264,7 +265,8 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
         # an explicit null means the lane has no spool.
         if newly_loaded and app_state.pending_spool_afc:
             staged_id = app_state.pending_spool_afc.get("spoolman_id")
-            lane_id = spool_id if "spool_id" in data else prev_spool
+            # AFC uses 0 for "no spool" — normalize before matching
+            lane_id = (spool_id or None) if "spool_id" in data else (prev_spool or None)
             if lane_id is None or staged_id == lane_id:
                 pending = app_state.pending_spool_afc
                 app_state.pending_spool_afc = None
