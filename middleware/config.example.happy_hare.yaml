@@ -51,6 +51,11 @@ happy_hare:
   # mmu_parameters.cfg, but the middleware does not enforce that — anything
   # consistent with how you've configured Happy Hare will work.
   printer_name: "YOUR_PRINTER_NAME"
+  # Number of MMU gates. Enables the mobile app's gate picker (targets
+  # G0..G{n-1}) and the live staging board. Optional — without it,
+  # phone-side gate assignment is unavailable but select-then-scan
+  # with a physical scanner still works.
+  num_gates: 4
 
 # ---- Scanners ------------------------------------------------
 # One shared scanner, used to bind any spool to whichever gate the user
@@ -61,3 +66,12 @@ scanners:
     action: "happy_hare_stage"
 
 scanner_topic_prefix: "spoolsense"
+
+# ---- Mobile app (optional) ----------------------------------
+# With action happy_hare_stage, the app scans a tag and then assigns it
+# to any gate from the picker (no MMU_SELECT_GATE needed). Requires
+# happy_hare.num_gates above. The Scan tab's staging board shows gate
+# occupancy and highlights the gate that is printing.
+# mobile:
+#   enabled: true
+#   action: "happy_hare_stage"

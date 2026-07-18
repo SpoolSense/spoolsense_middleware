@@ -275,6 +275,14 @@ def _start_sync_services(use_ws: bool) -> None:
                 "Klipper variables will not sync until the websocket connects."
             )
 
+    # Happy Hare — follow the live gate on printer.mmu so /api/status can
+    # report it as active_tool (mobile staging board). Local state only.
+    if has_happy_hare_scanners(cfg) or cfg.get("mobile", {}).get("action") == "happy_hare_stage":
+        if use_ws:
+            from happy_hare import on_ws_mmu
+            app_state.moonraker_ws.on_mmu = on_ws_mmu
+            logger.info("Happy Hare: live gate tracking via websocket (printer.mmu)")
+
     app_state.filament_usage_sync.start(use_ws=use_ws)
 
     # Wire all websocket callbacks before starting the connection

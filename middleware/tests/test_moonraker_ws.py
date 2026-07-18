@@ -203,6 +203,33 @@ class TestMoonrakerWebsocket(unittest.TestCase):
         self.ws._has_save_variables = True
         self.assertNotIn("save_variables", self.ws._build_subscribe_objects())
 
+
+    def test_mmu_subscribed_when_discovered_and_callback_set(self):
+        self.ws.on_mmu = lambda data: None
+        self.ws._has_mmu = True
+        self.assertIn("mmu", self.ws._build_subscribe_objects())
+
+    def test_mmu_not_subscribed_when_not_discovered(self):
+        self.ws.on_mmu = lambda data: None
+        self.ws._has_mmu = False
+        self.assertNotIn("mmu", self.ws._build_subscribe_objects())
+
+    def test_mmu_not_subscribed_without_callback(self):
+        self.ws._has_mmu = True
+        self.assertNotIn("mmu", self.ws._build_subscribe_objects())
+
+    def test_dispatch_routes_mmu_delta(self):
+        received = []
+        self.ws.on_mmu = received.append
+        self.ws._dispatch_status({"mmu": {"gate": 2}})
+        self.assertEqual(received, [{"gate": 2}])
+
+    def test_dispatch_skips_non_dict_mmu(self):
+        received = []
+        self.ws.on_mmu = received.append
+        self.ws._dispatch_status({"mmu": "garbage"})
+        self.assertEqual(received, [])
+
     def test_objects_list_discovers_save_variables(self):
         """printer.objects.list response records save_variables availability."""
         mock_ws = MagicMock()

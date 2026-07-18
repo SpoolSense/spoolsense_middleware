@@ -222,5 +222,71 @@ class TestModeCheckCaching(unittest.TestCase):
         assert happy_hare._cached_pull_mode is False
 
 
+
+class TestBindSpoolToGate(unittest.TestCase):
+    """Gate-targeted bind (mobile assign flow) — no gate selection needed."""
+
+    def setUp(self):
+        _reset()
+
+    def test_binds_explicit_gate_ignoring_current_selection(self):
+        # Current gate is -1 (nothing selected) — explicit target still binds
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(gate=-1))), \
+             patch("happy_hare.send_gcode") as mock_gcode:
+            assert happy_hare.bind_spool_to_gate(2, spool_id=7) is True
+        app_state.spoolman_client.update_spool_extras.assert_called_once_with(
+            7, {"mmu_gate": 2, "printer_name": "muffin"})
+        assert any("MMU_SPOOLMAN SYNC=1" in str(c) for c in mock_gcode.call_args_list)
+
+    def test_gate_out_of_range_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(num_gates=4))):
+            assert happy_hare.bind_spool_to_gate(4, spool_id=7) is False
+        app_state.spoolman_client.update_spool_extras.assert_not_called()
+
+    def test_negative_and_bool_gates_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status())):
+            assert happy_hare.bind_spool_to_gate(-1, spool_id=7) is False
+            assert happy_hare.bind_spool_to_gate(True, spool_id=7) is False
+
+    def test_wrong_mode_rejected(self):
+        with patch("moonraker_client.requests.get",
+                   return_value=_mock_response(_mmu_status(spoolman_support="push"))):
+            assert happy_hare.bind_spool_to_gate(1, spool_id=7) is False
+
+
+class TestOnWsMmu(unittest.TestCase):
+    """printer.mmu deltas drive the active_tool marker for /api/status."""
+
+    def setUp(self):
+        _reset()
+        app_state.indx_active_tool = None
+
+    def test_gate_pickup_sets_active_tool(self):
+        happy_hare.on_ws_mmu({"gate": 3})
+        assert app_state.indx_active_tool == 3
+
+    def test_unknown_and_bypass_map_to_none(self):
+        app_state.indx_active_tool = 3
+        happy_hare.on_ws_mmu({"gate": -1})
+        assert app_state.indx_active_tool is None
+        app_state.indx_active_tool = 3
+        happy_hare.on_ws_mmu({"gate": -2})
+        assert app_state.indx_active_tool is None
+
+    def test_absent_gate_key_leaves_state_unchanged(self):
+        app_state.indx_active_tool = 2
+        happy_hare.on_ws_mmu({"filament": "loaded"})
+        assert app_state.indx_active_tool == 2
+
+    def test_garbage_gate_ignored(self):
+        app_state.indx_active_tool = 2
+        happy_hare.on_ws_mmu({"gate": "three"})
+        happy_hare.on_ws_mmu({"gate": True})
+        assert app_state.indx_active_tool == 2
+
+
 if __name__ == "__main__":
     unittest.main()

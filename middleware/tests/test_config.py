@@ -24,6 +24,7 @@ from config import (  # noqa: E402
     _apply_scanner_defaults,
     _validate_scanners,
     _validate_happy_hare,
+    _validate_mobile,
     _derive_toolheads,
     _migrate_legacy_config,
     has_afc_scanners,
@@ -387,6 +388,57 @@ class TestHasHappyHareScanners(unittest.TestCase):
 
     def test_returns_false_when_no_scanners(self):
         assert has_happy_hare_scanners({}) is False
+
+
+
+class TestHappyHareNumGates(unittest.TestCase):
+    """num_gates drives the mobile gate picker; strict validation."""
+
+    def _hh(self, **kw):
+        base = {"enabled": True, "printer_name": "muffin"}
+        base.update(kw)
+        return {"scanners": {}, "spoolman_url": "http://s:7912", "happy_hare": base}
+
+    def test_valid_num_gates_ok(self):
+        _validate_happy_hare(self._hh(num_gates=8))
+
+    def test_absent_num_gates_ok(self):
+        _validate_happy_hare(self._hh())
+
+    def test_invalid_num_gates_rejected(self):
+        for bad in (0, 33, -1, "four", True, 2.5):
+            with self.assertRaises(SystemExit, msg=f"accepted {bad!r}"):
+                _validate_happy_hare(self._hh(num_gates=bad))
+
+
+class TestMobileHappyHareAction(unittest.TestCase):
+    """mobile.action happy_hare_stage gating."""
+
+    def _cfg(self, scanners=None, hh_enabled=True):
+        return {
+            "scanners": scanners or {},
+            "happy_hare": {"enabled": hh_enabled, "printer_name": "muffin"},
+            "mobile": {"enabled": True, "action": "happy_hare_stage"},
+        }
+
+    def test_allowed_when_hh_enabled(self):
+        _validate_mobile(self._cfg())
+
+    def test_rejected_without_hh_enabled(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(hh_enabled=False))
+
+    def test_rejected_with_toolhead_stage_scanners(self):
+        # Both flows stage into the same pending slot — the ASSIGN_SPOOL
+        # watcher would steal the HH-staged spool
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "toolhead_stage"}}))
+
+    def test_rejected_with_toolhead_scanners(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "toolhead", "toolhead": "T0"}}))
 
 
 if __name__ == "__main__":

@@ -296,6 +296,14 @@ def load_config() -> dict:
     _validate_mobile(config)
     _validate_happy_hare(config)
 
+    # Happy Hare: gates become mobile-assignable targets G0..G{n-1}. Runs
+    # after validation (num_gates is checked there). Only when no explicit/
+    # derived toolheads exist — HH installs have no toolhead scanners, so
+    # this is normally the only source.
+    if not config.get("toolheads") and config.get("happy_hare", {}).get("num_gates"):
+        config["toolheads"] = [f"G{i}" for i in range(config["happy_hare"]["num_gates"])]
+        logger.info(f"Derived gate targets from happy_hare.num_gates: {config['toolheads']}")
+
     return config
 
 
@@ -307,10 +315,22 @@ def _validate_mobile(config: dict) -> None:
     mobile.setdefault("port", 5001)
 
     mobile_action = mobile["action"]
-    if mobile_action not in ("afc_stage", "toolhead_stage", "toolhead"):
-        _config_error("mobile.action must be afc_stage, toolhead_stage, or toolhead (got %s)", mobile_action)
+    if mobile_action not in ("afc_stage", "toolhead_stage", "toolhead", "happy_hare_stage"):
+        _config_error("mobile.action must be afc_stage, toolhead_stage, toolhead, "
+                      "or happy_hare_stage (got %s)", mobile_action)
     if mobile_action == "toolhead" and not mobile.get("toolhead"):
         _config_error("mobile.action 'toolhead' requires a 'toolhead' field (e.g. T0)")
+    if mobile_action == "happy_hare_stage":
+        if not config.get("happy_hare", {}).get("enabled"):
+            _config_error("mobile.action 'happy_hare_stage' requires happy_hare.enabled: true")
+        # The gate-assign flow stages into the shared toolhead pending slot;
+        # a toolhead/toolhead_stage scanner's ASSIGN_SPOOL consumer would
+        # steal it and assign an MMU spool to a toolchanger tool.
+        if has_toolhead_scanners(config) or has_toolhead_stage_scanners(config):
+            _config_error(
+                "mobile.action 'happy_hare_stage' cannot be combined with "
+                "toolhead or toolhead_stage scanners — the staged-assign flows conflict."
+            )
 
     mobile_port = mobile["port"]
     if not isinstance(mobile_port, int) or mobile_port < 1 or mobile_port > 65535:
@@ -365,5 +385,14 @@ def _validate_happy_hare(config: dict) -> None:
             "Happy Hare binding writes to Spoolman — tag-only mode is not supported "
             "for this action. Set 'spoolman_url' in config.yaml."
         )
+
+    # num_gates drives the mobile gate picker (targets G0..G{n-1}). Optional:
+    # without it, phone-side gate assignment is unavailable but the physical
+    # select-then-scan flow still works.
+    num_gates = happy_hare.get("num_gates")
+    if num_gates is not None:
+        if isinstance(num_gates, bool) or not isinstance(num_gates, int) \
+                or num_gates < 1 or num_gates > 32:
+            _config_error("happy_hare.num_gates must be an integer 1-32 (got %s)", num_gates)
 
 

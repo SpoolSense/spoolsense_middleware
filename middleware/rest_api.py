@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -222,6 +223,44 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
         )
         return ApiResponse(success=True, message=msg, pending=True, replaced=replaced)
 
+    # happy_hare_stage: cache as pending, phone picks a gate next. The bind
+    # writes to Spoolman, so the spool must exist there — resolve now and
+    # tell the user at scan time rather than failing at assign time.
+    if action == "happy_hare_stage":
+        spool_id = scan.scanner_spoolman_id
+        if spool_id is None and scan.uid and app_state.spoolman_client is not None:
+            spool = app_state.spoolman_client.find_by_nfc(scan.uid)
+            if spool:
+                spool_id = spool.get("id")
+        if spool_id is None:
+            return ApiResponse(
+                success=False,
+                message="Spool not found in Spoolman — register the tag first",
+            )
+        replaced = _cache_pending_spool(
+            "toolhead",
+            scan.color_hex or "FFFFFF",
+            scan.material_name or scan.material_type or "Unknown",
+            scan.remaining_weight_g,
+            spool_id,
+            scan.nozzle_temp_min_c,
+            scan.nozzle_temp_max_c,
+            scan.bed_temp_min_c,
+            scan.bed_temp_max_c,
+            uid=scan.uid,
+            device_id="",
+            diameter_mm=scan.diameter_mm,
+            density=scan.density,
+            tag_format=req.tag_format or scan.source,
+        )
+        msg = (
+            "Previous pending spool replaced — select a gate to assign"
+            if replaced
+            else "Spool cached — select a gate to assign"
+        )
+        return ApiResponse(success=True, message=msg, pending=True,
+                           replaced=replaced, spool_id=spool_id)
+
     # All other actions: activate immediately
     scanner_cfg: dict[str, Any] = {"action": action}
     if action == "toolhead":
@@ -259,11 +298,70 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
     )
 
 
+_GATE_NAME = re.compile(r"^G(\d+)$")
+
+
+def _assign_gate(req: AssignToolRequest) -> ApiResponse:
+    """Gate-targeted Happy Hare assignment: claim the staged spool, bind it
+    to the requested gate, restore the stage on failure. Same uid/409
+    machinery as the toolhead flow — the shipped app's status-code contract
+    is identical."""
+    toolheads = app_state.cfg.get("toolheads", [])
+    match = _GATE_NAME.match(req.toolhead.upper())
+    if not match or (toolheads and req.toolhead.upper() not in toolheads):
+        return ApiResponse(
+            success=False,
+            message=f"Invalid gate — available: {', '.join(toolheads) or 'none (set happy_hare.num_gates)'}",
+        )
+    gate = int(match.group(1))
+
+    with app_state.state_lock:
+        pending = app_state.pending_spool_toolhead
+        if not pending:
+            raise HTTPException(status_code=409, detail={
+                "code": "no_pending_spool",
+                "message": "No pending spool — scan a tag first",
+            })
+        if req.uid and req.uid.lower() != (pending.get("uid") or "").lower():
+            raise HTTPException(status_code=409, detail={
+                "code": "pending_spool_changed",
+                "message": "Pending spool changed since scan — rescan and try again",
+            })
+        # Claim it — unlike the toolhead flow there is no macro watcher; the
+        # endpoint is the consumer
+        app_state.pending_spool_toolhead = None
+
+    spool_id = pending.get("spoolman_id")
+    if spool_id is None:
+        # Staging requires a Spoolman id, so this should be unreachable —
+        # but never bind nothing
+        return ApiResponse(success=False, message="Staged spool has no Spoolman id — rescan")
+
+    from happy_hare import bind_spool_to_gate
+    if bind_spool_to_gate(gate, spool_id):
+        logger.info(f"[mobile] Bound spool {spool_id} to gate {gate}")
+        return ApiResponse(success=True,
+                           message=f"Spool bound to gate {gate}",
+                           action="happy_hare_stage",
+                           toolhead=req.toolhead.upper(),
+                           spool_id=spool_id)
+
+    # Failed bind — restore the stage unless a newer scan already took it
+    with app_state.state_lock:
+        if app_state.pending_spool_toolhead is None:
+            app_state.pending_spool_toolhead = pending
+    raise HTTPException(status_code=502,
+                        detail="Happy Hare bind failed — see middleware log")
+
+
 @app.post("/api/assign-tool", response_model=ApiResponse)
 def assign_tool(req: AssignToolRequest) -> ApiResponse:
     mobile_cfg = app_state.cfg.get("mobile", {})
     if not mobile_cfg.get("enabled"):
         raise HTTPException(status_code=503, detail="Mobile scanning not enabled")
+
+    if mobile_cfg.get("action") == "happy_hare_stage":
+        return _assign_gate(req)
 
     if mobile_cfg.get("action") != "toolhead_stage":
         return ApiResponse(success=False, message="assign-tool only valid for toolhead_stage mode")
