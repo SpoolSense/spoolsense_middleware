@@ -218,6 +218,36 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
         })
         self.assertNotIn("lane1", app_state.active_spool_tracking)
 
+    def test_unrecordable_pending_clears_previous_baseline(self):
+        # A new spool loaded but with no baseline data — the OLD spool's
+        # record must not survive to receive its deductions
+        app_state.active_spool_tracking["lane1"] = app_state.ActiveSpool(
+            uid="oldspool", weight_g=400.0)
+        self._load_lane_with_pending({
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": None,
+            "spoolman_id": None,
+        })
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+
+    def test_poll_unload_clears_tag_only_baseline(self):
+        # Tag-only staged lanes never lock and have no spool_id, so the
+        # action-based clear can't fire — the load transition must clear
+        app_state.lane_load_states["lane1"] = True
+        app_state.active_spool_tracking["lane1"] = app_state.ActiveSpool(
+            uid="aabbcc", weight_g=250.0)
+        data = _make_afc_data(spool_id=None, load=False)
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state(data)
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+
+    def test_ws_unload_clears_tag_only_baseline(self):
+        app_state.lane_load_states["lane1"] = True
+        app_state.active_spool_tracking["lane1"] = app_state.ActiveSpool(
+            uid="aabbcc", weight_g=250.0)
+        with patch("afc_status.publish_lock"):
+            _sync_lane_state_single("lane1", {"load": False})
+        self.assertNotIn("lane1", app_state.active_spool_tracking)
+
 
 class TestSwapClearsTracking(unittest.TestCase):
     """An externally-driven spool swap (Mainsail SET_SPOOL_ID, no scan) must

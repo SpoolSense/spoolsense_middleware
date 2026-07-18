@@ -352,6 +352,21 @@ class TestAssignRecordsTracking(unittest.TestCase):
         self.assertNotIn("T0", app_state.active_spool_tracking)
 
     @patch("requests.post")
+    def test_unrecordable_assignment_clears_previous_baseline(self, mock_post):
+        # Spool B assigned with no weight while spool A's baseline is on the
+        # tool — B's usage must not be deducted from A's uid
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(
+            uid="spool_a", weight_g=400.0)
+        pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
+                   "remaining_g": None, "uid": "SPOOLB"}
+
+        result = _assign_spool_to_tool("T0", pending)
+
+        self.assertTrue(result)
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+
+    @patch("requests.post")
     def test_failed_activation_records_nothing(self, mock_post):
         import requests as req
         mock_post.side_effect = req.ConnectionError("refused")

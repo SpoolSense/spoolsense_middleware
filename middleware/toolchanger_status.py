@@ -181,13 +181,19 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> bool:
                                 color_hex, material, remaining_g, temps=pending)
 
     # Deduction baseline for UPDATE_TAG (#109) — staged scans carry the uid;
-    # without this, spools assigned via ASSIGN_SPOOL never get a baseline
+    # without this, spools assigned via ASSIGN_SPOOL never get a baseline.
+    # When the new spool can't be recorded (no uid or unknown weight), the
+    # previous spool's baseline must still die — a successful assignment
+    # means it no longer describes what's mounted.
     uid = pending.get("uid")
     if uid and remaining_g is not None:
         from tracking_store import record_tracking
         record_tracking(macro, uid, pending.get("device_id", ""), remaining_g,
                         pending.get("diameter_mm"), pending.get("density"),
                         pending.get("tag_format"))
+    else:
+        from tracking_store import clear_tracking
+        clear_tracking(macro)
     return True
 
 
