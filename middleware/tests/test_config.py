@@ -24,6 +24,7 @@ from config import (  # noqa: E402
     _apply_scanner_defaults,
     _validate_scanners,
     _validate_happy_hare,
+    _validate_mobile,
     _derive_toolheads,
     _migrate_legacy_config,
     has_afc_scanners,
@@ -387,6 +388,116 @@ class TestHasHappyHareScanners(unittest.TestCase):
 
     def test_returns_false_when_no_scanners(self):
         assert has_happy_hare_scanners({}) is False
+
+
+
+class TestHappyHareNumGates(unittest.TestCase):
+    """num_gates drives the mobile gate picker; strict validation."""
+
+    def _hh(self, **kw):
+        base = {"enabled": True, "printer_name": "muffin"}
+        base.update(kw)
+        return {"scanners": {}, "spoolman_url": "http://s:7912", "happy_hare": base}
+
+    def test_valid_num_gates_ok(self):
+        _validate_happy_hare(self._hh(num_gates=8))
+
+    def test_absent_num_gates_ok(self):
+        _validate_happy_hare(self._hh())
+
+    def test_invalid_num_gates_rejected(self):
+        for bad in (0, 33, -1, "four", True, 2.5):
+            with self.assertRaises(SystemExit, msg=f"accepted {bad!r}"):
+                _validate_happy_hare(self._hh(num_gates=bad))
+
+
+class TestMobileHappyHareAction(unittest.TestCase):
+    """mobile.action happy_hare_stage gating."""
+
+    def _cfg(self, scanners=None, hh_enabled=True, spoolman="http://s:7912",
+             num_gates=4, toolheads=None):
+        cfg = {
+            "scanners": scanners or {},
+            "spoolman_url": spoolman,
+            "happy_hare": {"enabled": hh_enabled, "printer_name": "muffin",
+                           "num_gates": num_gates},
+            "mobile": {"enabled": True, "action": "happy_hare_stage"},
+        }
+        if toolheads:
+            cfg["toolheads"] = toolheads
+        return cfg
+
+    def test_allowed_when_hh_enabled(self):
+        _validate_mobile(self._cfg())
+
+    def test_rejected_without_hh_enabled(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(hh_enabled=False))
+
+    def test_rejected_with_toolhead_stage_scanners(self):
+        # Both flows stage into the same pending slot — the ASSIGN_SPOOL
+        # watcher would steal the HH-staged spool
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "toolhead_stage"}}))
+
+    def test_rejected_with_toolhead_scanners(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "toolhead", "toolhead": "T0"}}))
+
+    def test_rejected_with_afc_scanners(self):
+        # AFC + publish_lane_data starts the ASSIGN_SPOOL consumer that
+        # would steal the HH-staged spool; lanes also suppress gate targets
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(
+                scanners={"abc": {"action": "afc_lane", "lane": "lane1"}}))
+
+    def test_allowed_with_hh_scanners(self):
+        _validate_mobile(self._cfg(
+            scanners={"abc": {"action": "happy_hare_stage"}}))
+
+    def test_rejected_without_spoolman_url(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(spoolman=""))
+
+    def test_rejected_without_num_gates(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(num_gates=None))
+
+    def test_rejected_with_explicit_toolheads(self):
+        with self.assertRaises(SystemExit):
+            _validate_mobile(self._cfg(toolheads=["T0", "T1"]))
+
+
+
+class TestGateDerivationEndToEnd(unittest.TestCase):
+    """load_config derives G0..G{n-1} for HH-mobile configs — the linchpin
+    of the phone gate picker, tested through the real loader."""
+
+    def _load(self, yaml_text):
+        import tempfile, config as config_mod
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_text)
+            path = f.name
+        old = config_mod.CONFIG_PATH
+        config_mod.CONFIG_PATH = path
+        try:
+            return config_mod.load_config()
+        finally:
+            config_mod.CONFIG_PATH = old
+            os.unlink(path)
+
+    def test_hh_mobile_config_derives_gate_targets(self):
+        cfg = self._load(
+            "mqtt: {broker: b, port: 1883, username: '', password: ''}\n"
+            "spoolman_url: http://s:7912\n"
+            "moonraker_url: http://m:7125\n"
+            "scanners: {vethh: {action: happy_hare_stage}}\n"
+            "happy_hare: {enabled: true, num_gates: 3}\n"
+            "mobile: {enabled: true, action: happy_hare_stage}\n"
+        )
+        self.assertEqual(cfg["toolheads"], ["G0", "G1", "G2"])
 
 
 if __name__ == "__main__":

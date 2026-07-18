@@ -69,12 +69,14 @@ class MoonrakerWebsocket:
 
         # Objects discovered via printer.objects.list on each connect
         self._has_save_variables: bool = False
+        self._has_mmu: bool = False
 
         # Callbacks — set by consumers
         self.on_lane_update: Callable[[str, dict], None] | None = None
         self.on_assign_spool: Callable[[str], None] | None = None
         self.on_update_tag: Callable[[int], None] | None = None
         self.on_save_variables: Callable[[dict], None] | None = None
+        self.on_mmu: Callable[[dict], None] | None = None
 
     def set_lane_names(self, names: list[str]) -> None:
         """Set AFC lane names to subscribe to (e.g. ['lane1', 'lane2'])."""
@@ -193,9 +195,10 @@ class MoonrakerWebsocket:
                 logger.info("MoonrakerWebsocket: discovered AFC lanes: %s", discovered)
             else:
                 logger.info("MoonrakerWebsocket: no AFC lanes found — subscribing without AFC_stepper objects")
-            # Only subscribe to save_variables if Klipper actually has the
-            # section — subscribing to a missing object errors the request.
+            # Only subscribe to save_variables/mmu if Klipper actually has
+            # them — subscribing to a missing object errors the request.
             self._has_save_variables = "save_variables" in objects
+            self._has_mmu = "mmu" in objects
             self._send_subscribe(ws)
             return
 
@@ -245,6 +248,8 @@ class MoonrakerWebsocket:
         objects["gcode_macro UPDATE_TAG"] = None
         if self._has_save_variables and self.on_save_variables:
             objects["save_variables"] = None
+        if self._has_mmu and self.on_mmu:
+            objects["mmu"] = None
         return objects
 
     def _dispatch_status(self, status: dict) -> None:
@@ -265,3 +270,6 @@ class MoonrakerWebsocket:
                 variables = value.get("variables")
                 if isinstance(variables, dict):
                     self.on_save_variables(variables)
+            elif key == "mmu" and self.on_mmu:
+                if isinstance(value, dict):
+                    self.on_mmu(value)
