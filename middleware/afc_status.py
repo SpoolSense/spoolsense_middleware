@@ -149,7 +149,10 @@ def _sync_lane_state(data: dict) -> None:
             if lane_name == "system" or not isinstance(lane_data, dict):
                 continue
 
-            spool_id       = lane_data.get("spool_id")
+            # AFC reports 0 for "no spool" — normalize once so the lock/
+            # clear/swap/consumption logic below all see one empty value
+            # (the websocket path already treats 0 as removal)
+            spool_id       = lane_data.get("spool_id") or None
             status         = lane_data.get("status")
             lane_is_loaded = lane_data.get("load", False)
 
@@ -195,8 +198,7 @@ def _sync_lane_state(data: dict) -> None:
                 # consumes anything (SET_NEXT_SPOOL_ID may land after load).
                 if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
                     staged_id = app_state.pending_spool_afc.get("spoolman_id")
-                    lane_id = spool_id or None  # AFC uses 0 for "no spool"
-                    if lane_id is None or staged_id == lane_id:
+                    if spool_id is None or staged_id == spool_id:
                         newly_loaded = True
                         pending = app_state.pending_spool_afc
                         app_state.pending_spool_afc = None

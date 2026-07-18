@@ -126,12 +126,16 @@ Two things work automatically on INDX:
 
 - **Per-tool deduction** — Bondtech's macros do not create Klipper `tool`
   objects, so `UPDATE_TAG` uses the slicer's per-tool filament weights from
-  the job metadata. Nothing extra to install.
+  the job metadata. Nothing extra to install, but your slicer must write
+  per-tool filament usage into the gcode (OrcaSlicer and PrusaSlicer do);
+  without that metadata the deduction is skipped.
 - **Live active-spool sync** — INDX records the mounted tool in
   `save_variables.active_tool`; on every tool pickup the middleware switches
   Spoolman's active spool to the spool assigned to that tool, so usage
-  accrues to the spool actually printing. Disable with
-  `active_tool_sync: false` in `config.yaml`.
+  accrues to the spool actually printing. If the picked tool has no spool
+  assigned (or the head is parked), Spoolman is left unchanged, so usage
+  keeps accruing to the previously active spool until the next assigned
+  pickup. Disable with `active_tool_sync: false` in `config.yaml`.
 
 ## Restart Klipper
 

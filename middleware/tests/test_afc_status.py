@@ -331,6 +331,31 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
                 _sync_lane_state_single("lane1", {"load": True})
         self.assertIsNone(app_state.pending_spool_afc)
 
+    def test_poll_zero_spool_id_treated_as_empty(self):
+        # AFC reports 0 for "no spool" — polling must not lock an empty
+        # lane, and a locked lane reporting 0 must clear (parity with the
+        # websocket path, which always treated 0 as removal)
+        app_state.lane_locks["lane1"] = True
+        app_state.active_spools["lane1"] = 42
+        data = _make_afc_data(spool_id=0, load=False)
+        with patch("afc_status.publish_lock") as mock_lock:
+            _sync_lane_state(data)
+            mock_lock.assert_called_once_with("lane1", "clear")
+        self.assertIsNone(app_state.active_spools.get("lane1"))
+
+    def test_poll_zero_spool_id_load_consumes_tag_only_staged(self):
+        app_state.lane_load_states["lane1"] = False
+        staged = {"color_hex": "FF0000", "material": "PLA",
+                  "remaining_g": 250.0, "spoolman_id": None, "uid": "AABBCC",
+                  "tag_format": "openprinttag"}
+        app_state.pending_spool_afc = staged
+        data = _make_afc_data(spool_id=0, load=True)
+        with patch("afc_status.threading.Timer"):
+            with patch("afc_status.publish_lock"):
+                _sync_lane_state(data)
+        self.assertIsNone(app_state.pending_spool_afc)
+        self.assertIn("lane1", app_state.active_spool_tracking)
+
     def test_ws_zero_spool_id_load_consumes_tag_only_staged(self):
         # AFC reports spool_id 0 for "no spool" — a tag-only staged spool
         # must still be consumed when the lane loads with a zero id
