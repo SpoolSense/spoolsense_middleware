@@ -185,11 +185,16 @@ def _sync_lane_state(data: dict) -> None:
                 # transition. A Spoolman-backed staged load reports load=true
                 # AND a spool_id in the same poll (SET_NEXT_SPOOL_ID landed
                 # first), so consumption can't live in an else-branch keyed
-                # off spool_id being absent.
+                # off spool_id being absent. But a lane loading a DIFFERENT
+                # Spoolman spool (assigned externally) must not eat the
+                # staged one — only consume when the ids agree or either
+                # side is tag-only.
                 if lane_is_loaded and not was_loaded and app_state.pending_spool_afc:
-                    newly_loaded = True
-                    pending = app_state.pending_spool_afc
-                    app_state.pending_spool_afc = None
+                    staged_id = app_state.pending_spool_afc.get("spoolman_id")
+                    if staged_id is None or spool_id is None or staged_id == spool_id:
+                        newly_loaded = True
+                        pending = app_state.pending_spool_afc
+                        app_state.pending_spool_afc = None
 
             # Unload transition must clear independently of lock/spool-id
             # state: tag-only staged lanes (#109) have neither, so the
@@ -245,10 +250,14 @@ def _sync_lane_state_single(lane_name: str, data: dict) -> None:
                 unloaded = True
             app_state.lane_load_states[lane_name] = load_state
 
-        # Consume pending afc_stage data on load transition
+        # Consume pending afc_stage data on load transition — same id-match
+        # rule as the poll path: never eat a staged spool while the lane
+        # reports a different Spoolman id
         if newly_loaded and app_state.pending_spool_afc:
-            pending = app_state.pending_spool_afc
-            app_state.pending_spool_afc = None
+            staged_id = app_state.pending_spool_afc.get("spoolman_id")
+            if staged_id is None or spool_id is None or staged_id == spool_id:
+                pending = app_state.pending_spool_afc
+                app_state.pending_spool_afc = None
 
         # Update lane status if present in delta
         status = data.get("status")
