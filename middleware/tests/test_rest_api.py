@@ -451,9 +451,11 @@ class TestMobileScanHappyHare(unittest.TestCase):
     def _post(self, payload):
         return client.post("/api/mobile-scan", json=payload)
 
-    def test_scan_with_spoolman_id_stages(self):
+    def test_scan_stages_with_uid_resolved_spool(self):
         scan = _make_scan_event(uid="AABB11")
         scan.scanner_spoolman_id = 42
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = {"id": 42}
         with patch("rest_api.detect_and_parse", return_value=scan):
             resp = self._post({"uid": "AABB11", "present": True,
                                "tag_data_valid": True, "spoolman_id": 42})
@@ -463,6 +465,19 @@ class TestMobileScanHappyHare(unittest.TestCase):
         self.assertEqual(resp.json()["spool_id"], 42)
         self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 42)
         self.assertEqual(app_state.pending_spool_toolhead["uid"], "AABB11")
+
+    def test_uid_resolution_beats_stale_payload_id(self):
+        # A relinked tag: payload still carries the OLD spool id — the uid
+        # lookup is authoritative and must win
+        scan = _make_scan_event(uid="AABB11")
+        scan.scanner_spoolman_id = 42
+        app_state.spoolman_client = MagicMock()
+        app_state.spoolman_client.find_by_nfc.return_value = {"id": 77}
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            resp = self._post({"uid": "AABB11", "present": True,
+                               "tag_data_valid": True, "spoolman_id": 42})
+        self.assertEqual(resp.json()["spool_id"], 77)
+        self.assertEqual(app_state.pending_spool_toolhead["spoolman_id"], 77)
 
     def test_scan_without_id_resolves_via_spoolman_lookup(self):
         scan = _make_scan_event(uid="AABB11")

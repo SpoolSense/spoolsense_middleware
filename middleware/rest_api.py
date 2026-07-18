@@ -227,11 +227,19 @@ def mobile_scan(req: MobileScanRequest) -> ApiResponse:
     # writes to Spoolman, so the spool must exist there — resolve now and
     # tell the user at scan time rather than failing at assign time.
     if action == "happy_hare_stage":
-        spool_id = scan.scanner_spoolman_id
-        if spool_id is None and scan.uid and app_state.spoolman_client is not None:
+        # The UID is the authority: scanner_spoolman_id is a hint that can go
+        # stale when a tag is relinked to a different spool. Config requires
+        # spoolman_url for this action, so a missing client is a hard error.
+        spool_id: Optional[int] = None
+        if scan.uid and app_state.spoolman_client is not None:
             spool = app_state.spoolman_client.find_by_nfc(scan.uid)
             if spool:
                 spool_id = spool.get("id")
+                hint = scan.scanner_spoolman_id
+                if hint is not None and hint != spool_id:
+                    logger.info(
+                        f"[mobile] uid {scan.uid} resolves to spool {spool_id}; "
+                        f"ignoring stale payload id {hint}")
         if spool_id is None:
             return ApiResponse(
                 success=False,
