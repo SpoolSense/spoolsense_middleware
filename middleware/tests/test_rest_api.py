@@ -182,6 +182,15 @@ class TestMobileScan(unittest.TestCase):
         # Pending spool was stored in app_state
         self.assertIsNotNone(app_state.pending_spool_toolhead)
 
+    def test_toolhead_stage_pending_uid_stored_as_sent(self):
+        # Frozen iOS contract: /api/status echoes the pending dict and the
+        # shipped app reads the uid back — it must keep the case the app sent
+        _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
+        scan = _make_scan_event(uid="AABBCCDD")
+        with patch("rest_api.detect_and_parse", return_value=scan):
+            self._post({"uid": "AABBCCDD", "present": True, "tag_data_valid": True})
+        self.assertEqual(app_state.pending_spool_toolhead["uid"], "AABBCCDD")
+
     def test_toolhead_stage_replaced_flag_set_on_second_scan(self):
         _reset_app_state(mobile_enabled=True, mobile_action="toolhead_stage")
         # Pre-populate a pending spool to simulate scanning twice

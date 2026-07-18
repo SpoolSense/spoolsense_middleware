@@ -16,7 +16,7 @@ sys.modules.setdefault("paho.mqtt", MagicMock())
 sys.modules.setdefault("paho.mqtt.client", MagicMock())
 
 import app_state  # noqa: E402
-from tracking_store import load_tracking, save_tracking  # noqa: E402
+from tracking_store import load_tracking, record_tracking, save_tracking  # noqa: E402
 
 
 class TestTrackingStore(unittest.TestCase):
@@ -74,6 +74,47 @@ class TestTrackingStore(unittest.TestCase):
     def test_save_never_raises(self):
         app_state.TRACKING_FILE = "/nonexistent-root-dir/tracking.json"
         save_tracking()  # must not raise
+
+
+class TestRecordTracking(unittest.TestCase):
+    """record_tracking is the single write path for deduction baselines —
+    it lowercases the uid, requires a weight, and persists (#109)."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        self.tmp.close()
+        os.unlink(self.tmp.name)
+        app_state.TRACKING_FILE = self.tmp.name
+        app_state.state_lock = threading.Lock()
+        app_state.active_spool_tracking = {}
+
+    def tearDown(self):
+        if os.path.exists(self.tmp.name):
+            os.unlink(self.tmp.name)
+
+    def test_records_lowercased_uid_and_persists(self):
+        ok = record_tracking("T0", "AABB11", "f3d360", 300.0, 1.75, 1.24, "openprinttag")
+        self.assertTrue(ok)
+        self.assertEqual(app_state.active_spool_tracking["T0"].uid, "aabb11")
+        with open(self.tmp.name) as f:
+            self.assertIn("aabb11", json.load(f)["T0"]["uid"])
+
+    def test_missing_weight_rejected(self):
+        self.assertFalse(record_tracking("T0", "aabb11", "", None))
+        self.assertNotIn("T0", app_state.active_spool_tracking)
+        self.assertFalse(os.path.exists(self.tmp.name))
+
+    def test_missing_uid_or_target_rejected(self):
+        self.assertFalse(record_tracking("T0", "", "", 300.0))
+        self.assertFalse(record_tracking("", "aabb11", "", 300.0))
+        self.assertEqual(app_state.active_spool_tracking, {})
+
+    def test_defaults_applied(self):
+        record_tracking("lane1", "aabb11", "", 250.0)
+        rec = app_state.active_spool_tracking["lane1"]
+        self.assertEqual(rec.diameter_mm, 1.75)
+        self.assertEqual(rec.density, 1.24)
+        self.assertEqual(rec.tag_format, "unknown")
 
 
 class TestClearTracking(unittest.TestCase):
