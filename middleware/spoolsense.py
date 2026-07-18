@@ -262,9 +262,11 @@ def _start_sync_services(use_ws: bool) -> None:
         app_state.moonraker_ws.on_update_tag = app_state.filament_usage_sync.on_ws_update_tag
 
     # Klipper save_variables — syncs spool IDs on manual changes (SAVE_VARIABLE
-    # in Mainsail/console). Websocket-only; without the websocket, manual var
-    # changes are picked up by ToolheadStatusSync's eject polling alone.
-    if has_toolhead_scanners(cfg):
+    # in Mainsail/console) and carries INDX's active_tool. Websocket-only;
+    # without the websocket, manual var changes are picked up by
+    # ToolheadStatusSync's eject polling alone. toolhead_stage configs (INDX)
+    # need this too — their bindings and active_tool live in the same object.
+    if has_toolhead_scanners(cfg) or has_toolhead_stage_scanners(cfg):
         if use_ws:
             app_state.moonraker_ws.on_save_variables = on_ws_save_variables
         else:
