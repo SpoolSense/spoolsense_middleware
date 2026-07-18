@@ -173,11 +173,15 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
     # OpenTag3D/OpenPrintTag payloads have no such key — their parser puts
     # the format name in scan.source, which matches _WRITABLE_FORMATS
     tag_format = raw.get("tag_format") or getattr(scan, "source", None)
+    # "mobile" is the REST marker for event attribution, not an MQTT scanner.
+    # Deduction routing keys off the tracking device_id — empty means mobile
+    # (store for GET /api/deductions), nonempty means publish to that scanner.
+    tracking_device = "" if device_id == "mobile" else (device_id or "")
     _cache_pending_spool(slot, color_hex, filament_label, remaining, spoolman_id,
                          event.nozzle_temp_min, event.nozzle_temp_max,
                          event.bed_temp_min, event.bed_temp_max,
                          uid=getattr(scan, "uid", None),
-                         device_id=device_id or "",
+                         device_id=tracking_device,
                          diameter_mm=getattr(scan, "diameter_mm", None),
                          density=getattr(scan, "density", None),
                          tag_format=tag_format)

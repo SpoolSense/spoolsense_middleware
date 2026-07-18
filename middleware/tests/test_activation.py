@@ -291,6 +291,24 @@ class TestStagedCarriesTrackingFields(unittest.TestCase):
         self.assertEqual(pending["diameter_mm"], 1.75)
         self.assertEqual(pending["tag_format"], "openprinttag")
 
+    def test_mobile_marker_not_stored_as_tracking_device(self):
+        # device_id="mobile" is REST event attribution — if it lands in the
+        # tracking record, UPDATE_TAG publishes deductions to a nonexistent
+        # MQTT scanner instead of the mobile REST store
+        from activation import _route_staged
+        from publishers.base import Action
+        from state.models import ScanEvent
+        scan = ScanEvent(
+            source="opentag3d", target_id="mobile", scanned_at="now",
+            uid="AABB11", present=True, tag_data_valid=True,
+        )
+        event = MagicMock(nozzle_temp_min=None, nozzle_temp_max=None,
+                          bed_temp_min=None, bed_temp_max=None)
+        with patch("activation.notify_observers"):
+            _route_staged(Action.AFC_STAGE, True, "FF0000", "PLA", 500.0,
+                          42, event, scan, "mobile")
+        self.assertEqual(app_state.pending_spool_afc["device_id"], "")
+
     def test_opentag3d_format_derived_from_source(self):
         # Direct OpenTag3D payloads have no tag_format key — the parser puts
         # the format in scan.source; storing "unknown" would make
