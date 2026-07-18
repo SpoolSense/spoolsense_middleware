@@ -4,6 +4,47 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.8.6] - 2026-07-18
+
+### Added
+
+- **Happy Hare from the mobile app** — with `mobile.action: happy_hare_stage`
+  and `happy_hare.num_gates`, the app's picker shows gates `G0..G{n-1}`:
+  scan a tag on the phone, pick a gate, done — no `MMU_SELECT` on the
+  printer needed. The scanned uid is resolved against Spoolman (a stale
+  spool-id on the tag is ignored), assignments use the same stale-scan
+  guard as toolchangers, and a failed bind restores the staged spool so a
+  retry is a plain re-tap. `/api/status` now reports the live MMU gate as
+  `active_tool` and per-gate occupancy in `active_spools`, mirrored from
+  Happy Hare's own gate map. (#117)
+
+- **Staged scans record deduction baselines** — spools assigned via
+  ASSIGN_SPOOL (toolhead_stage) or staged AFC loads now get an UPDATE_TAG
+  deduction baseline, previously exclusive to dedicated toolhead/afc_lane
+  scanners. A failed ASSIGN_SPOOL assignment no longer loses the staged
+  spool — it is restored unless a newer scan replaced it. (#108, #109)
+
+### Fixed
+
+- **Happy Hare binding never actually worked** — the middleware wrote a
+  Spoolman field (`mmu_gate`) that no Happy Hare version reads (HH uses
+  `mmu_gate_map`), so scan-to-gate bindings silently never reached Happy
+  Hare. Binding now goes through HH's own `MMU_SPOOLMAN SPOOLID=<id>
+  GATE=<n>`, which also cleans up any previous spool on that gate, and
+  the middleware confirms the gate map actually updated before reporting
+  success. `happy_hare.printer_name` is no longer required. Docs also
+  referenced `MMU_SELECT_GATE`, which does not exist — the command is
+  `MMU_SELECT GATE=N`. (#117)
+
+- **AFC staged-load edge cases** — Spoolman-backed staged loads in polling
+  mode never consumed the staged data (load and spool id arrive in the
+  same poll); a lane loading a different spool could consume a staged one;
+  partial websocket deltas and AFC's `0`/null spool-id conventions are now
+  honored throughout; unloads clear deduction baselines for tag-only lanes
+  that never lock. (#116)
+
+---
+
 ## [1.8.5] - 2026-07-18
 
 ### Added
