@@ -4,6 +4,40 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.9.0] - UNRELEASED
+
+### Changed
+
+- **Deduction baselines now come from Spoolman, not the tag** (#119). In AFC
+  setups the scanner applies deductions Spoolman-direct and never rewrites
+  the tag, so tag weights go stale — re-scanning a spool reset the baseline
+  to the stale value and double-deducted prior usage in Spoolman. The
+  baseline is now Spoolman's remaining weight (minus any scanner-side
+  pending deduction) whenever the spool is matched; the tag weight is only
+  a fallback for measured/legacy tags Spoolman doesn't know yet. This
+  applies to all tag formats, v1 included.
+
+### Added
+
+- **OpenTag3D v2 support** (#119, scanner #298): the middleware honors the
+  new `weight_source` MQTT field. `"nominal"` tags (v2 tags without a
+  measured weight) report the spool's nominal size forever — they get no
+  tag-weight baseline at all; deductions still flow and land in Spoolman
+  exactly once. `pending_deduction_g` (a not-yet-applied scanner deduction)
+  is subtracted from the baseline when present. Older firmware without the
+  fields behaves as before.
+
+### Fixed
+
+- Tag write-back commands are only built for OpenPrintTag tags —
+  `cmd/write_tag` on the scanner is not format-aware and would rewrite an
+  OpenTag3D tag as OpenPrintTag (#119).
+- The write-back staleness check compared the tag-preferred merged weight
+  to the tag itself and could never fire; it now compares Spoolman's own
+  remaining weight.
+
+---
+
 ## [1.8.6] - 2026-07-18
 
 ### Added
