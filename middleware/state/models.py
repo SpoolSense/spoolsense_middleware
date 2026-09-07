@@ -47,6 +47,13 @@ class ScanEvent:
     remaining_weight_g: Optional[float] = None
     remaining_length_mm: Optional[float] = None  # converted from remaining_m × 1000
 
+    # OpenTag3D v2 weight semantics (#119) — set only by the opentag3d parser.
+    # weight_source "nominal" means remaining_weight_g is the spool's nominal
+    # size and will never change on the tag; None = legacy firmware / other
+    # formats (measured semantics).
+    weight_source: Optional[str] = None
+    pending_deduction_g: Optional[float] = None  # scanner deduction not yet applied to Spoolman
+
     # Tag provenance
     tag_written_at: Optional[str] = None    # when tag was written (unix → ISO)
 

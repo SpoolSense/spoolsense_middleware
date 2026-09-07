@@ -33,6 +33,8 @@ def parse_opentag3d(payload: dict, target_id: str) -> ScanEvent:
         bed_temp_max         → bed_temp_max_c
         spool_weight_nominal → full_weight_g
         spool_weight_measured→ remaining_weight_g
+        weight_source        → weight_source        ("measured" | "nominal", v2 contract #119)
+        pending_deduction_g  → pending_deduction_g  (scanner-side unapplied deduction)
     """
     opentag_version = payload.get("opentag_version")
 
@@ -55,5 +57,7 @@ def parse_opentag3d(payload: dict, target_id: str) -> ScanEvent:
         bed_temp_max_c=payload.get("bed_temp_max"),
         full_weight_g=payload.get("spool_weight_nominal"),
         remaining_weight_g=payload.get("spool_weight_measured"),
+        weight_source=payload.get("weight_source"),
+        pending_deduction_g=payload.get("pending_deduction_g"),
         raw=payload,
     )
