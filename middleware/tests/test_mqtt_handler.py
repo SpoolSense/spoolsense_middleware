@@ -42,6 +42,7 @@ from mqtt_handler import (  # noqa: E402
     _resolve_scanner_from_topic,
     _get_scanner_target,
     _should_auto_release_lock,
+    _record_spool_tracking,
     on_connect,
     on_message,
 )
@@ -399,6 +400,30 @@ class TestUidOnlyObserverEvents(unittest.TestCase):
              patch("happy_hare.bind_spool_to_current_gate", return_value=False):
             self._scan()
         mock_notify.assert_not_called()
+
+
+class TestRecordSpoolTrackingNoneBaseline(unittest.TestCase):
+    """#119 — a None baseline records the spool but must not run the
+    low-spool check (None is 'unknown', not 'empty')."""
+
+    def setUp(self):
+        app_state.state_lock = threading.Lock()
+        app_state.active_spool_tracking = {}
+
+    def test_none_baseline_records_without_low_spool_check(self):
+        with patch("mqtt_handler._check_low_spool") as mock_low:
+            _record_spool_tracking("lane1", "AABB11", "f3d360", None,
+                                   1.75, 1.24, tag_format="opentag3d")
+        rec = app_state.active_spool_tracking.get("lane1")
+        self.assertIsNotNone(rec)
+        self.assertIsNone(rec.weight_g)
+        mock_low.assert_not_called()
+
+    def test_real_baseline_still_checks_low_spool(self):
+        with patch("mqtt_handler._check_low_spool") as mock_low:
+            _record_spool_tracking("lane1", "AABB11", "f3d360", 90.0,
+                                   1.75, 1.24, tag_format="opentag3d")
+        mock_low.assert_called_once_with("f3d360", 90.0)
 
 
 if __name__ == "__main__":

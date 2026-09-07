@@ -83,7 +83,7 @@ def _record_spool_tracking(
     # Check low-spool threshold at scan time — if a new spool has plenty of
     # filament, this also clears any latched low-spool state from the same
     # device so the LED stops breathing after a spool swap.
-    if device_id:
+    if device_id and remaining is not None:
         _check_low_spool(device_id, remaining)
 
 
@@ -253,12 +253,14 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
         device_id = _extract_scanner_device_id(topic)
         _activate_from_scan(scanner_cfg, scan, spool_info=spool_info, device_id=device_id)
 
-        # Record initial weight for UPDATE_TAG filament deduction
-        # tag_format comes from the scanner payload — tells us if this tag supports weight writes
+        # Record the deduction baseline for UPDATE_TAG — Spoolman-preferred,
+        # tag fallback, None for unmatched nominal tags (#119)
         tag_format = payload.get("tag_format", "unknown")
+        from tracking_store import choose_deduction_baseline
         _record_spool_tracking(
             target, scan.uid.lower() if scan.uid else None, device_id or "",
-            scan.remaining_weight_g, scan.diameter_mm, scan.density,
+            choose_deduction_baseline(scan, spool_info),
+            scan.diameter_mm, scan.density,
             tag_format=tag_format,
         )
 
