@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import unittest
+from dataclasses import dataclass
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -29,6 +30,7 @@ from filament_usage import (  # noqa: E402
     _check_low_spool,
     LOW_SPOOL_HYSTERESIS_G,
 )
+from tracking_store import choose_deduction_baseline, record_tracking  # noqa: E402
 
 
 def _reset_app_state():
@@ -495,6 +497,96 @@ class TestHandleAfcLowSpoolIntegration(unittest.TestCase):
         low_spool_calls = [c for c in calls if "cmd/low_spool" in c[0][0]]
         self.assertEqual(len(low_spool_calls), 0)
         self.assertFalse(app_state.low_spool_latched.get("scanner1", False))
+
+
+@dataclass
+class _FakeScan:
+    """Only the fields choose_deduction_baseline reads."""
+    uid: str = "53ab12cd34ef56"
+    remaining_weight_g: float | None = 1000.0
+    weight_source: str | None = None
+    pending_deduction_g: float | None = None
+
+
+@dataclass
+class _FakeSpoolInfo:
+    spoolman_remaining_g: float | None = None
+
+
+class TestRescanDoubleDeductRegression(unittest.TestCase):
+    """#119 acceptance — a re-scan must never resurrect a stale or nominal
+    tag weight as the AFC baseline and re-deduct prior usage."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    def _scan(self, scan, spool_info, lane="lane1", device="f3d360"):
+        record_tracking(lane, scan.uid, device,
+                        choose_deduction_baseline(scan, spool_info),
+                        1.75, 1.24, "opentag3d")
+
+    @patch("filament_usage._publish_deduction")
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_nominal_tag_rescan_does_not_double_deduct(self, mock_fetch, mock_pub):
+        scan = _FakeScan(weight_source="nominal")
+        # First scan of a fresh spool — Spoolman says 1000 g
+        self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=1000.0))
+
+        # Print 1 uses 200 g → one deduction of 200
+        mock_fetch.return_value = {"lane1": 800.0}
+        _handle_afc()
+        self.assertEqual(mock_pub.call_count, 1)
+        self.assertAlmostEqual(mock_pub.call_args[0][2], 200.0)
+
+        # Re-scan: tag still says 1000, but Spoolman (updated by the
+        # scanner) now says 800 — baseline must follow Spoolman
+        self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=800.0))
+
+        # UPDATE_TAG fires again with no new usage → no second deduction
+        _handle_afc()
+        self.assertEqual(mock_pub.call_count, 1)
+
+    @patch("filament_usage._publish_deduction")
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_stale_v1_tag_rescan_does_not_double_deduct(self, mock_fetch, mock_pub):
+        # Same failure mode, measured (v1) tag gone stale in the lane
+        scan = _FakeScan(weight_source=None, remaining_weight_g=1000.0)
+        self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=800.0))
+
+        mock_fetch.return_value = {"lane1": 800.0}
+        _handle_afc()
+        mock_pub.assert_not_called()
+
+    @patch("filament_usage._publish_deduction")
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_nominal_without_spoolman_sends_no_deduction(self, mock_fetch, mock_pub):
+        self._scan(_FakeScan(weight_source="nominal"), None)
+
+        mock_fetch.return_value = {"lane1": 800.0}
+        _handle_afc()
+        mock_pub.assert_not_called()
+
+    @patch("filament_usage._publish_deduction")
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_legacy_tag_without_spoolman_keeps_today_behavior(self, mock_fetch, mock_pub):
+        self._scan(_FakeScan(), None)  # baseline = tag 1000
+
+        mock_fetch.return_value = {"lane1": 800.0}
+        _handle_afc()
+        self.assertEqual(mock_pub.call_count, 1)
+        self.assertAlmostEqual(mock_pub.call_args[0][2], 200.0)
+
+    @patch("filament_usage._publish_deduction")
+    @patch("filament_usage._fetch_afc_lane_weights")
+    def test_pending_deduction_shrinks_baseline(self, mock_fetch, mock_pub):
+        # Spoolman was unreachable at apply time: it still says 1000 while
+        # the scanner holds 200 pending → baseline must be 800
+        scan = _FakeScan(weight_source="nominal", pending_deduction_g=200.0)
+        self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=1000.0))
+
+        mock_fetch.return_value = {"lane1": 800.0}
+        _handle_afc()
+        mock_pub.assert_not_called()
 
 
 if __name__ == "__main__":
