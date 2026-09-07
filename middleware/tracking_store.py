@@ -23,6 +23,33 @@ import app_state
 logger = logging.getLogger(__name__)
 
 
+def choose_deduction_baseline(scan: "object", spool_info: "object | None") -> float | None:
+    """Pick the UPDATE_TAG deduction baseline for a scanned spool (#119).
+
+    Spoolman's remaining weight is authoritative whenever available: in AFC
+    setups the scanner applies off-scanner deductions Spoolman-direct and
+    never rewrites the tag, so the tag goes stale — and OpenTag3D v2
+    nominal-weight tags never change at all. The tag weight is only a
+    fallback for measured/legacy tags Spoolman doesn't know yet. A nominal
+    tag with no Spoolman match gets no baseline rather than a wrong one
+    that would double-deduct on every re-scan.
+
+    scan needs: remaining_weight_g, weight_source, pending_deduction_g, uid.
+    spool_info needs: spoolman_remaining_g (or be None).
+    """
+    spoolman_remaining = getattr(spool_info, "spoolman_remaining_g", None) if spool_info else None
+    if spoolman_remaining is not None:
+        pending = getattr(scan, "pending_deduction_g", None) or 0.0
+        return max(0.0, spoolman_remaining - pending)
+    if getattr(scan, "weight_source", None) == "nominal":
+        logger.info(
+            "Baseline: uid=%s reports a nominal weight and has no Spoolman "
+            "match — no deduction baseline until Spoolman knows the spool",
+            getattr(scan, "uid", None))
+        return None
+    return getattr(scan, "remaining_weight_g", None)
+
+
 def record_tracking(
     target: str,
     uid: str,
@@ -33,12 +60,14 @@ def record_tracking(
     tag_format: str | None = None,
 ) -> bool:
     """Record the deduction baseline for the spool mounted on *target* and
-    persist it. Requires a uid and a known weight — a baseline without a
-    weight can't drive a deduction, so nothing useful would be stored.
+    persist it. Requires a uid. remaining may be None (#119): the record
+    still carries uid/device/format so usage-based (toolchanger) deductions
+    and mobile deduction routing keep working; the AFC weight-delta path
+    skips baselines of None.
 
     The uid is stored lowercased: tracking records are matched against
     scanner/mobile uids that arrive in either case."""
-    if not target or not uid or remaining is None:
+    if not target or not uid:
         return False
 
     with app_state.state_lock:
