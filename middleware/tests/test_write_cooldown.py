@@ -37,7 +37,7 @@ class FakeScanEvent:
 
 @dataclass
 class FakeSpoolInfo:
-    remaining_weight_g: float | None = 500.0
+    spoolman_remaining_g: float | None = 500.0
 
 
 class TestShouldWriteRemaining(unittest.TestCase):
@@ -70,8 +70,8 @@ class TestWriteCooldown(unittest.TestCase):
     def test_no_cooldown_allows_write(self):
         """First write to a UID should always be allowed."""
         scan = FakeScanEvent(uid="AABBCCDD", remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNotNone(plan)
         self.assertEqual(plan.uid, "AABBCCDD")
 
@@ -82,8 +82,8 @@ class TestWriteCooldown(unittest.TestCase):
         app_state.tag_write_timestamps[uid] = time.monotonic()
 
         scan = FakeScanEvent(uid=uid, remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNone(plan)
 
     def test_cooldown_expires_allows_write(self):
@@ -93,8 +93,8 @@ class TestWriteCooldown(unittest.TestCase):
         app_state.tag_write_timestamps[uid] = time.monotonic() - (app_state.WRITE_COOLDOWN_SECONDS + 1)
 
         scan = FakeScanEvent(uid=uid, remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNotNone(plan)
 
     def test_cooldown_per_uid(self):
@@ -104,31 +104,31 @@ class TestWriteCooldown(unittest.TestCase):
 
         # UID B should still work
         scan = FakeScanEvent(uid="BBBB", remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNotNone(plan)
         self.assertEqual(plan.uid, "BBBB")
 
     def test_no_device_id_returns_none(self):
         """No device_id means no writeback (unchanged behavior)."""
         scan = FakeScanEvent(uid="AABBCCDD", remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id=None)
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id=None, tag_format="openprinttag")
         self.assertIsNone(plan)
 
     def test_no_uid_returns_none(self):
         """No UID means no writeback (unchanged behavior)."""
         scan = FakeScanEvent(uid=None, remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNone(plan)
 
     def test_build_write_plan_claims_slot_on_write(self):
         """build_write_plan records timestamp when a write plan is produced."""
         uid = "CLAIM_TEST"
         scan = FakeScanEvent(uid=uid, remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNotNone(plan)
         self.assertIn(uid, app_state.tag_write_timestamps)
 
@@ -136,8 +136,8 @@ class TestWriteCooldown(unittest.TestCase):
         """build_write_plan does NOT burn cooldown when no write is needed."""
         uid = "NO_WRITE"
         scan = FakeScanEvent(uid=uid, remaining_weight_g=500.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)  # equal — no write
-        plan = build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)  # equal — no write
+        plan = build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
         self.assertIsNone(plan)
         self.assertNotIn(uid, app_state.tag_write_timestamps)
 
@@ -151,8 +151,8 @@ class TestWriteCooldown(unittest.TestCase):
 
         # New write should trigger pruning
         scan = FakeScanEvent(uid="NEW_UID", remaining_weight_g=800.0)
-        spool = FakeSpoolInfo(remaining_weight_g=500.0)
-        build_write_plan(scan, spool, device_id="abc123")
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        build_write_plan(scan, spool, device_id="abc123", tag_format="openprinttag")
 
         # Expired entries should be pruned, only NEW_UID remains
         self.assertIn("NEW_UID", app_state.tag_write_timestamps)
@@ -233,6 +233,42 @@ class TestScannerWriterTimestamp(unittest.TestCase):
         execute(plan, mock_client)
         # Claim should be released so a retry can proceed
         self.assertNotIn(uid, app_state.tag_write_timestamps)
+
+
+class TestWritePlanFormatGate(unittest.TestCase):
+    """#119 — write commands are OpenPrintTag-only; write_tag would rewrite
+    a foreign tag as OpenPrintTag."""
+
+    def setUp(self):
+        app_state.state_lock = threading.Lock()
+        app_state.tag_write_timestamps = {}
+        app_state.WRITE_COOLDOWN_SECONDS = 10
+
+    def test_opentag3d_never_gets_write_plan(self):
+        scan = FakeScanEvent(remaining_weight_g=1000.0)
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)  # stale — would write
+        self.assertIsNone(build_write_plan(scan, spool, device_id="abc123",
+                                           tag_format="opentag3d"))
+
+    def test_unknown_format_never_gets_write_plan(self):
+        scan = FakeScanEvent(remaining_weight_g=1000.0)
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        self.assertIsNone(build_write_plan(scan, spool, device_id="abc123",
+                                           tag_format=None))
+
+    def test_gate_does_not_claim_cooldown_slot(self):
+        scan = FakeScanEvent(remaining_weight_g=1000.0)
+        spool = FakeSpoolInfo(spoolman_remaining_g=500.0)
+        build_write_plan(scan, spool, device_id="abc123", tag_format="opentag3d")
+        self.assertNotIn(scan.uid, app_state.tag_write_timestamps)
+
+    def test_openprinttag_uses_spoolman_remaining_field(self):
+        scan = FakeScanEvent(remaining_weight_g=1000.0)
+        spool = FakeSpoolInfo(spoolman_remaining_g=750.0)
+        plan = build_write_plan(scan, spool, device_id="abc123",
+                                tag_format="openprinttag")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.payload, {"remaining_g": 750.0})
 
 
 if __name__ == "__main__":

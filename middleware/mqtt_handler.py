@@ -204,9 +204,10 @@ def _enrich_from_spoolman(scan: ScanEvent, topic: str) -> SpoolInfo | None:
 
 
 def _handle_tag_writeback(scan: ScanEvent, spool_info: SpoolInfo | None,
-                          device_id: str | None, client: mqtt.Client) -> None:
+                          device_id: str | None, client: mqtt.Client,
+                          tag_format: str | None = None) -> None:
     """Check if tag weight is stale and write updated data back to the scanner."""
-    write_plan = build_write_plan(scan, spool_info, device_id=device_id)
+    write_plan = build_write_plan(scan, spool_info, device_id=device_id, tag_format=tag_format)
     if not write_plan:
         return
     if app_state.cfg.get("tag_writeback_enabled"):
@@ -265,7 +266,7 @@ def _handle_rich_tag(client: mqtt.Client, scanner_cfg: dict, payload: dict, topi
         )
 
         # Write updated weight back to tag if stale
-        _handle_tag_writeback(scan, spool_info, device_id, client)
+        _handle_tag_writeback(scan, spool_info, device_id, client, tag_format=tag_format)
 
     except NotImplementedError as e:
         logger.warning(f"Tag format not yet supported: {e}")

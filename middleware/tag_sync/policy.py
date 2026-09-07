@@ -57,6 +57,7 @@ def build_write_plan(
     scan: ScanEvent,
     spool_info: SpoolInfo | None,
     device_id: str | None,
+    tag_format: str | None = None,
 ) -> TagWritePlan | None:
     """
     Decides whether a tag write is needed and returns a TagWritePlan, or None.
@@ -71,6 +72,8 @@ def build_write_plan(
         spool_info: SpoolInfo from Spoolman sync, or None if sync failed
         device_id:  Scanner deviceId extracted from the MQTT topic, or None
                     for PN532/ESPHome scans (which don't support writeback)
+        tag_format: scanner-reported tag format; only "openprinttag"
+                    produces write plans (#119)
 
     Returns:
         TagWritePlan if a write should occur, None otherwise.
@@ -81,6 +84,12 @@ def build_write_plan(
 
     if not scan.uid:
         # No UID means we can't target the tag
+        return None
+
+    if tag_format != "openprinttag":
+        # update_remaining is OpenPrintTag-only scanner-side, and write_tag
+        # would rewrite a foreign tag as OpenPrintTag — never build write
+        # plans for other formats (#119)
         return None
 
     # Cooldown — prevent write loops from our own tag state republishes.
@@ -96,7 +105,10 @@ def build_write_plan(
                 )
                 return None
 
-    spoolman_remaining = spool_info.remaining_weight_g if spool_info else None
+    # spoolman_remaining_g is Spoolman's own number — the merged
+    # remaining_weight_g is tag-preferred and would compare the tag to
+    # itself (#119)
+    spoolman_remaining = spool_info.spoolman_remaining_g if spool_info else None
     tag_remaining = scan.remaining_weight_g
 
     if not should_write_remaining(tag_remaining, spoolman_remaining):
