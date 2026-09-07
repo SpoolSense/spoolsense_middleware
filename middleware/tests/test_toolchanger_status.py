@@ -317,7 +317,7 @@ class TestAssignRecordsTracking(unittest.TestCase):
     def test_success_records_baseline_with_lowercased_uid(self, mock_post):
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": 300.0, "baseline_g": 300.0,
+                   "remaining_g": 999.0, "baseline_g": 300.0,
                    "uid": "AABB11", "device_id": "f3d360",
                    "diameter_mm": 1.75, "density": 1.24,
                    "tag_format": "openprinttag"}
@@ -347,7 +347,7 @@ class TestAssignRecordsTracking(unittest.TestCase):
         # no baseline weight is known
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": None, "baseline_g": None, "uid": "AABB11"}
+                   "remaining_g": 999.0, "baseline_g": None, "uid": "AABB11"}
 
         _assign_spool_to_tool("T0", pending)
 
@@ -364,7 +364,7 @@ class TestAssignRecordsTracking(unittest.TestCase):
         app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(
             uid="spool_a", weight_g=400.0)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": None, "baseline_g": None, "uid": "SPOOLB"}
+                   "remaining_g": 999.0, "baseline_g": None, "uid": "SPOOLB"}
 
         result = _assign_spool_to_tool("T0", pending)
 
