@@ -517,17 +517,20 @@ class TestRescanDoubleDeductRegression(unittest.TestCase):
     """#119 acceptance — a re-scan must never resurrect a stale or nominal
     tag weight as the AFC baseline and re-deduct prior usage."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         _reset_app_state()
 
-    def _scan(self, scan, spool_info, lane="lane1", device="f3d360"):
+    def _scan(self, scan: _FakeScan, spool_info: _FakeSpoolInfo | None,
+              lane: str = "lane1", device: str = "f3d360") -> None:
         record_tracking(lane, scan.uid, device,
                         choose_deduction_baseline(scan, spool_info),
                         1.75, 1.24, "opentag3d")
 
     @patch("filament_usage._publish_deduction")
     @patch("filament_usage._fetch_afc_lane_weights")
-    def test_nominal_tag_rescan_does_not_double_deduct(self, mock_fetch, mock_pub):
+    def test_nominal_tag_rescan_does_not_double_deduct(
+        self, mock_fetch: MagicMock, mock_pub: MagicMock
+    ) -> None:
         scan = _FakeScan(weight_source="nominal")
         # First scan of a fresh spool — Spoolman says 1000 g
         self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=1000.0))
@@ -548,7 +551,9 @@ class TestRescanDoubleDeductRegression(unittest.TestCase):
 
     @patch("filament_usage._publish_deduction")
     @patch("filament_usage._fetch_afc_lane_weights")
-    def test_stale_v1_tag_rescan_does_not_double_deduct(self, mock_fetch, mock_pub):
+    def test_stale_v1_tag_rescan_does_not_double_deduct(
+        self, mock_fetch: MagicMock, mock_pub: MagicMock
+    ) -> None:
         # Same failure mode, measured (v1) tag gone stale in the lane
         scan = _FakeScan(weight_source=None, remaining_weight_g=1000.0)
         self._scan(scan, _FakeSpoolInfo(spoolman_remaining_g=800.0))
@@ -559,7 +564,9 @@ class TestRescanDoubleDeductRegression(unittest.TestCase):
 
     @patch("filament_usage._publish_deduction")
     @patch("filament_usage._fetch_afc_lane_weights")
-    def test_nominal_without_spoolman_sends_no_deduction(self, mock_fetch, mock_pub):
+    def test_nominal_without_spoolman_sends_no_deduction(
+        self, mock_fetch: MagicMock, mock_pub: MagicMock
+    ) -> None:
         self._scan(_FakeScan(weight_source="nominal"), None)
 
         mock_fetch.return_value = {"lane1": 800.0}
@@ -568,7 +575,9 @@ class TestRescanDoubleDeductRegression(unittest.TestCase):
 
     @patch("filament_usage._publish_deduction")
     @patch("filament_usage._fetch_afc_lane_weights")
-    def test_legacy_tag_without_spoolman_keeps_today_behavior(self, mock_fetch, mock_pub):
+    def test_legacy_tag_without_spoolman_keeps_today_behavior(
+        self, mock_fetch: MagicMock, mock_pub: MagicMock
+    ) -> None:
         self._scan(_FakeScan(), None)  # baseline = tag 1000
 
         mock_fetch.return_value = {"lane1": 800.0}
@@ -578,7 +587,9 @@ class TestRescanDoubleDeductRegression(unittest.TestCase):
 
     @patch("filament_usage._publish_deduction")
     @patch("filament_usage._fetch_afc_lane_weights")
-    def test_pending_deduction_shrinks_baseline(self, mock_fetch, mock_pub):
+    def test_pending_deduction_shrinks_baseline(
+        self, mock_fetch: MagicMock, mock_pub: MagicMock
+    ) -> None:
         # Spoolman was unreachable at apply time: it still says 1000 while
         # the scanner holds 200 pending → baseline must be 800
         scan = _FakeScan(weight_source="nominal", pending_deduction_g=200.0)
