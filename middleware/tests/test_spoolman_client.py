@@ -323,6 +323,40 @@ class TestNoWrites(unittest.TestCase):
         mock_patch.assert_not_called()
 
 
+class TestSpoolmanRemainingExposed(unittest.TestCase):
+    """#119 — the tag-preferred merge must still expose Spoolman's own
+    remaining weight; deduction baselines need it."""
+
+    def setUp(self):
+        _reset_app_state()
+
+    def _client_with_spool(self, spool: dict | None) -> SpoolmanClient:
+        with patch.object(SpoolmanClient, "_fetch_all_spools"):
+            client = SpoolmanClient(BASE_URL)
+        client.find_by_nfc = MagicMock(return_value=spool)
+        return client
+
+    def test_prefer_tag_still_exposes_spoolman_remaining(self):
+        client = self._client_with_spool(
+            {"id": 5, "remaining_weight": 812.5, "filament": {}})
+        scan = _make_scan_event(remaining_weight_g=1000.0)
+        info = client.sync_spool_from_scan(scan, prefer_tag=True)
+        self.assertEqual(info.spoolman_remaining_g, 812.5)
+        # merge semantics unchanged — tag value still wins the display field
+        self.assertEqual(info.remaining_weight_g, 1000.0)
+
+    def test_spoolman_without_weight_data_gives_none(self):
+        client = self._client_with_spool({"id": 5, "filament": {}})
+        scan = _make_scan_event(remaining_weight_g=1000.0)
+        info = client.sync_spool_from_scan(scan, prefer_tag=True)
+        self.assertIsNone(info.spoolman_remaining_g)
+
+    def test_no_spoolman_match_returns_none_info(self):
+        client = self._client_with_spool(None)
+        scan = _make_scan_event(remaining_weight_g=1000.0)
+        self.assertIsNone(client.sync_spool_from_scan(scan, prefer_tag=True))
+
+
 class TestUpdateSpoolExtras(unittest.TestCase):
     """PATCH /api/v1/spool/<id> with `extra` updates, JSON-encoded per value."""
 

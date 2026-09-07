@@ -157,6 +157,7 @@ class SpoolmanClient:
         spoolman_id = existing["id"]
         filament = existing.get("filament", {})
         tag_spool.spoolman_id = spoolman_id
+        tag_spool.spoolman_remaining_g = existing.get("remaining_weight")
 
         # Spoolman's color always wins if set — a human chose it deliberately
         spoolman_color = filament.get("color_hex")

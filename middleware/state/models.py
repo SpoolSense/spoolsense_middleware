@@ -89,6 +89,9 @@ class SpoolInfo:
     empty_spool_weight_g: Optional[float] = None
     remaining_weight_g: Optional[float] = None
     consumed_weight_g: Optional[float] = None
+    # Spoolman's own remaining_weight, exposed regardless of merge preference —
+    # deduction baselines read this, never the merged remaining_weight_g (#119)
+    spoolman_remaining_g: Optional[float] = None
 
     full_length_mm: Optional[float] = None
     remaining_length_mm: Optional[float] = None
