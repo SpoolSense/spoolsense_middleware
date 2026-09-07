@@ -373,6 +373,16 @@ class TestUidOnlyObserverEvents(unittest.TestCase):
         self.assertEqual(event.spool_id, 17)
         self.assertEqual(event.scanner_id, "ecb338")
 
+    def test_staged_uid_only_scan_caches_spoolman_remaining_as_baseline(self) -> None:
+        # #119 follow-up — the staged branch cached remaining_g but dropped
+        # baseline_g, so afc/toolchanger consumers recorded weight_g=None
+        # where dev recorded Spoolman's remaining weight.
+        with patch("mqtt_handler.notify_observers"):
+            self._scan()
+        pending = app_state.pending_spool_afc
+        self.assertEqual(pending["baseline_g"], 500.0)
+        self.assertEqual(pending["remaining_g"], 500.0)
+
     def test_happy_hare_uid_only_notifies_on_successful_bind(self):
         app_state.cfg["scanners"]["ecb338"] = {"action": "happy_hare_stage"}
         with patch("mqtt_handler.notify_observers") as mock_notify, \

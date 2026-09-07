@@ -24,8 +24,9 @@ All notable changes to SpoolSense are documented here.
   measured weight) report the spool's nominal size forever — they get no
   tag-weight baseline at all; deductions still flow and land in Spoolman
   exactly once. `pending_deduction_g` (a not-yet-applied scanner deduction)
-  is subtracted from the baseline when present. Older firmware without the
-  fields behaves as before.
+  is subtracted from the baseline when present. Absent fields keep measured
+  semantics and a zero pending deduction; the Spoolman-preferred baseline
+  applies regardless of firmware.
 
 ### Fixed
 

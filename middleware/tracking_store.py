@@ -39,7 +39,9 @@ def choose_deduction_baseline(scan: "object", spool_info: "object | None") -> fl
     """
     spoolman_remaining = getattr(spool_info, "spoolman_remaining_g", None) if spool_info else None
     if spoolman_remaining is not None:
-        pending = getattr(scan, "pending_deduction_g", None) or 0.0
+        pending_raw = getattr(scan, "pending_deduction_g", None)
+        valid = isinstance(pending_raw, (int, float)) and pending_raw > 0
+        pending = pending_raw if valid else 0.0
         return max(0.0, spoolman_remaining - pending)
     if getattr(scan, "weight_source", None) == "nominal":
         logger.info(

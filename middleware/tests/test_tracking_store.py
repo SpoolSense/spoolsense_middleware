@@ -213,6 +213,19 @@ class TestChooseDeductionBaseline(unittest.TestCase):
             choose_deduction_baseline(_Scan(weight_source="nominal"),
                                       _Spool(spoolman_remaining_g=None)))
 
+    def test_negative_pending_deduction_is_clamped_not_subtracted(self) -> None:
+        # A negative pending_deduction_g would otherwise INFLATE the
+        # baseline (800 - (-50) = 850) — a phantom gain instead of a floor.
+        got = choose_deduction_baseline(
+            _Scan(pending_deduction_g=-50.0), _Spool(spoolman_remaining_g=800.0))
+        self.assertEqual(got, 800.0)
+
+    def test_non_numeric_pending_deduction_is_ignored(self) -> None:
+        # A malformed pending_deduction_g must not raise TypeError mid-scan.
+        got = choose_deduction_baseline(
+            _Scan(pending_deduction_g="garbage"), _Spool(spoolman_remaining_g=800.0))
+        self.assertEqual(got, 800.0)
+
 
 class TestRecordTrackingNoneWeight(unittest.TestCase):
     """#119 — a record with no baseline still carries uid/format for

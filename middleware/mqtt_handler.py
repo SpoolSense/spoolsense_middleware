@@ -160,6 +160,7 @@ def _handle_uid_only_tag(client: mqtt.Client, scanner_cfg: dict, uid: str, topic
             "afc" if action == "afc_stage" else "toolhead",
             color_hex, material, remaining, spool_id,
             uid=uid, device_id=device_id or "", tag_format="uid_only",
+            baseline_g=remaining,
         )
         logger.info(f"[{action}] Staged spool {spool_id} ({name}) for assignment")
         # Observer channels (MQTT event stream) still see staged scans even
