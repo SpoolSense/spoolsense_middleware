@@ -17,7 +17,7 @@ sys.modules.setdefault("watchdog.observers", MagicMock())
 sys.modules.setdefault("watchdog.events", MagicMock())
 
 import app_state  # noqa: E402
-from activation import activate_spool  # noqa: E402
+from activation import activate_spool, _cache_pending_spool  # noqa: E402
 from publishers.klipper import _validate_color_hex, _validate_material  # noqa: E402
 
 
@@ -368,6 +368,29 @@ class TestBuildSpoolEventScannerId(unittest.TestCase):
     def test_unknown_only_when_nothing_available(self):
         ev = self._event({"action": "toolhead_stage"}, None, None)
         self.assertEqual(ev.scanner_id, "unknown")
+
+
+class TestPendingBaseline(unittest.TestCase):
+    """#119 — the staged pending dict carries the chosen deduction baseline
+    separately from the display weight."""
+
+    def setUp(self):
+        app_state.state_lock = threading.Lock()
+        app_state.pending_spool_afc = None
+        app_state.pending_spool_toolhead = None
+        app_state.pending_spool_toolhead_gen = 0
+
+    def test_baseline_stored_alongside_display_weight(self):
+        _cache_pending_spool("afc", "FF0000", "PLA", 1000.0, None,
+                             uid="AABB11", baseline_g=700.0)
+        pending = app_state.pending_spool_afc
+        self.assertEqual(pending["remaining_g"], 1000.0)   # display untouched
+        self.assertEqual(pending["baseline_g"], 700.0)
+
+    def test_baseline_may_be_none(self):
+        _cache_pending_spool("afc", "FF0000", "PLA", 1000.0, None,
+                             uid="AABB11", baseline_g=None)
+        self.assertIsNone(app_state.pending_spool_afc["baseline_g"])
 
 
 if __name__ == "__main__":

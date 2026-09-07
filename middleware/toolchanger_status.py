@@ -186,9 +186,10 @@ def _assign_spool_to_tool(tool_name: str, pending: dict) -> bool:
     # previous spool's baseline must still die — a successful assignment
     # means it no longer describes what's mounted.
     uid = pending.get("uid")
-    if uid and remaining_g is not None:
+    if uid:
         from tracking_store import record_tracking
-        record_tracking(macro, uid, pending.get("device_id", ""), remaining_g,
+        record_tracking(macro, uid, pending.get("device_id", ""),
+                        pending.get("baseline_g"),
                         pending.get("diameter_mm"), pending.get("density"),
                         pending.get("tag_format"))
     else:

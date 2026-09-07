@@ -317,7 +317,8 @@ class TestAssignRecordsTracking(unittest.TestCase):
     def test_success_records_baseline_with_lowercased_uid(self, mock_post):
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": 300.0, "uid": "AABB11", "device_id": "f3d360",
+                   "remaining_g": 300.0, "baseline_g": 300.0,
+                   "uid": "AABB11", "device_id": "f3d360",
                    "diameter_mm": 1.75, "density": 1.24,
                    "tag_format": "openprinttag"}
 
@@ -341,30 +342,36 @@ class TestAssignRecordsTracking(unittest.TestCase):
         self.assertNotIn("T0", app_state.active_spool_tracking)
 
     @patch("requests.post")
-    def test_no_weight_records_nothing(self, mock_post):
-        # A baseline without a weight can't drive a deduction — skip it
+    def test_no_baseline_records_uid_with_no_weight(self, mock_post):
+        # #119: usage-based toolchanger deductions need the uid even when
+        # no baseline weight is known
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": None, "uid": "AABB11"}
+                   "remaining_g": None, "baseline_g": None, "uid": "AABB11"}
 
         _assign_spool_to_tool("T0", pending)
 
-        self.assertNotIn("T0", app_state.active_spool_tracking)
+        rec = app_state.active_spool_tracking.get("T0")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.uid, "aabb11")
+        self.assertIsNone(rec.weight_g)
 
     @patch("requests.post")
-    def test_unrecordable_assignment_clears_previous_baseline(self, mock_post):
-        # Spool B assigned with no weight while spool A's baseline is on the
-        # tool — B's usage must not be deducted from A's uid
+    def test_new_spool_without_baseline_replaces_previous_record(self, mock_post):
+        # Spool B assigned with no baseline while spool A's record is on the
+        # tool — B's record must replace A's so A never eats B's deductions
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
         app_state.active_spool_tracking["T0"] = app_state.ActiveSpool(
             uid="spool_a", weight_g=400.0)
         pending = {"spoolman_id": 10, "color_hex": "FF0000", "material": "PLA",
-                   "remaining_g": None, "uid": "SPOOLB"}
+                   "remaining_g": None, "baseline_g": None, "uid": "SPOOLB"}
 
         result = _assign_spool_to_tool("T0", pending)
 
         self.assertTrue(result)
-        self.assertNotIn("T0", app_state.active_spool_tracking)
+        rec = app_state.active_spool_tracking.get("T0")
+        self.assertEqual(rec.uid, "spoolb")
+        self.assertIsNone(rec.weight_g)
 
     @patch("requests.post")
     def test_failed_activation_records_nothing(self, mock_post):

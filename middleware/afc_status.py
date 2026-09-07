@@ -115,13 +115,16 @@ def _publish_lane_actions(lane_name: str, action: str | None, pending: dict | No
     if newly_loaded and pending:
         # Deduction baseline for UPDATE_TAG (#109) — the staged scan carried
         # the uid; recording on lane-load matches what dedicated afc_lane
-        # scanners do at scan time. If the new spool can't be recorded, drop
-        # any previous baseline instead — it describes a removed spool.
+        # scanners do at scan time. The baseline comes from baseline_g, the
+        # Spoolman-preferred value chosen at scan time (#119), and is recorded
+        # even when None so deduction routing still keys off the uid. A
+        # uid-less pending still clears any previous baseline — it describes
+        # a removed spool.
         uid = pending.get("uid")
-        if uid and pending.get("remaining_g") is not None:
+        if uid:
             from tracking_store import record_tracking
             record_tracking(lane_name, uid, pending.get("device_id", ""),
-                            pending.get("remaining_g"),
+                            pending.get("baseline_g"),
                             pending.get("diameter_mm"), pending.get("density"),
                             pending.get("tag_format"))
         else:

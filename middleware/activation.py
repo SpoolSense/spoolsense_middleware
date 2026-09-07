@@ -65,7 +65,7 @@ def _cache_pending_spool(
     bed_temp_min: int | None = None, bed_temp_max: int | None = None,
     uid: str | None = None, device_id: str = "",
     diameter_mm: float | None = None, density: float | None = None,
-    tag_format: str | None = None,
+    tag_format: str | None = None, baseline_g: float | None = None,
 ) -> bool:
     """Store tag data in the per-consumer pending slot ("afc" is consumed by
     afc_status on lane load; "toolhead" by toolchanger_status on ASSIGN_SPOOL).
@@ -74,6 +74,9 @@ def _cache_pending_spool(
     dict and the shipped mobile app reads it back (consumers that need a
     canonical form lowercase at their own boundary). uid and the filament
     props let the consumer record a deduction baseline on assignment (#109).
+
+    baseline_g is the UPDATE_TAG deduction baseline chosen at scan time
+    (#119) — distinct from remaining_g, which is display/mobile-echo data.
 
     Returns True if an earlier pending spool was replaced."""
     pending = {
@@ -90,6 +93,7 @@ def _cache_pending_spool(
         "diameter_mm": diameter_mm,
         "density": density,
         "tag_format": tag_format or "unknown",
+        "baseline_g": baseline_g,
     }
     with app_state.state_lock:
         if slot == "afc":
@@ -166,7 +170,8 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
                   color_hex: str, filament_label: str, remaining: float | None,
                   spoolman_id: int | None, event: SpoolEvent,
                   scan: ScanEvent | None = None,
-                  device_id: str | None = None) -> None:
+                  device_id: str | None = None,
+                  baseline_g: float | None = None) -> None:
     """Handle afc_stage and toolhead_stage — cache tag data, don't lock."""
     slot = "afc" if action_enum == Action.AFC_STAGE else "toolhead"
     raw = getattr(scan, "raw", None) or {}
@@ -185,7 +190,8 @@ def _route_staged(action_enum: Action, spoolman_activated: bool,
                          device_id=tracking_device,
                          diameter_mm=getattr(scan, "diameter_mm", None),
                          density=getattr(scan, "density", None),
-                         tag_format=tag_format)
+                         tag_format=tag_format,
+                         baseline_g=baseline_g)
     stage_name = "afc_stage" if action_enum == Action.AFC_STAGE else "toolhead_stage"
     if spoolman_activated:
         logger.info(f"[{stage_name}] Spool staged with Spoolman ID, scanner remains unlocked")
@@ -296,6 +302,8 @@ def _activate_from_scan(
 
     # Resolve best available data from tag + Spoolman
     color_hex, remaining, filament_label = _resolve_scan_data(scan, spool_info)
+    from tracking_store import choose_deduction_baseline
+    baseline_g = choose_deduction_baseline(scan, spool_info)
     spoolman_id = spool_info.spoolman_id if spool_info else None
 
     event = _build_spool_event(scanner_cfg, action_enum, target, spoolman_id,
@@ -323,7 +331,7 @@ def _activate_from_scan(
     # Route by action type
     if action_enum in (Action.AFC_STAGE, Action.TOOLHEAD_STAGE):
         _route_staged(action_enum, spoolman_activated, color_hex, filament_label,
-                      remaining, spoolman_id, event, scan, device_id)
+                      remaining, spoolman_id, event, scan, device_id, baseline_g=baseline_g)
     elif action_enum in (Action.AFC_LANE, Action.TOOLHEAD):
         _route_dedicated(action_enum, spoolman_activated, spoolman_id, target, event)
 

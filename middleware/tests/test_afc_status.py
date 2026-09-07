@@ -196,6 +196,7 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
     def test_staged_scan_with_uid_records_baseline(self):
         self._load_lane_with_pending({
             "color_hex": "FF0000", "material": "PLA", "remaining_g": 250.0,
+            "baseline_g": 250.0,
             "spoolman_id": None, "uid": "AABBCC", "device_id": "4d9620",
             "diameter_mm": 1.75, "density": 1.24, "tag_format": "openprinttag",
         })
@@ -211,12 +212,17 @@ class TestLaneLoadRecordsTracking(unittest.TestCase):
         })
         self.assertNotIn("lane1", app_state.active_spool_tracking)
 
-    def test_staged_scan_without_weight_records_nothing(self):
+    def test_staged_scan_without_baseline_records_uid_only(self):
+        # #119: no baseline (e.g. nominal tag, no Spoolman match) still
+        # records the uid so deduction routing works; weight stays None
         self._load_lane_with_pending({
-            "color_hex": "FF0000", "material": "PLA", "remaining_g": None,
-            "spoolman_id": 5, "uid": "AABBCC",
+            "color_hex": "FF0000", "material": "PLA", "remaining_g": 1000.0,
+            "baseline_g": None, "spoolman_id": 5, "uid": "AABBCC",
         })
-        self.assertNotIn("lane1", app_state.active_spool_tracking)
+        rec = app_state.active_spool_tracking.get("lane1")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.uid, "aabbcc")
+        self.assertIsNone(rec.weight_g)
 
     def test_unrecordable_pending_clears_previous_baseline(self):
         # A new spool loaded but with no baseline data — the OLD spool's
