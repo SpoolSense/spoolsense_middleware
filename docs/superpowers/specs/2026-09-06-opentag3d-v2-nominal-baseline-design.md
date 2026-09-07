@@ -82,6 +82,11 @@ routing need them, and the AFC loop already skips `weight_g is None`. The
 scan-time low-spool check uses the same chosen value and is skipped when
 `None`, so nominal tags stop reading as "1000 g remaining" for free.
 
+Staged flows (`afc_stage`, `toolhead_stage`, mobile staging) get the same
+rule: activation computes the baseline once per scan and carries it in a new
+`pending["baseline_g"]` key — `remaining_g` keeps its display/mobile-echo
+meaning — and the lane-load / ASSIGN_SPOOL consumers record from it.
+
 ### 4. Write-back gate
 
 `tag_sync/policy.py` `build_write_plan` returns `None` unless the scanned tag
