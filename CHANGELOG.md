@@ -20,6 +20,11 @@ All notable changes to SpoolSense are documented here.
   cache log line reports both sources: `N UIDs indexed (X native tags,
   Y extra.nfc_id)`.
 
+### Thanks
+
+- @githubber4ever for reporting #121 and pointing at Spoolman's new
+  native tag API.
+
 ---
 
 ## [1.9.1] - 2026-10-03
