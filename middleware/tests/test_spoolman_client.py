@@ -98,6 +98,153 @@ class TestFetchAllSpools(unittest.TestCase):
         self.assertEqual(len(client.cache), 0)
 
 
+def _tag(uid: str) -> dict:
+    """A native Spoolman tag as v0.27+ returns it on a spool."""
+    return {"uid": uid, "format": "ntag", "added": "2026-10-03T00:00:00Z"}
+
+
+class TestNativeTags(unittest.TestCase):
+    """Spoolman v0.27+ native tags (#123). Older servers send no `tags` key."""
+
+    def setUp(self) -> None:
+        _reset_app_state()
+
+    @patch("requests.get")
+    def test_finds_spool_by_native_tag(self, mock_get: MagicMock) -> None:
+        # #121: the UID lived only in a native tag, cache said "0 spools indexed"
+        mock_get.return_value = _ok_response([{"id": 7, "extra": {}, "tags": [_tag("53B5674D740001")]}])
+        client = SpoolmanClient(BASE_URL)
+
+        result = client.find_by_nfc("53B5674D740001")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["id"], 7)
+
+    @patch("requests.get")
+    def test_indexes_every_tag_on_a_spool(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _ok_response([{"id": 7, "tags": [_tag("AABB0001"), _tag("AABB0002")]}])
+        client = SpoolmanClient(BASE_URL)
+
+        client._fetch_all_spools()
+
+        self.assertEqual(client.cache["aabb0001"]["id"], 7)
+        self.assertEqual(client.cache["aabb0002"]["id"], 7)
+
+    @patch("requests.get")
+    def test_indexes_native_tags_and_nfc_id_side_by_side(self, mock_get: MagicMock) -> None:
+        spools = [
+            {"id": 1, "extra": {"nfc_id": '"AABBCCDD"'}},
+            {"id": 2, "extra": {}, "tags": [_tag("11223344")]},
+        ]
+        mock_get.return_value = _ok_response(spools)
+        client = SpoolmanClient(BASE_URL)
+
+        client._fetch_all_spools()
+
+        self.assertEqual(client.cache["aabbccdd"]["id"], 1)
+        self.assertEqual(client.cache["11223344"]["id"], 2)
+
+    @patch("requests.get")
+    def test_same_uid_in_both_places_on_one_spool_is_not_a_conflict(self, mock_get: MagicMock) -> None:
+        # Dual-write (scanner/app) puts the UID in both places on the same spool
+        spool = {"id": 3, "extra": {"nfc_id": '"AABBCCDD"'}, "tags": [_tag("AABBCCDD")]}
+        mock_get.return_value = _ok_response([spool])
+        client = SpoolmanClient(BASE_URL)
+
+        with self.assertLogs("spoolman.client", level="INFO") as logs:
+            client._fetch_all_spools()
+
+        self.assertEqual(client.cache["aabbccdd"]["id"], 3)
+        self.assertFalse(any(r.levelname == "WARNING" for r in logs.records))
+
+    @patch("requests.get")
+    def test_native_tag_wins_over_another_spools_nfc_id(self, mock_get: MagicMock) -> None:
+        legacy = {"id": 1, "extra": {"nfc_id": '"AABBCCDD"'}}
+        native = {"id": 2, "extra": {}, "tags": [_tag("AABBCCDD")]}
+        for order in ([legacy, native], [native, legacy]):
+            with self.subTest(order=[s["id"] for s in order]):
+                mock_get.return_value = _ok_response(order)
+                client = SpoolmanClient(BASE_URL)
+
+                with self.assertLogs("spoolman.client", level="WARNING") as logs:
+                    client._fetch_all_spools()
+
+                self.assertEqual(client.cache["aabbccdd"]["id"], 2)
+                message = logs.records[0].getMessage()
+                self.assertIn("spool 2", message)
+                self.assertIn("spool 1", message)
+
+    @patch("requests.get")
+    def test_conflict_warning_names_legacy_claimant_hidden_by_dual_write(self, mock_get: MagicMock) -> None:
+        # Spool 2 is dual-written (nfc_id + native tag); spool 1 still carries the
+        # same nfc_id. Spool 2 comes last, so it also owns the legacy slot — the
+        # warning must still name spool 1.
+        stale = {"id": 1, "extra": {"nfc_id": '"AABBCCDD"'}}
+        dual = {"id": 2, "extra": {"nfc_id": '"AABBCCDD"'}, "tags": [_tag("AABBCCDD")]}
+        mock_get.return_value = _ok_response([stale, dual])
+        client = SpoolmanClient(BASE_URL)
+
+        with self.assertLogs("spoolman.client", level="WARNING") as logs:
+            client._fetch_all_spools()
+
+        self.assertEqual(client.cache["aabbccdd"]["id"], 2)
+        self.assertIn("spool 1", logs.records[0].getMessage())
+
+    @patch("requests.get")
+    def test_matches_hex_prefix_like_spoolman(self, mock_get: MagicMock) -> None:
+        # Spoolman's normalize_uid strips an optional 0x; stored tags never carry it
+        mock_get.return_value = _ok_response([{"id": 7, "tags": [_tag("04A2B3C4")]}])
+        client = SpoolmanClient(BASE_URL)
+
+        self.assertEqual(client.find_by_nfc("0x04A2B3C4")["id"], 7)
+        self.assertEqual(client.find_by_nfc("0X04a2b3c4")["id"], 7)
+
+    @patch("requests.get")
+    def test_matches_across_case_separators_and_quotes(self, mock_get: MagicMock) -> None:
+        spools = [
+            {"id": 1, "extra": {"nfc_id": '"04:A2:B3:C4"'}},
+            {"id": 2, "extra": {}, "tags": [_tag("04A2B3C5")]},
+        ]
+        mock_get.return_value = _ok_response(spools)
+        client = SpoolmanClient(BASE_URL)
+
+        self.assertEqual(client.find_by_nfc("04a2b3c4")["id"], 1)
+        self.assertEqual(client.find_by_nfc("04-a2-b3-c5")["id"], 2)
+        self.assertEqual(client.find_by_nfc('"04A2B3C5"')["id"], 2)
+
+    @patch("requests.get")
+    def test_ignores_malformed_tags(self, mock_get: MagicMock) -> None:
+        spools = [
+            {"id": 1, "tags": None},
+            {"id": 2, "tags": "AABBCCDD"},
+            {"id": 3, "tags": ["AABBCCDD", {"format": "ntag"}, {"uid": ""}, {"uid": 1234}]},
+            {"id": 4, "tags": [_tag("11223344")]},
+        ]
+        mock_get.return_value = _ok_response(spools)
+        client = SpoolmanClient(BASE_URL)
+
+        client._fetch_all_spools()
+
+        self.assertEqual(list(client.cache), ["11223344"])
+        self.assertEqual(client.cache["11223344"]["id"], 4)
+
+    @patch("requests.get")
+    def test_refresh_log_counts_both_sources(self, mock_get: MagicMock) -> None:
+        spools = [
+            {"id": 1, "extra": {"nfc_id": '"AABBCCDD"'}},
+            {"id": 2, "tags": [_tag("11223344"), _tag("55667788")]},
+        ]
+        mock_get.return_value = _ok_response(spools)
+        client = SpoolmanClient(BASE_URL)
+
+        with self.assertLogs("spoolman.client", level="INFO") as logs:
+            client._fetch_all_spools()
+
+        self.assertTrue(any(
+            "3 UIDs indexed (2 native tags, 1 extra.nfc_id)" in r.getMessage() for r in logs.records
+        ))
+
+
 class TestFindByNfc(unittest.TestCase):
 
     def setUp(self):
