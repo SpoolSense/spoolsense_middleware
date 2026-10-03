@@ -4,6 +4,24 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.9.2] - 2026-10-03
+
+### Added
+
+- **Spoolman native NFC tags** (#123, part of #122). Spoolman v0.27.0 added
+  built-in tag support. The middleware now finds spools by their native
+  tags as well as by the `extra.nfc_id` field it has always used, so a
+  spool tagged by Spoolman itself or by another tool is no longer "not in
+  Spoolman" (#121). Older Spoolman servers send no tags and work exactly
+  as before — no version check, no config change. If one spool's native
+  tag and another spool's `extra.nfc_id` claim the same UID, the native
+  tag wins and a WARNING names every spool involved. UIDs now match
+  regardless of case, quotes, a `0x` prefix or `:`/`-` separators. The
+  cache log line reports both sources: `N UIDs indexed (X native tags,
+  Y extra.nfc_id)`.
+
+---
+
 ## [1.9.1] - 2026-10-03
 
 ### Fixed
