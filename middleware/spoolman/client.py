@@ -12,6 +12,7 @@ assignment).
 """
 import json
 import logging
+import re
 import time
 from typing import Optional
 
@@ -23,6 +24,64 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # seconds before forcing a full Spoolman re-sync
 
+# Quotes (extra.nfc_id is stored JSON-quoted) plus the separators Spoolman's
+# own normalize_uid strips, so "04:A2:B3", '"04a2b3"' and "04-a2-b3" share a key
+_UID_NOISE = re.compile(r'[\s:_.\-"]+')
+
+
+def _normalize_uid(uid: str) -> str:
+    """Cache key for a tag UID: no quotes, separators or 0x prefix, lowercase."""
+    return _UID_NOISE.sub("", uid).lower().removeprefix("0x")
+
+
+def _native_tag_uids(spool: dict) -> list[str]:
+    """
+    Normalized UIDs of a spool's native Spoolman tags (v0.27+, #123).
+
+    Older servers send no `tags` key, so this returns [] for them — no
+    version check needed. Malformed entries are skipped, never raised on.
+    """
+    tags = spool.get("tags")
+    if not isinstance(tags, list):
+        return []
+    uids = []
+    for tag in tags:
+        uid = tag.get("uid") if isinstance(tag, dict) else None
+        if isinstance(uid, str) and _normalize_uid(uid):
+            uids.append(_normalize_uid(uid))
+    return uids
+
+
+def _index_spools_by_uid(spools: list[dict]) -> tuple[dict[str, dict], int, int]:
+    """
+    Map normalized UID → spool from `extra.nfc_id` and native tags.
+
+    Returns (index, native_tag_count, nfc_id_count). Among `extra.nfc_id`
+    claimants the last spool wins, as it always has. A native tag is unique
+    and authoritative, so it overrides them; every other spool whose
+    `extra.nfc_id` claims the same UID is named in a WARNING — including one
+    hidden behind a dual-written spool that also owns the legacy slot.
+    """
+    legacy_claims: dict[str, list[dict]] = {}
+    for spool in spools:
+        nfc_id = _normalize_uid(str(spool.get("extra", {}).get("nfc_id", "")))
+        if nfc_id:
+            legacy_claims.setdefault(nfc_id, []).append(spool)
+    index = {uid: claimants[-1] for uid, claimants in legacy_claims.items()}
+
+    native_count = 0
+    for spool in spools:
+        for uid in _native_tag_uids(spool):
+            others = [s.get("id") for s in legacy_claims.get(uid, []) if s.get("id") != spool.get("id")]
+            if others:
+                logger.warning(
+                    "UID %s is a native tag on spool %s and extra.nfc_id on spool %s — using spool %s",
+                    uid, spool.get("id"), ", ".join(str(o) for o in others), spool.get("id"),
+                )
+            index[uid] = spool
+            native_count += 1
+    return index, native_count, len(legacy_claims)
+
 
 class SpoolmanClient:
     def __init__(self, base_url: str):
@@ -31,20 +90,25 @@ class SpoolmanClient:
         self._last_refresh = 0
 
     def _fetch_all_spools(self) -> None:
-        """Pulls all active (non-archived) spools to build the NFC UID lookup cache."""
+        """
+        Pulls all active (non-archived) spools to build the NFC UID lookup cache.
+
+        Indexes both the legacy `extra.nfc_id` field and native Spoolman tags
+        (v0.27+, #123). A native tag is unique and authoritative, so it wins
+        when another spool's `extra.nfc_id` claims the same UID.
+        """
         try:
             # Only index active spools — archived spools with the same nfc_id
             # would overwrite the active entry and cause lookup failures (#49)
             response = requests.get(f"{self.base_url}/api/v1/spool?archived=false", timeout=5)
             response.raise_for_status()
-            new_cache = {}
-            for spool in response.json():
-                nfc_id = spool.get("extra", {}).get("nfc_id", "").strip('"').lower()
-                if nfc_id:
-                    new_cache[nfc_id] = spool
+            new_cache, native_count, legacy_count = _index_spools_by_uid(response.json())
             self.cache = new_cache
             self._last_refresh = time.time()
-            logger.info(f"Spoolman cache refreshed: {len(self.cache)} spools indexed.")
+            logger.info(
+                "Spoolman cache refreshed: %d UIDs indexed (%d native tags, %d extra.nfc_id).",
+                len(self.cache), native_count, legacy_count,
+            )
             # Imported lazily: this client stays free of app_state coupling (#41)
             from health import set_health
             set_health("spoolman", "connected")
@@ -104,7 +168,7 @@ class SpoolmanClient:
 
     def find_by_nfc(self, nfc_uid: str) -> Optional[dict]:
         """Looks up a spool by NFC UID, with TTL-based cache and single forced refresh on miss."""
-        uid_lower = nfc_uid.lower()
+        uid_lower = _normalize_uid(nfc_uid)
 
         if time.time() - self._last_refresh > CACHE_TTL:
             self._fetch_all_spools()
