@@ -4,6 +4,46 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.9.2] - 2026-10-03
+
+### Added
+
+- **Spoolman native NFC tags** (#123, part of #122). Spoolman v0.27.0 added
+  built-in tag support. The middleware now finds spools by their native
+  tags as well as by the `extra.nfc_id` field it has always used, so a
+  spool tagged by Spoolman itself or by another tool is no longer "not in
+  Spoolman" (#121). Older Spoolman servers send no tags and work exactly
+  as before — no version check, no config change. If one spool's native
+  tag and another spool's `extra.nfc_id` claim the same UID, the native
+  tag wins and a WARNING names every spool involved. UIDs now match
+  regardless of case, quotes, a `0x` prefix or `:`/`-` separators. The
+  cache log line reports both sources: `N UIDs indexed (X native tags,
+  Y extra.nfc_id)`.
+
+### Thanks
+
+- @githubber4ever for reporting #121 and pointing at Spoolman's new
+  native tag API.
+
+---
+
+## [1.9.1] - 2026-10-03
+
+### Fixed
+
+- **Tag-only toolhead scans no longer error on printers without a tool
+  macro** (#121). When a scan has no Spoolman match, the `toolhead` action
+  sends the tag color with `SET_GCODE_VARIABLE MACRO=T0 VARIABLE=color`.
+  Single-toolhead printers usually have no `[gcode_macro T0]`, so Klipper
+  rejected it (`The value 'T0' is not valid for MACRO`) and every scan
+  logged an ERROR with a traceback. The middleware now checks that the
+  macro exists and defines `variable_color` before it sends, and logs an
+  INFO line when it skips. If Moonraker can't be queried, it still tries,
+  as before. This restores the v1.3.1 behavior that was lost when the
+  single/toolchanger mode setting became per-scanner actions.
+
+---
+
 ## [1.9.0] - 2026-09-07
 
 ### Changed

@@ -8,11 +8,14 @@ dispatch path for each action type. HTTP calls are patched at the requests level
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
 import unittest
 from unittest.mock import MagicMock, patch, call
+
+import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -44,6 +47,19 @@ def _reset_app_state(moonraker_url: str = MOONRAKER) -> None:
     app_state.lane_locks = {}
     app_state.active_spools = {}
     app_state.state_lock = threading.Lock()
+
+
+def _macro_query_response(macro: str, variables: dict) -> MagicMock:
+    """Moonraker /printer/objects/query reply for one gcode_macro. Klipper
+    returns an empty dict for a macro that doesn't exist."""
+    response = MagicMock(raise_for_status=lambda: None)
+    response.json.return_value = {"result": {"status": {f"gcode_macro {macro}": variables}}}
+    return response
+
+
+def _scripts(mock_post: MagicMock) -> list[str]:
+    """Every gcode script POSTed through the mocked requests.post."""
+    return [c[1]["json"].get("script", "") for c in mock_post.call_args_list if "json" in c[1]]
 
 
 def _make_event(**kwargs) -> SpoolEvent:
@@ -266,10 +282,12 @@ class TestKlipperPublisherToolhead(unittest.TestCase):
         # SAVE_VARIABLE persists the spool_id across printer restarts
         self.assertTrue(any("SAVE_VARIABLE VARIABLE=t0_spool_id VALUE=15" in s for s in scripts))
 
+    @patch("requests.get")
     @patch("requests.post")
-    def test_toolhead_tag_only_sends_color_variable(self, mock_post: MagicMock) -> None:
+    def test_toolhead_tag_only_sends_color_variable(self, mock_post: MagicMock, mock_get: MagicMock) -> None:
         # No Spoolman — color from tag is sent via SET_GCODE_VARIABLE
         mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        mock_get.return_value = _macro_query_response("T1", {"color": ""})
         publisher = KlipperPublisher(app_state.cfg)
 
         result = publisher.publish(
@@ -279,12 +297,77 @@ class TestKlipperPublisherToolhead(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        scripts = [
-            c[1]["json"].get("script", "")
-            for c in mock_post.call_args_list
-            if "json" in c[1]
-        ]
-        self.assertTrue(any("SET_GCODE_VARIABLE MACRO=T1 VARIABLE=color" in s for s in scripts))
+        self.assertTrue(any("SET_GCODE_VARIABLE MACRO=T1 VARIABLE=color" in s for s in _scripts(mock_post)))
+
+    @patch("requests.get")
+    @patch("requests.post")
+    def test_toolhead_tag_only_queries_target_macro(self, mock_post: MagicMock, mock_get: MagicMock) -> None:
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        mock_get.return_value = _macro_query_response("T1", {"color": ""})
+        publisher = KlipperPublisher(app_state.cfg)
+
+        publisher.publish(
+            _make_event(action=Action.TOOLHEAD, target="T1", tag_only=True, spool_id=None, color="0000FF")
+        )
+
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        self.assertTrue(any("gcode_macro%20T1" in u for u in urls))
+
+    @patch("requests.get")
+    @patch("requests.post")
+    def test_toolhead_tag_only_skips_color_when_macro_missing(
+        self, mock_post: MagicMock, mock_get: MagicMock
+    ) -> None:
+        # #121: single-toolhead printers have no [gcode_macro T0]; Klipper
+        # rejects SET_GCODE_VARIABLE with "The value 'T0' is not valid for MACRO"
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        mock_get.return_value = _macro_query_response("T0", {})
+        publisher = KlipperPublisher(app_state.cfg)
+
+        with self.assertLogs("publishers.klipper", level="INFO") as logs:
+            result = publisher.publish(
+                _make_event(action=Action.TOOLHEAD, target="T0", tag_only=True, spool_id=None, color="0000FF")
+            )
+
+        self.assertTrue(result)
+        self.assertFalse(any("SET_GCODE_VARIABLE" in s for s in _scripts(mock_post)))
+        # The skip is logged, not an ERROR with a traceback
+        self.assertFalse(any(r.levelno >= logging.ERROR for r in logs.records))
+        self.assertTrue(any("skipping color variable" in r.getMessage() for r in logs.records))
+
+    @patch("requests.get")
+    @patch("requests.post")
+    def test_toolhead_tag_only_skips_color_when_macro_has_no_color_variable(
+        self, mock_post: MagicMock, mock_get: MagicMock
+    ) -> None:
+        # A T0 macro that only selects the extruder has no variable_color —
+        # Klipper would reject the SET_GCODE_VARIABLE with "Unknown gcode_macro variable"
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        mock_get.return_value = _macro_query_response("T0", {"tool_number": 0})
+        publisher = KlipperPublisher(app_state.cfg)
+
+        result = publisher.publish(
+            _make_event(action=Action.TOOLHEAD, target="T0", tag_only=True, spool_id=None, color="0000FF")
+        )
+
+        self.assertTrue(result)
+        self.assertFalse(any("SET_GCODE_VARIABLE" in s for s in _scripts(mock_post)))
+
+    @patch("requests.get")
+    @patch("requests.post")
+    def test_toolhead_tag_only_sends_color_when_macro_query_fails(
+        self, mock_post: MagicMock, mock_get: MagicMock
+    ) -> None:
+        # Can't tell whether the macro exists — keep the pre-#121 behavior and try
+        mock_post.return_value = MagicMock(raise_for_status=lambda: None)
+        mock_get.side_effect = requests.ConnectionError("moonraker down")
+        publisher = KlipperPublisher(app_state.cfg)
+
+        publisher.publish(
+            _make_event(action=Action.TOOLHEAD, target="T1", tag_only=True, spool_id=None, color="0000FF")
+        )
+
+        self.assertTrue(any("SET_GCODE_VARIABLE MACRO=T1 VARIABLE=color" in s for s in _scripts(mock_post)))
 
     @patch("requests.post")
     def test_toolhead_missing_target_returns_false(self, mock_post: MagicMock) -> None:
