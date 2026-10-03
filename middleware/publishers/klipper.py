@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 
-from moonraker_client import send_gcode, set_active_spool_id, set_database_item
+from moonraker_client import query_objects, send_gcode, set_active_spool_id, set_database_item
 from publishers.base import Action, Publisher, SpoolEvent
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,20 @@ def _send_afc_lane_data(
             logger.exception(f"[afc] SET_WEIGHT failed for {toolhead}")
 
 
+def _macro_has_variable(moonraker: str, macro: str, variable: str) -> bool | None:
+    """
+    Whether [gcode_macro <macro>] exists and defines variable_<variable>.
+
+    Klipper reports a macro that doesn't exist as an empty dict, so a missing
+    macro and a missing variable are both False. Returns None when Moonraker
+    can't be queried — the caller decides what an unknown answer means.
+    """
+    status = query_objects(moonraker, quote(f"gcode_macro {macro}"), context="[toolhead]")
+    if status is None:
+        return None
+    return variable in status.get(f"gcode_macro {macro}", {})
+
+
 def _send_toolhead_tag_data(
     moonraker: str,
     target: str,
@@ -118,20 +133,25 @@ def _send_toolhead_tag_data(
 
     Used when Spoolman is not available — provides the toolhead macro with
     color from tag data so slicer integration still works without Spoolman.
+    Skipped when the printer has no such macro: single-toolhead printers
+    usually have no [gcode_macro T0] (#121).
     """
     if not moonraker or not target:
         return
 
     spool_color = display_spoolcolor(color_hex)
     if spool_color is not None:
-        try:
-            _send_gcode(
-                moonraker,
-                f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{spool_color}'\"",
-            )
-            logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{spool_color}'")
-        except Exception:
-            logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
+        if _macro_has_variable(moonraker, target, "color") is False:
+            logger.info(f"[toolhead] No [gcode_macro {target}] with variable_color — skipping color variable")
+        else:
+            try:
+                _send_gcode(
+                    moonraker,
+                    f"SET_GCODE_VARIABLE MACRO={target} VARIABLE=color VALUE=\"'{spool_color}'\"",
+                )
+                logger.info(f"[toolhead] SET_GCODE_VARIABLE {target} color='{spool_color}'")
+            except Exception:
+                logger.exception(f"[toolhead] SET_GCODE_VARIABLE color failed for {target}")
 
     if material and material != "Unknown":
         logger.info(f"[toolhead] {target} material: {material}")

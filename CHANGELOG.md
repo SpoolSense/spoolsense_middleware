@@ -4,6 +4,23 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Tag-only toolhead scans no longer error on printers without a tool
+  macro** (#121). When a scan has no Spoolman match, the `toolhead` action
+  sends the tag color with `SET_GCODE_VARIABLE MACRO=T0 VARIABLE=color`.
+  Single-toolhead printers usually have no `[gcode_macro T0]`, so Klipper
+  rejected it (`The value 'T0' is not valid for MACRO`) and every scan
+  logged an ERROR with a traceback. The middleware now checks that the
+  macro exists and defines `variable_color` before it sends, and logs an
+  INFO line when it skips. If Moonraker can't be queried, it still tries,
+  as before. This restores the v1.3.1 behavior that was lost when the
+  single/toolchanger mode setting became per-scanner actions.
+
+---
+
 ## [1.9.0] - 2026-09-07
 
 ### Changed
