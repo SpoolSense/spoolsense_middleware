@@ -19,6 +19,7 @@ import threading
 import requests
 
 import app_state
+from backoff import backoff_delay
 from config import has_afc_scanners
 from moonraker_client import query_objects, send_gcode
 
@@ -469,21 +470,26 @@ class FilamentUsageSync:
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            pending = _fetch_pending()
+            # One bad pass must never end the thread (#128).
+            try:
+                pending = _fetch_pending()
 
-            if pending is not None:
-                consecutive_failures = 0
-                if pending:
-                    logger.info("UPDATE_TAG: triggered via polling")
-                    try:
-                        _handle_update_tag()
-                    except Exception:
-                        logger.exception("UPDATE_TAG: error in handler")
-                wait = POLL_INTERVAL
-            else:
-                consecutive_failures += 1
-                wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
-                if consecutive_failures == 1:
-                    logger.warning("UPDATE_TAG: poll failed, retrying with backoff")
+                if pending is not None:
+                    consecutive_failures = 0
+                    if pending:
+                        logger.info("UPDATE_TAG: triggered via polling")
+                        try:
+                            _handle_update_tag()
+                        except Exception:
+                            logger.exception("UPDATE_TAG: error in handler")
+                    wait = POLL_INTERVAL
+                else:
+                    consecutive_failures += 1
+                    wait = backoff_delay(consecutive_failures, RETRY_BASE, RETRY_MAX)
+                    if consecutive_failures == 1:
+                        logger.warning("UPDATE_TAG: poll failed, retrying with backoff")
+            except Exception:
+                logger.exception("UPDATE_TAG: unexpected error in poll loop")
+                wait = RETRY_MAX
 
             self._stop_event.wait(timeout=wait)
