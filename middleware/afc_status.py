@@ -24,6 +24,7 @@ import requests
 
 import app_state
 from activation import publish_lock
+from backoff import backoff_delay
 from publishers.klipper import _send_afc_lane_data
 
 logger = logging.getLogger(__name__)
@@ -420,25 +421,30 @@ class AfcStatusSync:
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            data = _fetch_afc_status()
+            # One bad pass must never end the thread (#128).
+            try:
+                data = _fetch_afc_status()
 
-            if data is not None:
-                try:
-                    _sync_lane_state(data)
-                except Exception:
-                    logger.exception("AFC status: sync error")
-                consecutive_failures = 0
-                wait = POLL_INTERVAL
-            else:
-                consecutive_failures += 1
-                # Exponential backoff: 2s, 4s, 8s, 16s, 30s (capped)
-                wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
-                if consecutive_failures == 1:
-                    logger.warning("AFC status: poll failed, retrying with backoff")
-                elif consecutive_failures % 10 == 0:
-                    logger.warning(
-                        f"AFC status: {consecutive_failures} consecutive failures, "
-                        f"retrying every {wait:.0f}s"
-                    )
+                if data is not None:
+                    try:
+                        _sync_lane_state(data)
+                    except Exception:
+                        logger.exception("AFC status: sync error")
+                    consecutive_failures = 0
+                    wait = POLL_INTERVAL
+                else:
+                    consecutive_failures += 1
+                    # Exponential backoff: 2s, 4s, 8s, 16s, 30s (capped)
+                    wait = backoff_delay(consecutive_failures, RETRY_BASE, RETRY_MAX)
+                    if consecutive_failures == 1:
+                        logger.warning("AFC status: poll failed, retrying with backoff")
+                    elif consecutive_failures % 10 == 0:
+                        logger.warning(
+                            f"AFC status: {consecutive_failures} consecutive failures, "
+                            f"retrying every {wait:.0f}s"
+                        )
+            except Exception:
+                logger.exception("AFC status: unexpected error in poll loop")
+                wait = RETRY_MAX
 
             self._stop_event.wait(timeout=wait)

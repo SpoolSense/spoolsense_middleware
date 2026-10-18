@@ -19,6 +19,7 @@ import threading
 
 import app_state
 import moonraker_client
+from backoff import backoff_delay
 from activation import publish_lock
 
 logger = logging.getLogger(__name__)
@@ -99,30 +100,35 @@ class ToolheadStatusSync:
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            result = _fetch_active_spool_id()
+            # One bad pass must never end the thread (#128).
+            try:
+                result = _fetch_active_spool_id()
 
-            if result is not _FETCH_ERROR:
-                # Successful fetch — result is int (spool ID) or None (no spool)
-                try:
-                    self._check_transition(result)
-                except Exception:
-                    logger.exception("Toolhead status: transition check error")
-                consecutive_failures = 0
-                wait = POLL_INTERVAL
-            else:
-                # Fetch failed — do NOT treat as eject, just backoff and retry.
-                # No health report here: _FETCH_ERROR includes 404 from
-                # no-Spoolman setups, which is not a Moonraker outage — the
-                # websocket open/close is the moonraker health source (#41).
-                consecutive_failures += 1
-                wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
-                if consecutive_failures == 1:
-                    logger.warning("Toolhead status: poll failed, retrying with backoff")
-                elif consecutive_failures % 10 == 0:
-                    logger.warning(
-                        f"Toolhead status: {consecutive_failures} consecutive failures, "
-                        f"retrying every {wait:.0f}s"
-                    )
+                if result is not _FETCH_ERROR:
+                    # Successful fetch — result is int (spool ID) or None (no spool)
+                    try:
+                        self._check_transition(result)
+                    except Exception:
+                        logger.exception("Toolhead status: transition check error")
+                    consecutive_failures = 0
+                    wait = POLL_INTERVAL
+                else:
+                    # Fetch failed — do NOT treat as eject, just backoff and retry.
+                    # No health report here: _FETCH_ERROR includes 404 from
+                    # no-Spoolman setups, which is not a Moonraker outage — the
+                    # websocket open/close is the moonraker health source (#41).
+                    consecutive_failures += 1
+                    wait = backoff_delay(consecutive_failures, RETRY_BASE, RETRY_MAX)
+                    if consecutive_failures == 1:
+                        logger.warning("Toolhead status: poll failed, retrying with backoff")
+                    elif consecutive_failures % 10 == 0:
+                        logger.warning(
+                            f"Toolhead status: {consecutive_failures} consecutive failures, "
+                            f"retrying every {wait:.0f}s"
+                        )
+            except Exception:
+                logger.exception("Toolhead status: unexpected error in poll loop")
+                wait = RETRY_MAX
 
             self._stop_event.wait(timeout=wait)
 
