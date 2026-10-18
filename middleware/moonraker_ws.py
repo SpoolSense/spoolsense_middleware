@@ -15,6 +15,8 @@ import logging
 import threading
 from collections.abc import Callable
 
+from backoff import backoff_delay
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -131,7 +133,7 @@ class MoonrakerWebsocket:
                 break
 
             self._consecutive_failures += 1
-            wait = min(RETRY_BASE * (2 ** (self._consecutive_failures - 1)), RETRY_MAX)
+            wait = backoff_delay(self._consecutive_failures, RETRY_BASE, RETRY_MAX)
             logger.warning(
                 f"MoonrakerWebsocket: disconnected, reconnecting in {wait:.0f}s "
                 f"(attempt {self._consecutive_failures})"

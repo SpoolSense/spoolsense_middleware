@@ -4,6 +4,35 @@ All notable changes to SpoolSense are documented here.
 
 ---
 
+## [1.9.3] - 2026-10-17
+
+### Fixed
+
+- **Status sync no longer dies after a long printer outage** (#128). Every
+  Moonraker retry loop doubled its wait with `2 ** failures` and capped it
+  at 30s. After about 1025 failures in a row (the printer offline for
+  hours) that number got too big to turn into a float, and the loop
+  crashed with `OverflowError: int too large to convert to float`. The
+  thread was gone for good, so status sync stayed dead even after the
+  printer came back. All five loops (Moonraker websocket, toolhead status,
+  AFC status, UPDATE_TAG and ASSIGN_SPOOL polling) now share one backoff
+  helper that clamps the exponent first. Waits are the same as before
+  (2s, 4s, 8s, 16s, then 30s) and can no longer overflow.
+- **A poll loop survives one bad pass.** Each HTTP poll loop now logs an
+  unexpected error and tries again after 30s, instead of ending its
+  thread.
+- **ASSIGN_SPOOL keeps the scanned spool when the assign raises.** An
+  error during the assign was not caught, so the staged spool was lost
+  and the tag had to be scanned again. It now counts as a failed assign:
+  the error is logged and the spool is put back, unless a newer scan
+  already took its place.
+
+### Thanks
+
+- @githubber4ever for reporting #128 with the full traceback.
+
+---
+
 ## [1.9.2] - 2026-10-03
 
 ### Added

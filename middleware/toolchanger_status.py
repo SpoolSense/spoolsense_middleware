@@ -33,6 +33,7 @@ import re
 import threading
 
 import app_state
+from backoff import backoff_delay
 from moonraker_client import (
     query_objects, send_gcode, set_active_spool_id, set_database_item,
 )
@@ -219,7 +220,13 @@ def _process_pending_tool(tool_name: str, source: str) -> None:
         return
 
     logger.info(f"{source}: assigning cached spool data to {tool_name}")
-    if _assign_spool_to_tool(tool_name, pending):
+    try:
+        assigned = _assign_spool_to_tool(tool_name, pending)
+    except Exception:
+        # Treat a raise like a failed assign so the claimed spool is restored
+        logger.exception(f"{source}: error assigning to {tool_name}")
+        assigned = False
+    if assigned:
         return
 
     with app_state.state_lock:
@@ -339,31 +346,40 @@ class ToolchangerStatusSync:
         consecutive_failures: int = 0
 
         while not self._stop_event.is_set():
-            pending_tool = _fetch_pending_tool()
+            # One bad pass must never end the thread (#128).
+            try:
+                pending_tool = _fetch_pending_tool()
 
-            if pending_tool is not None:
-                consecutive_failures = 0
+                if pending_tool is not None:
+                    consecutive_failures = 0
 
-                # Detect assignment: pending_tool is non-empty
-                if pending_tool and pending_tool.strip():
-                    tool_name = pending_tool.strip()
-                    logger.info(f"Macro assign: tool {tool_name} requested")
+                    # Detect assignment: pending_tool is non-empty
+                    if pending_tool and pending_tool.strip():
+                        tool_name = pending_tool.strip()
+                        logger.info(f"Macro assign: tool {tool_name} requested")
 
-                    _process_pending_tool(tool_name, "Macro assign")
+                        try:
+                            _process_pending_tool(tool_name, "Macro assign")
+                        except Exception:
+                            logger.exception(f"Macro assign: error assigning {tool_name}")
 
-                    # Clear the macro variable
-                    _clear_pending_tool()
+                        # Clear the macro variable even after a failed assign,
+                        # or the same request would be retried on every poll
+                        _clear_pending_tool()
 
-                wait = POLL_INTERVAL
-            else:
-                consecutive_failures += 1
-                wait = min(RETRY_BASE * (2 ** (consecutive_failures - 1)), RETRY_MAX)
-                if consecutive_failures == 1:
-                    logger.warning("Macro assign: poll failed, retrying with backoff")
-                elif consecutive_failures % 10 == 0:
-                    logger.warning(
-                        f"Macro assign: {consecutive_failures} consecutive failures, "
-                        f"retrying every {wait:.0f}s"
-                    )
+                    wait = POLL_INTERVAL
+                else:
+                    consecutive_failures += 1
+                    wait = backoff_delay(consecutive_failures, RETRY_BASE, RETRY_MAX)
+                    if consecutive_failures == 1:
+                        logger.warning("Macro assign: poll failed, retrying with backoff")
+                    elif consecutive_failures % 10 == 0:
+                        logger.warning(
+                            f"Macro assign: {consecutive_failures} consecutive failures, "
+                            f"retrying every {wait:.0f}s"
+                        )
+            except Exception:
+                logger.exception("Macro assign: unexpected error in poll loop")
+                wait = RETRY_MAX
 
             self._stop_event.wait(timeout=wait)
